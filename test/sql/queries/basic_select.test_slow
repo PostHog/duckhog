@@ -1,0 +1,34 @@
+# name: test/sql/queries/basic_select.test_slow
+# description: Basic SELECT queries via Flight SQL
+# group: [queries]
+
+# Tests in this file require a running Flight SQL server
+# Run: ./scripts/start-flight-server.sh before executing
+
+require posthog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+# Connect to the Flight SQL server
+statement ok
+ATTACH 'hog:test?token=demo&endpoint=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+
+# Test 1: Basic SELECT 1
+query I
+SELECT 1;
+----
+1
+
+# Test 2: Query test_data table (has single column: value)
+query I
+SELECT value FROM remote.main.test_data;
+----
+1
+
+# Test 3: Query numbers table with COUNT
+query I
+SELECT COUNT(*) FROM remote.main.numbers;
+----
+10

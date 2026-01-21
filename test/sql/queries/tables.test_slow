@@ -1,0 +1,30 @@
+# name: test/sql/queries/tables.test_slow
+# description: Schema and table listing operations via Flight SQL
+# group: [queries]
+
+# Tests in this file require a running Flight SQL server
+# Run: ./scripts/start-flight-server.sh before executing
+
+require posthog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+statement ok
+ATTACH 'hog:test?token=demo&endpoint=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+
+# Test 4: Schema listing
+query I
+SELECT schema_name FROM information_schema.schemata WHERE catalog_name = 'remote';
+----
+main
+
+# Test 5: Table listing - verify expected tables exist
+query I rowsort
+SELECT table_name FROM information_schema.tables
+WHERE table_catalog = 'remote' AND table_schema = 'main';
+----
+numbers
+test_data
+types_test

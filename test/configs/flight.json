@@ -1,0 +1,19 @@
+{
+  "description": "Run PostHog tests with Flight SQL server",
+  "on_init": "SET posthog_log_level = 'INFO';",
+  "autoloading": "all",
+  "statically_loaded_extensions": [
+    "posthog"
+  ],
+  "test_env": [
+    {
+      "env_name": "FLIGHT_HOST",
+      "env_value": "127.0.0.1"
+    },
+    {
+      "env_name": "FLIGHT_PORT",
+      "env_value": "8815"
+    }
+  ],
+  "skip_tests": []
+}

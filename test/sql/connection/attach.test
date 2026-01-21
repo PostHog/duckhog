@@ -1,0 +1,15 @@
+# name: test/sql/connection/attach.test
+# description: Test ATTACH statement parsing and connection error handling
+# group: [connection]
+
+require posthog
+
+# Test: Invalid connection string (missing token) should fail
+statement error
+ATTACH 'hog:test' AS remote;
+----
+Missing authentication token
+
+# Note: Invalid endpoints and unreachable servers create catalogs in
+# "disconnected mode" - ATTACH succeeds but queries will fail.
+# This is tested in the integration tests with a running server.

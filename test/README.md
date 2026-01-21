@@ -1,11 +1,154 @@
-# Testing this extension
-This directory contains all the tests for this extension. The `sql` directory holds tests that are written as [SQLLogicTests](https://duckdb.org/dev/sqllogictest/intro.html). DuckDB aims to have most its tests in this format as SQL statements, so for the quack extension, this should probably be the goal too.
+# Testing (Following DuckLake Pattern)
 
-The root makefile contains targets to build and run all of these tests. To run the SQLLogicTests:
+This directory contains all tests for the PostHog DuckDB extension, following the [DuckLake testing conventions](https://duckdb.org/dev/sqllogictest/intro.html).
+
+## Quick Start
+
 ```bash
+# Build the extension first
+GEN=ninja make release
+
+# Run unit tests (fast, no server needed)
 make test
+
+# Run integration tests (requires Flight SQL server)
+./scripts/start-flight-server.sh --background
+./build/release/test/unittest "test/sql/queries/*"
+./scripts/start-flight-server.sh --stop
 ```
-or 
+
+## Running Tests
+
+### Unit Tests
+
+Unit tests (`.test` files) run without external dependencies:
+
 ```bash
-make test_debug
+# Run all unit tests
+make test
+
+# Run specific test file
+./build/release/test/unittest "test/sql/posthog.test"
+
+# Run tests matching a pattern
+./build/release/test/unittest "test/sql/connection/*"
 ```
+
+### Integration Tests
+
+Integration tests (`.test_slow` files) require a running Flight SQL server:
+
+```bash
+# Step 1: Start the Flight SQL server
+./scripts/start-flight-server.sh
+
+# Step 2 (in another terminal): Run integration tests
+export FLIGHT_HOST=127.0.0.1
+export FLIGHT_PORT=8815
+./build/release/test/unittest --test-config test/configs/flight.json "test/sql/queries/*"
+```
+
+**Background mode** (for CI or single terminal):
+
+```bash
+# Start server in background
+./scripts/start-flight-server.sh --background
+
+# Run tests
+export FLIGHT_HOST=127.0.0.1
+export FLIGHT_PORT=8815
+./build/release/test/unittest --test-config test/configs/flight.json "test/sql/queries/*"
+
+# Stop server when done
+./scripts/start-flight-server.sh --stop
+```
+
+### Running Individual Test Files
+
+```bash
+# Using unittest
+./build/release/test/unittest "test/sql/queries/basic_select.test_slow"
+
+# Using DuckDB CLI directly
+./build/release/duckdb -unsigned -cmd "LOAD 'build/release/extension/posthog/posthog.duckdb_extension';" < test/sql/queries/basic_select.test_slow
+```
+
+## Test Structure
+
+```
+test/
+├── configs/
+│   └── flight.json              # Test configuration for Flight SQL
+├── integration/
+│   ├── flight_server.py         # Python Flight SQL test server
+│   └── requirements.txt         # Python dependencies
+└── sql/
+    ├── posthog.test             # Extension loading tests
+    ├── connection/
+    │   └── attach.test          # Connection string parsing tests
+    └── queries/
+        ├── basic_select.test_slow   # Basic queries (requires server)
+        ├── tables.test_slow         # Schema/table operations
+        └── projection.test_slow     # Column projection tests
+```
+
+## Test File Conventions
+
+| Extension | Purpose | Server Required |
+|-----------|---------|-----------------|
+| `.test` | Unit tests (extension loading, parsing) | No |
+| `.test_slow` | Integration tests (Flight SQL queries) | Yes |
+
+## Test Configuration
+
+The `test/configs/flight.json` file defines environment variables:
+
+```json
+{
+  "test_env": [
+    {"env_name": "FLIGHT_HOST", "env_value": "127.0.0.1"},
+    {"env_name": "FLIGHT_PORT", "env_value": "8815"}
+  ]
+}
+```
+
+## Writing New Tests
+
+### SQLLogicTest Format
+
+```sql
+# name: test/sql/queries/my_test.test_slow
+# description: Description of what this tests
+# group: [queries]
+
+require posthog
+
+statement ok
+ATTACH 'hog:test?token=demo&endpoint=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+
+query I
+SELECT COUNT(*) FROM remote.main.numbers;
+----
+10
+```
+
+### Key Directives
+
+| Directive | Purpose |
+|-----------|---------|
+| `require posthog` | Load the extension |
+| `statement ok` | Statement should succeed |
+| `statement error` | Statement should fail (with optional error message match) |
+| `query I` | Query returning INTEGER column |
+| `query T` | Query returning TEXT column |
+| `query IT` | Query returning INTEGER, TEXT columns |
+| `rowsort` | Sort rows before comparison |
+
+See [SQLLogicTest documentation](https://duckdb.org/dev/testing) for more details.
+
+## CI/CD
+
+Integration tests run automatically in GitHub Actions:
+1. Build extension
+2. Start Flight SQL server (separate step)
+3. Run SQLLogicTests against the server
