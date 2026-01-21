@@ -7,6 +7,7 @@
 
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_schema_entry.hpp"
+#include "utils/posthog_logger.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/planner/operator/logical_create_table.hpp"
@@ -14,8 +15,6 @@
 #include "duckdb/planner/operator/logical_delete.hpp"
 #include "duckdb/planner/operator/logical_update.hpp"
 #include "duckdb/storage/database_size.hpp"
-
-#include <iostream>
 
 namespace duckdb {
 
@@ -27,21 +26,20 @@ PostHogCatalog::~PostHogCatalog() = default;
 
 void PostHogCatalog::Initialize(bool load_builtin) {
     // Log attachment attempt
-    std::cerr << "[PostHog] Connecting to remote database: " << config_.database << std::endl;
-    std::cerr << "[PostHog] Endpoint: " << config_.endpoint << std::endl;
-    std::cerr << "[PostHog] Token: " << (config_.token.empty() ? "(none)" : "(provided)") << std::endl;
+    POSTHOG_LOG_INFO("Connecting to remote database: %s", config_.database.c_str());
+    POSTHOG_LOG_INFO("Endpoint: %s", config_.endpoint.c_str());
+    POSTHOG_LOG_DEBUG("Token: %s", config_.token.empty() ? "(none)" : "(provided)");
 
     // Create the Flight SQL client (Milestone 3)
     try {
         flight_client_ = make_uniq<PostHogFlightClient>(config_.endpoint, config_.token);
         flight_client_->Authenticate();
-        std::cerr << "[PostHog] Successfully connected to Flight server" << std::endl;
+        POSTHOG_LOG_INFO("Successfully connected to Flight server");
     } catch (const std::exception &e) {
         // Log the error but don't throw - allow catalog to be created even if connection fails
         // This enables testing the extension without a running server
-        std::cerr << "[PostHog] Warning: Failed to connect to Flight server: " << e.what() << std::endl;
-        std::cerr << "[PostHog] Catalog created in disconnected mode. Queries will fail until connection is restored."
-                  << std::endl;
+        POSTHOG_LOG_WARN("Failed to connect to Flight server: %s", e.what());
+        POSTHOG_LOG_WARN("Catalog created in disconnected mode. Queries will fail until connection is restored.");
     }
 }
 
@@ -64,16 +62,16 @@ void PostHogCatalog::LoadSchemasIfNeeded() {
             return; // Cache is still valid
         }
         // Cache expired, need to refresh
-        std::cerr << "[PostHog] Schema cache expired, refreshing..." << std::endl;
+        POSTHOG_LOG_DEBUG("Schema cache expired, refreshing...");
     }
 
     if (!IsConnected()) {
-        std::cerr << "[PostHog] Cannot load schemas: not connected" << std::endl;
+        POSTHOG_LOG_DEBUG("Cannot load schemas: not connected");
         return;
     }
 
     try {
-        std::cerr << "[PostHog] Loading schemas from remote server..." << std::endl;
+        POSTHOG_LOG_DEBUG("Loading schemas from remote server...");
         auto schema_names = flight_client_->ListSchemas();
 
         // Create schema entries (don't clear existing ones to preserve loaded tables)
@@ -85,10 +83,10 @@ void PostHogCatalog::LoadSchemasIfNeeded() {
 
         schemas_loaded_ = true;
         schemas_loaded_at_ = std::chrono::steady_clock::now();
-        std::cerr << "[PostHog] Loaded " << schema_names.size() << " schemas" << std::endl;
+        POSTHOG_LOG_INFO("Loaded %zu schemas", schema_names.size());
 
     } catch (const std::exception &e) {
-        std::cerr << "[PostHog] Failed to load schemas: " << e.what() << std::endl;
+        POSTHOG_LOG_ERROR("Failed to load schemas: %s", e.what());
     }
 }
 
