@@ -9,6 +9,9 @@
 
 #include "duckdb/catalog/catalog.hpp"
 #include "utils/connection_string.hpp"
+#include "flight/flight_client.hpp"
+
+#include <memory>
 
 namespace duckdb {
 
@@ -53,12 +56,23 @@ public:
         return database_name_;
     }
 
+    // Access to Flight client for query execution
+    PostHogFlightClient &GetFlightClient() {
+        return *flight_client_;
+    }
+
+    // Check if connected to remote server
+    bool IsConnected() const {
+        return flight_client_ && flight_client_->IsConnected() && flight_client_->IsAuthenticated();
+    }
+
 private:
     void DropSchema(ClientContext &context, DropInfo &info) override;
 
 private:
     string database_name_;
     PostHogConnectionConfig config_;
+    unique_ptr<PostHogFlightClient> flight_client_;
 };
 
 } // namespace duckdb

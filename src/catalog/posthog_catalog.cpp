@@ -25,11 +25,23 @@ PostHogCatalog::PostHogCatalog(AttachedDatabase &db, const string &name, PostHog
 PostHogCatalog::~PostHogCatalog() = default;
 
 void PostHogCatalog::Initialize(bool load_builtin) {
-    // Log successful attachment (Milestone 2 requirement)
-    // In production, this would be where we connect to the Flight server
-    std::cerr << "[PostHog] Attached to remote database: " << config_.database << std::endl;
+    // Log attachment attempt
+    std::cerr << "[PostHog] Connecting to remote database: " << config_.database << std::endl;
     std::cerr << "[PostHog] Endpoint: " << config_.endpoint << std::endl;
     std::cerr << "[PostHog] Token: " << (config_.token.empty() ? "(none)" : "(provided)") << std::endl;
+
+    // Create the Flight SQL client (Milestone 3)
+    try {
+        flight_client_ = make_uniq<PostHogFlightClient>(config_.endpoint, config_.token);
+        flight_client_->Authenticate();
+        std::cerr << "[PostHog] Successfully connected to Flight server" << std::endl;
+    } catch (const std::exception &e) {
+        // Log the error but don't throw - allow catalog to be created even if connection fails
+        // This enables testing the extension without a running server
+        std::cerr << "[PostHog] Warning: Failed to connect to Flight server: " << e.what() << std::endl;
+        std::cerr << "[PostHog] Catalog created in disconnected mode. Queries will fail until connection is restored."
+                  << std::endl;
+    }
 }
 
 optional_ptr<CatalogEntry> PostHogCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
@@ -37,16 +49,32 @@ optional_ptr<CatalogEntry> PostHogCatalog::CreateSchema(CatalogTransaction trans
 }
 
 void PostHogCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCatalogEntry &)> callback) {
-    // For Milestone 2, we don't have any schemas yet
-    // This will be populated when we connect to the Flight server in Milestone 3
+    // If not connected, no schemas are available
+    if (!IsConnected()) {
+        return;
+    }
+
+    // TODO (Milestone 4): Implement schema scanning using flight_client_->ListSchemas()
+    // This requires creating SchemaCatalogEntry objects for each remote schema
+    // For now, schemas will be populated when Milestone 4 (Virtual Catalog) is implemented
 }
 
 optional_ptr<SchemaCatalogEntry> PostHogCatalog::LookupSchema(CatalogTransaction transaction,
                                                               const EntryLookupInfo &schema_lookup,
                                                               OnEntryNotFound if_not_found) {
-    // For Milestone 2, no schemas are available yet
+    // Check connection status
+    if (!IsConnected()) {
+        if (if_not_found == OnEntryNotFound::THROW_EXCEPTION) {
+            throw CatalogException("PostHog: Not connected to remote server. Schema lookup failed.");
+        }
+        return nullptr;
+    }
+
+    // TODO (Milestone 4): Implement schema lookup using cached schema entries
+    // This requires creating SchemaCatalogEntry objects for each remote schema
+    // For now, return nullptr as schemas will be populated in Milestone 4
     if (if_not_found == OnEntryNotFound::THROW_EXCEPTION) {
-        throw CatalogException("PostHog: Schema lookup not yet implemented (requires Flight connection)");
+        throw CatalogException("PostHog: Schema lookup not yet fully implemented (Milestone 4)");
     }
     return nullptr;
 }
