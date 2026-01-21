@@ -12,8 +12,13 @@
 #include "flight/flight_client.hpp"
 
 #include <memory>
+#include <unordered_map>
+#include <mutex>
+#include <chrono>
 
 namespace duckdb {
+
+class PostHogSchemaEntry;
 
 class PostHogCatalog : public Catalog {
 public:
@@ -66,13 +71,34 @@ public:
         return flight_client_ && flight_client_->IsConnected() && flight_client_->IsAuthenticated();
     }
 
+    // Force refresh of schema cache
+    void RefreshSchemas();
+
 private:
     void DropSchema(ClientContext &context, DropInfo &info) override;
+
+    // Load schemas from remote server (lazy loading)
+    void LoadSchemasIfNeeded();
+
+    // Create a schema entry for a remote schema
+    void CreateSchemaEntry(const string &schema_name);
+
+    // Get or create a schema entry
+    optional_ptr<PostHogSchemaEntry> GetOrCreateSchema(const string &schema_name);
 
 private:
     string database_name_;
     PostHogConnectionConfig config_;
     unique_ptr<PostHogFlightClient> flight_client_;
+
+    // Schema cache
+    mutable std::mutex schemas_mutex_;
+    bool schemas_loaded_ = false;
+    std::chrono::steady_clock::time_point schemas_loaded_at_;
+    std::unordered_map<string, unique_ptr<PostHogSchemaEntry>> schema_cache_;
+
+    // Cache TTL (5 minutes by default)
+    static constexpr int64_t CACHE_TTL_SECONDS = 300;
 };
 
 } // namespace duckdb

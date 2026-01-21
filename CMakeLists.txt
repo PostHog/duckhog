@@ -31,6 +31,10 @@ set(EXTENSION_SOURCES
     # Milestone 3: Arrow Flight SQL client integration
     src/flight/flight_client.cpp
     src/flight/arrow_conversion.cpp
+    # Milestone 4: Virtual catalog with proxy table entries
+    src/catalog/posthog_schema_entry.cpp
+    src/catalog/posthog_table_entry.cpp
+    src/catalog/remote_scan.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
