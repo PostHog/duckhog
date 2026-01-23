@@ -1,9 +1,12 @@
 #define DUCKDB_EXTENSION_MAIN
 
-#include "posthog_extension.hpp"
+#include "include/posthog_extension.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/main/config.hpp"
+
+#include "storage/posthog_storage.hpp"
 
 // OpenSSL linked through vcpkg
 #include <openssl/opensslv.h>
@@ -15,6 +18,12 @@ inline void PosthogVersionScalarFun(DataChunk &args, ExpressionState &state, Vec
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
+    loader.SetDescription("Adds support for PostHog remote data access via hog: protocol");
+
+    // Register the storage extension for "hog:" protocol
+    auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
+    config.storage_extensions["hog"] = make_uniq<PostHogStorageExtension>();
+
     // Register a simple version function to verify the extension loads
     auto posthog_version_func = ScalarFunction("posthog_version", {}, LogicalType::VARCHAR, PosthogVersionScalarFun);
     loader.RegisterFunction(posthog_version_func);

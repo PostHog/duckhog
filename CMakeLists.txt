@@ -19,23 +19,25 @@ set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
 project(${TARGET_NAME})
-include_directories(src/include)
+include_directories(src/include src)
 
-# Milestone 1: Basic extension that loads and prints version
+# Extension sources
 set(EXTENSION_SOURCES
     src/posthog_extension.cpp
+    # Milestone 2: Storage extension with hog: protocol registration
+    src/storage/posthog_storage.cpp
+    src/storage/posthog_transaction_manager.cpp
+    src/catalog/posthog_catalog.cpp
+    src/utils/connection_string.cpp
 )
 
-# Milestone 2+ sources (uncomment when implementing):
+# Milestone 3+ sources (uncomment when implementing):
 # list(APPEND EXTENSION_SOURCES
-#     src/storage/posthog_storage.cpp
-#     src/catalog/posthog_catalog.cpp
 #     src/catalog/posthog_schema.cpp
 #     src/catalog/posthog_table.cpp
 #     src/catalog/remote_scan.cpp
 #     src/flight/flight_client.cpp
 #     src/flight/arrow_conversion.cpp
-#     src/utils/connection_string.cpp
 # )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
