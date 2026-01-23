@@ -1,8 +1,48 @@
-build
-.idea
-cmake-build-debug
+# Build directories
+build/
+cmake-build-debug/
+cmake-build-release/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Makefile.generated
+
+# vcpkg dependencies
+vcpkg_installed/
+
+# DuckDB test artifacts
 duckdb_unittest_tempdir/
-.DS_Store
-testext
-test/python/__pycache__/
+
+# Compiled binaries
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.duckdb_extension
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# R
 .Rhistory
+.RData
+
+# macOS
+.DS_Store
+._*
+
+# Test artifacts
+testext
