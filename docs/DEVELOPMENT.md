@@ -103,11 +103,7 @@ GEN=ninja make release
 GEN=ninja make debug
 ```
 
-**Using make instead of ninja:**
-
-```bash
-make release
-```
+`GEN=ninja` is optional, it just speeds up the build.
 
 ### First Build Notes
 

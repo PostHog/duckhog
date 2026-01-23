@@ -216,7 +216,7 @@ std::vector<std::string> PostHogFlightClient::ListSchemas() {
             auto schema_array = std::static_pointer_cast<arrow::StringArray>(schema_col);
             for (int64_t i = 0; i < schema_array->length(); i++) {
                 if (!schema_array->IsNull(i)) {
-                    schemas.push_back(schema_array->GetString(i));
+                    schemas.push_back(std::string(schema_array->GetView(i)));
                 }
             }
         }
@@ -273,7 +273,7 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &sche
             auto table_array = std::static_pointer_cast<arrow::StringArray>(table_col);
             for (int64_t i = 0; i < table_array->length(); i++) {
                 if (!table_array->IsNull(i)) {
-                    tables.push_back(table_array->GetString(i));
+                    tables.push_back(std::string(table_array->GetView(i)));
                 }
             }
         }
@@ -328,12 +328,32 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
         throw std::runtime_error("PostHog: Server did not return table schema for: " + schema + "." + table);
     }
 
+    auto table_name_col = chunk.data->GetColumnByName("table_name");
+    if (!table_name_col) {
+        throw std::runtime_error("PostHog: Server did not return table_name column");
+    }
+
     auto schema_array = std::static_pointer_cast<arrow::BinaryArray>(schema_col);
-    if (schema_array->IsNull(0)) {
+    auto table_name_array = std::static_pointer_cast<arrow::StringArray>(table_name_col);
+
+    // Find the row matching the requested table name
+    int64_t row_idx = -1;
+    for (int64_t i = 0; i < chunk.data->num_rows(); i++) {
+        if (!table_name_array->IsNull(i) && table_name_array->GetView(i) == table) {
+            row_idx = i;
+            break;
+        }
+    }
+
+    if (row_idx < 0) {
+        throw std::runtime_error("PostHog: Table not found in metadata: " + schema + "." + table);
+    }
+
+    if (schema_array->IsNull(row_idx)) {
         throw std::runtime_error("PostHog: Table schema is null for: " + schema + "." + table);
     }
 
-    auto schema_bytes = schema_array->GetView(0);
+    auto schema_bytes = schema_array->GetView(row_idx);
 
     // Deserialize the Arrow schema from IPC format
     arrow::ipc::DictionaryMemo dict_memo;

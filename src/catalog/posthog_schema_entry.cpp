@@ -9,8 +9,6 @@
 #include "catalog/posthog_schema_entry.hpp"
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_table_entry.hpp"
-#include "flight/arrow_conversion.hpp"
-
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/entry_lookup_info.hpp"
 #include "duckdb/common/exception.hpp"
@@ -143,33 +141,8 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
         return;
     }
 
-    try {
-        auto &client = posthog_catalog_.GetFlightClient();
-        auto arrow_schema = client.GetTableSchema(name, table_name);
-
-        // Convert Arrow schema to DuckDB column definitions
-        vector<string> column_names;
-        vector<LogicalType> column_types;
-        ArrowConversion::ArrowSchemaToDuckDB(arrow_schema, column_names, column_types);
-
-        // Create the table info
-        auto table_info = make_uniq<CreateTableInfo>();
-        table_info->table = table_name;
-        table_info->schema = name;
-        table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
-
-        for (size_t i = 0; i < column_names.size(); i++) {
-            table_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
-        }
-
-        // Create the table entry and add to cache
-        auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *table_info, posthog_catalog_);
-        table_cache_[table_name] = std::move(table_entry);
-
-    } catch (const std::exception &e) {
-        std::cerr << "[PostHog] Failed to create table entry for " << name << "." << table_name << ": " << e.what()
-                  << std::endl;
-    }
+    std::cerr << "[PostHog] Skipping table entry for " << name << "." << table_name
+              << ": Arrow schema conversion removed; pending DuckDB Arrow schema utilities." << std::endl;
 }
 
 optional_ptr<PostHogTableEntry> PostHogSchemaEntry::GetOrCreateTable(const string &table_name) {

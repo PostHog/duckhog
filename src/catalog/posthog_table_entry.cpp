@@ -10,7 +10,6 @@
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_schema_entry.hpp"
 #include "catalog/remote_scan.hpp"
-#include "flight/arrow_conversion.hpp"
 
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/common/exception.hpp"

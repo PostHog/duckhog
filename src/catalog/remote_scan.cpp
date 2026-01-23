@@ -8,8 +8,6 @@
 
 #include "catalog/remote_scan.hpp"
 #include "catalog/posthog_catalog.hpp"
-#include "flight/arrow_conversion.hpp"
-#include "utils/posthog_logger.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -95,42 +93,12 @@ unique_ptr<LocalTableFunctionState> PostHogRemoteScan::InitLocal(ExecutionContex
 //===----------------------------------------------------------------------===//
 
 void PostHogRemoteScan::Execute(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
+    (void)context;
+    (void)output;
+
     auto &bind_data = data.bind_data->Cast<PostHogRemoteScanBindData>();
-    auto &global_state = data.global_state->Cast<PostHogRemoteScanGlobalState>();
-
-    // Execute the remote query if we haven't already
-    if (!global_state.executed) {
-        if (!bind_data.catalog.IsConnected()) {
-            throw ConnectionException("PostHog: Not connected to remote server");
-        }
-
-        try {
-            POSTHOG_LOG_DEBUG("Executing remote query: %s", bind_data.query.c_str());
-            auto &client = bind_data.catalog.GetFlightClient();
-            global_state.result_table = client.ExecuteQuery(bind_data.query);
-            global_state.executed = true;
-            POSTHOG_LOG_DEBUG("Query returned %lld rows", global_state.result_table->num_rows());
-        } catch (const std::exception &e) {
-            POSTHOG_LOG_ERROR("Failed to execute remote query: %s", e.what());
-            throw IOException("PostHog: Failed to execute remote query: " + string(e.what()));
-        }
-    }
-
-    // Check if we have more data to return
-    if (!global_state.result_table || global_state.current_row >= static_cast<idx_t>(global_state.result_table->num_rows())) {
-        output.SetCardinality(0);
-        return;
-    }
-
-    // Calculate how many rows to copy
-    idx_t remaining = static_cast<idx_t>(global_state.result_table->num_rows()) - global_state.current_row;
-    idx_t rows_to_copy = MinValue<idx_t>(STANDARD_VECTOR_SIZE, remaining);
-
-    // Convert Arrow data to DuckDB DataChunk
-    ArrowConversion::ArrowTableToDataChunk(global_state.result_table, output, global_state.current_row, rows_to_copy);
-
-    global_state.current_row += rows_to_copy;
-    output.SetCardinality(rows_to_copy);
+    throw NotImplementedException("PostHog: remote scan disabled during Arrow conversion refactor for " +
+                                  bind_data.schema_name + "." + bind_data.table_name);
 }
 
 //===----------------------------------------------------------------------===//
