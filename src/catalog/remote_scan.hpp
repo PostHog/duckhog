@@ -8,8 +8,9 @@
 
 #pragma once
 
+#include "duckdb/function/table/arrow.hpp"
 #include "duckdb/function/table_function.hpp"
-#include "flight/flight_client.hpp"
+#include "flight/arrow_stream.hpp"
 
 namespace duckdb {
 
@@ -19,8 +20,9 @@ class PostHogCatalog;
 // Remote Scan Bind Data
 //===----------------------------------------------------------------------===//
 
-struct PostHogRemoteScanBindData : public TableFunctionData {
+struct PostHogRemoteScanBindData : public ArrowScanFunctionData {
     PostHogRemoteScanBindData(PostHogCatalog &catalog, const string &schema_name, const string &table_name);
+    ~PostHogRemoteScanBindData() override;
 
     PostHogCatalog &catalog;
     string schema_name;
@@ -32,31 +34,9 @@ struct PostHogRemoteScanBindData : public TableFunctionData {
 
     // The query to execute (generated from table name + column projection)
     string query;
-};
 
-//===----------------------------------------------------------------------===//
-// Remote Scan State
-//===----------------------------------------------------------------------===//
-
-struct PostHogRemoteScanGlobalState : public GlobalTableFunctionState {
-    PostHogRemoteScanGlobalState();
-
-    // Result table from remote execution
-    std::shared_ptr<arrow::Table> result_table;
-
-    // Current position in the result
-    idx_t current_row = 0;
-
-    // Whether we've executed the query
-    bool executed = false;
-
-    idx_t MaxThreads() const override {
-        return 1; // Single-threaded for now
-    }
-};
-
-struct PostHogRemoteScanLocalState : public LocalTableFunctionState {
-    // Nothing needed for now
+    std::shared_ptr<PostHogArrowStreamState> stream_state;
+    ArrowArrayStream arrow_stream;
 };
 
 //===----------------------------------------------------------------------===//

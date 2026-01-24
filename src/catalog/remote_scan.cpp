@@ -10,7 +10,9 @@
 #include "catalog/posthog_catalog.hpp"
 
 #include "duckdb/common/exception.hpp"
+#include "duckdb/function/table/arrow.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/main/config.hpp"
 
 namespace duckdb {
 
@@ -20,14 +22,19 @@ namespace duckdb {
 
 PostHogRemoteScanBindData::PostHogRemoteScanBindData(PostHogCatalog &catalog_p, const string &schema_name_p,
                                                      const string &table_name_p)
-    : catalog(catalog_p), schema_name(schema_name_p), table_name(table_name_p) {
+    : ArrowScanFunctionData(&PostHogArrowStream::Produce, reinterpret_cast<uintptr_t>(&arrow_stream)),
+      catalog(catalog_p), schema_name(schema_name_p), table_name(table_name_p) {
+    arrow_stream.get_schema = nullptr;
+    arrow_stream.get_next = nullptr;
+    arrow_stream.get_last_error = nullptr;
+    arrow_stream.release = nullptr;
+    arrow_stream.private_data = nullptr;
 }
 
-//===----------------------------------------------------------------------===//
-// Global State
-//===----------------------------------------------------------------------===//
-
-PostHogRemoteScanGlobalState::PostHogRemoteScanGlobalState() : current_row(0), executed(false) {
+PostHogRemoteScanBindData::~PostHogRemoteScanBindData() {
+    if (arrow_stream.release) {
+        arrow_stream.release(&arrow_stream);
+    }
 }
 
 //===----------------------------------------------------------------------===//
@@ -70,6 +77,14 @@ unique_ptr<FunctionData> PostHogRemoteScan::CreateBindData(PostHogCatalog &catal
     bind_data->query =
         "SELECT " + columns_str + " FROM \"" + schema_name + "\".\"" + table_name + "\"";
 
+    bind_data->stream_state = std::make_shared<PostHogArrowStreamState>(catalog, bind_data->query);
+    PostHogArrowStream::Initialize(bind_data->arrow_stream, bind_data->stream_state);
+
+    PostHogArrowStream::GetSchema(&bind_data->arrow_stream, bind_data->schema_root.arrow_schema);
+    ArrowTableFunction::PopulateArrowTableSchema(DBConfig::GetConfig(catalog.GetDatabase()), bind_data->arrow_table,
+                                                 bind_data->schema_root.arrow_schema);
+    bind_data->all_types = bind_data->arrow_table.GetTypes();
+
     return bind_data;
 }
 
@@ -79,13 +94,13 @@ unique_ptr<FunctionData> PostHogRemoteScan::CreateBindData(PostHogCatalog &catal
 
 unique_ptr<GlobalTableFunctionState> PostHogRemoteScan::InitGlobal(ClientContext &context,
                                                                     TableFunctionInitInput &input) {
-    return make_uniq<PostHogRemoteScanGlobalState>();
+    return ArrowTableFunction::ArrowScanInitGlobal(context, input);
 }
 
 unique_ptr<LocalTableFunctionState> PostHogRemoteScan::InitLocal(ExecutionContext &context,
                                                                   TableFunctionInitInput &input,
                                                                   GlobalTableFunctionState *global_state) {
-    return make_uniq<PostHogRemoteScanLocalState>();
+    return ArrowTableFunction::ArrowScanInitLocal(context, input, global_state);
 }
 
 //===----------------------------------------------------------------------===//
@@ -93,12 +108,7 @@ unique_ptr<LocalTableFunctionState> PostHogRemoteScan::InitLocal(ExecutionContex
 //===----------------------------------------------------------------------===//
 
 void PostHogRemoteScan::Execute(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
-    (void)context;
-    (void)output;
-
-    auto &bind_data = data.bind_data->Cast<PostHogRemoteScanBindData>();
-    throw NotImplementedException("PostHog: remote scan disabled during Arrow conversion refactor for " +
-                                  bind_data.schema_name + "." + bind_data.table_name);
+    ArrowTableFunction::ArrowScanFunction(context, data, output);
 }
 
 //===----------------------------------------------------------------------===//
@@ -107,17 +117,10 @@ void PostHogRemoteScan::Execute(ClientContext &context, TableFunctionInput &data
 
 double PostHogRemoteScan::Progress(ClientContext &context, const FunctionData *bind_data,
                                     const GlobalTableFunctionState *global_state) {
-    auto &state = global_state->Cast<PostHogRemoteScanGlobalState>();
-
-    if (!state.executed || !state.result_table) {
-        return 0.0;
-    }
-
-    if (state.result_table->num_rows() == 0) {
-        return 100.0;
-    }
-
-    return 100.0 * static_cast<double>(state.current_row) / static_cast<double>(state.result_table->num_rows());
+    (void)context;
+    (void)bind_data;
+    (void)global_state;
+    return 0.0;
 }
 
 //===----------------------------------------------------------------------===//
