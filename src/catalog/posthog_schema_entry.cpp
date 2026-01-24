@@ -12,11 +12,33 @@
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/entry_lookup_info.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/function/table/arrow.hpp"
+#include "duckdb/main/config.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
+
+#include <arrow/c/bridge.h>
 
 #include <iostream>
 
 namespace duckdb {
+
+static void PopulateTableSchemaFromArrow(DBConfig &config, const std::shared_ptr<arrow::Schema> &schema,
+                                         vector<string> &names, vector<LogicalType> &types) {
+    ArrowSchema arrow_schema;
+    auto status = arrow::ExportSchema(*schema, &arrow_schema);
+    if (!status.ok()) {
+        throw IOException("PostHog: Failed to export Arrow schema: " + status.ToString());
+    }
+
+    ArrowTableSchema arrow_table;
+    ArrowTableFunction::PopulateArrowTableSchema(config, arrow_table, arrow_schema);
+    names = arrow_table.GetNames();
+    types = arrow_table.GetTypes();
+
+    if (arrow_schema.release) {
+        arrow_schema.release(&arrow_schema);
+    }
+}
 
 PostHogSchemaEntry::PostHogSchemaEntry(Catalog &catalog, CreateSchemaInfo &info, PostHogCatalog &posthog_catalog)
     : SchemaCatalogEntry(catalog, info), posthog_catalog_(posthog_catalog) {
@@ -141,8 +163,27 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
         return;
     }
 
-    std::cerr << "[PostHog] Skipping table entry for " << name << "." << table_name
-              << ": Arrow schema conversion removed; pending DuckDB Arrow schema utilities." << std::endl;
+    try {
+        auto &client = posthog_catalog_.GetFlightClient();
+        auto arrow_schema = client.GetTableSchema(name, table_name);
+
+        vector<string> column_names;
+        vector<LogicalType> column_types;
+        PopulateTableSchemaFromArrow(DBConfig::GetConfig(posthog_catalog_.GetDatabase()), arrow_schema, column_names,
+                                     column_types);
+
+        auto create_info = make_uniq<CreateTableInfo>(*this, table_name);
+        for (idx_t i = 0; i < column_names.size(); i++) {
+            create_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
+        }
+        create_info->columns.Finalize();
+
+        auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_);
+        table_cache_.emplace(table_name, std::move(table_entry));
+    } catch (const std::exception &e) {
+        std::cerr << "[PostHog] Failed to create table entry for " << name << "." << table_name << ": " << e.what()
+                  << std::endl;
+    }
 }
 
 optional_ptr<PostHogTableEntry> PostHogSchemaEntry::GetOrCreateTable(const string &table_name) {
