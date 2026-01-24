@@ -9,11 +9,10 @@
 #include "catalog/remote_scan.hpp"
 #include "catalog/posthog_catalog.hpp"
 #include "flight/arrow_conversion.hpp"
+#include "utils/posthog_logger.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/table_function.hpp"
-
-#include <iostream>
 
 namespace duckdb {
 
@@ -106,12 +105,13 @@ void PostHogRemoteScan::Execute(ClientContext &context, TableFunctionInput &data
         }
 
         try {
-            std::cerr << "[PostHog] Executing remote query: " << bind_data.query << std::endl;
+            POSTHOG_LOG_DEBUG("Executing remote query: %s", bind_data.query.c_str());
             auto &client = bind_data.catalog.GetFlightClient();
             global_state.result_table = client.ExecuteQuery(bind_data.query);
             global_state.executed = true;
-            std::cerr << "[PostHog] Query returned " << global_state.result_table->num_rows() << " rows" << std::endl;
+            POSTHOG_LOG_DEBUG("Query returned %lld rows", global_state.result_table->num_rows());
         } catch (const std::exception &e) {
+            POSTHOG_LOG_ERROR("Failed to execute remote query: %s", e.what());
             throw IOException("PostHog: Failed to execute remote query: " + string(e.what()));
         }
     }
@@ -158,7 +158,7 @@ double PostHogRemoteScan::Progress(ClientContext &context, const FunctionData *b
 
 TableFunction PostHogRemoteScan::GetFunction() {
     TableFunction func("posthog_remote_scan", {}, Execute, Bind, InitGlobal, InitLocal);
-    func.projection_pushdown = false; // TODO: Implement projection pushdown
+    func.projection_pushdown = true;  // Required for virtual tables
     func.filter_pushdown = false;     // TODO: Implement filter pushdown
     func.table_scan_progress = Progress;
     return func;
