@@ -153,8 +153,8 @@ posthog-duckdb-extension/
 │   ├── flight/
 │   │   ├── flight_client.cpp      # Arrow Flight SQL client
 │   │   ├── flight_client.hpp
-│   │   ├── arrow_conversion.cpp   # Arrow <-> DuckDB type conversion
-│   │   └── arrow_conversion.hpp
+│   │   ├── arrow_stream.cpp       # Arrow C stream bridge for DuckDB scan
+│   │   └── arrow_stream.hpp
 │   ├── storage/
 │   │   ├── posthog_storage.cpp    # Storage extension (hog: protocol)
 │   │   ├── posthog_storage.hpp
