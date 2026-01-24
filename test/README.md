@@ -8,13 +8,16 @@ This directory contains all tests for the PostHog DuckDB extension, following th
 # Build the extension first
 GEN=ninja make release
 
-# Run unit tests (fast, no server needed)
+# Run the full test suite (unit + integration).
+# Integration tests will only run if FLIGHT_HOST/FLIGHT_PORT are set and the server is running.
 make test
 
 # Run integration tests (requires Flight SQL server)
-./scripts/start-flight-server.sh --background
+./scripts/flight-server.sh start --background
+export FLIGHT_HOST=127.0.0.1
+export FLIGHT_PORT=8815
 ./build/release/test/unittest "test/sql/queries/*"
-./scripts/start-flight-server.sh --stop
+./scripts/flight-server.sh stop
 ```
 
 ## Running Tests
@@ -24,8 +27,8 @@ make test
 Unit tests (`.test` files) run without external dependencies:
 
 ```bash
-# Run all unit tests
-make test
+# Run only unit tests (exclude .test_slow)
+./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"
 
 # Run specific test file
 ./build/release/test/unittest "test/sql/posthog.test"
@@ -40,27 +43,33 @@ Integration tests (`.test_slow` files) require a running Flight SQL server:
 
 ```bash
 # Step 1: Start the Flight SQL server
-./scripts/start-flight-server.sh
+./scripts/flight-server.sh start
 
 # Step 2 (in another terminal): Run integration tests
 export FLIGHT_HOST=127.0.0.1
 export FLIGHT_PORT=8815
-./build/release/test/unittest --test-config test/configs/flight.json "test/sql/queries/*"
+./build/release/test/unittest "test/sql/queries/*"
 ```
 
 **Background mode** (for CI or single terminal):
 
 ```bash
 # Start server in background
-./scripts/start-flight-server.sh --background
+./scripts/flight-server.sh start --background
 
 # Run tests
 export FLIGHT_HOST=127.0.0.1
 export FLIGHT_PORT=8815
-./build/release/test/unittest --test-config test/configs/flight.json "test/sql/queries/*"
+./build/release/test/unittest "test/sql/queries/*"
 
 # Stop server when done
-./scripts/start-flight-server.sh --stop
+./scripts/flight-server.sh stop
+```
+
+**Full suite with config file** (optional, mirrors DuckDB test config behavior):
+
+```bash
+DUCKDB_TEST_CONFIG=test/configs/flight.json make test
 ```
 
 ### Running Individual Test Files

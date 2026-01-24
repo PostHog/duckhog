@@ -34,7 +34,14 @@ unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream
                                                                 ArrowStreamParameters &parameters) {
     (void)parameters;
     auto res = make_uniq<ArrowArrayStreamWrapper>();
-    res->arrow_array_stream = *reinterpret_cast<ArrowArrayStream *>(stream_factory_ptr);
+    auto stream = reinterpret_cast<ArrowArrayStream *>(stream_factory_ptr);
+    res->arrow_array_stream = *stream;
+    // Ownership of the stream is transferred to the wrapper; prevent double-release on the original.
+    stream->release = nullptr;
+    stream->get_schema = nullptr;
+    stream->get_next = nullptr;
+    stream->get_last_error = nullptr;
+    stream->private_data = nullptr;
     return res;
 }
 

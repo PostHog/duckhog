@@ -63,7 +63,7 @@ class FlightSQLServer(flight.FlightServerBase):
         self.conn.execute(
             "CREATE TABLE types_test AS SELECT "
             "1 AS int_col, "
-            "1.5 AS float_col, "
+            "CAST(1.5 AS DOUBLE) AS float_col, "
             "'hello' AS str_col, "
             "TRUE AS bool_col, "
             "DATE '2024-01-15' AS date_col"

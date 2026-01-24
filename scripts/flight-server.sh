@@ -2,13 +2,14 @@
 #===----------------------------------------------------------------------===//
 #                         PostHog DuckDB Extension
 #
-# Starts the Flight SQL test server independently of test execution.
+# Starts/stops the Flight SQL test server independently of test execution.
 # Following DuckLake pattern: external service lifecycle is separate from tests.
 #
 # Usage:
-#   ./scripts/start-flight-server.sh              # Foreground (for local dev)
-#   ./scripts/start-flight-server.sh --background # Background (for CI)
-#   ./scripts/start-flight-server.sh --stop       # Stop background server
+#   ./scripts/flight-server.sh start               # Foreground (for local dev)
+#   ./scripts/flight-server.sh start --background  # Background (for CI)
+#   ./scripts/flight-server.sh stop                # Stop background server
+#   ./scripts/flight-server.sh status              # Check background server
 #===----------------------------------------------------------------------===//
 
 set -e
@@ -102,13 +103,40 @@ start_server() {
 }
 
 case "${1:-}" in
-    --stop)
+    start|"")
+        if [ "${2:-}" = "--background" ]; then
+            start_server --background
+        else
+            start_server
+        fi
+        ;;
+    stop)
         stop_server
         ;;
+    status)
+        if [ -f "$PID_FILE" ]; then
+            pid=$(cat "$PID_FILE")
+            if kill -0 "$pid" 2>/dev/null; then
+                log_info "Flight server is running (PID: $pid)"
+                exit 0
+            fi
+            log_info "Flight server not running (stale PID file)"
+            exit 1
+        fi
+        log_info "Flight server not running"
+        exit 1
+        ;;
     --background)
+        log_error "Deprecated: use './scripts/flight-server.sh start --background'"
         start_server --background
         ;;
+    --stop)
+        log_error "Deprecated: use './scripts/flight-server.sh stop'"
+        stop_server
+        ;;
     *)
-        start_server
+        log_error "Unknown command: ${1}"
+        log_error "Usage: ./scripts/flight-server.sh start [--background] | stop | status"
+        exit 1
         ;;
 esac
