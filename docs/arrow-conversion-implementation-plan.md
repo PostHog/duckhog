@@ -73,7 +73,7 @@
    - Respect `ArrowScanMaxThreads` if concurrency is introduced.
    - Ensure `ArrowArrayStream` is released when scan completes.
 
-### Phase 5: Tests and Verification
+### Phase 5: Tests and Verification ✅
 1. Add decimal coverage:
    - Include precisions mapping to INT16/INT32/INT64/INT128.
 2. Add nested type coverage:
@@ -95,4 +95,4 @@
 - [x] Proper DuckDB Arrow scan bind/init integration
 - [x] Catalog schema mapping via DuckDB Arrow schema utilities
 - [x] Removal of custom conversion code
-- [ ] Test coverage for decimals and nested types
+- [x] Test coverage for decimals and nested types
