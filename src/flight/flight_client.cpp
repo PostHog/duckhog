@@ -143,6 +143,23 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
     return *table_result;
 }
 
+std::unique_ptr<PostHogFlightQueryStream> PostHogFlightClient::ExecuteQueryStream(const std::string &sql) {
+    std::lock_guard<std::mutex> lock(client_mutex_);
+
+    if (!authenticated_) {
+        throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
+    }
+
+    auto call_options = GetCallOptions();
+
+    auto info_result = sql_client_->Execute(call_options, sql);
+    if (!info_result.ok()) {
+        throw std::runtime_error("PostHog: Query execution failed: " + info_result.status().ToString());
+    }
+
+    return std::make_unique<PostHogFlightQueryStream>(*sql_client_, call_options, std::move(*info_result));
+}
+
 std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::string &sql) {
     std::lock_guard<std::mutex> lock(client_mutex_);
 
@@ -368,6 +385,78 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
     }
 
     return *schema_read_result;
+}
+
+PostHogFlightQueryStream::PostHogFlightQueryStream(arrow::flight::sql::FlightSqlClient &client,
+                                                   arrow::flight::FlightCallOptions options,
+                                                   std::unique_ptr<arrow::flight::FlightInfo> info)
+    : client_(client), options_(std::move(options)), info_(std::move(info)) {
+}
+
+arrow::Status PostHogFlightQueryStream::OpenReader() {
+    if (reader_) {
+        return arrow::Status::OK();
+    }
+    if (!info_ || info_->endpoints().empty()) {
+        return arrow::Status::Invalid("FlightInfo did not return any endpoints");
+    }
+    if (endpoint_index_ >= info_->endpoints().size()) {
+        return arrow::Status::OK();
+    }
+    auto stream_result = client_.DoGet(options_, info_->endpoints()[endpoint_index_].ticket);
+    if (!stream_result.ok()) {
+        return stream_result.status();
+    }
+    reader_ = std::move(*stream_result);
+    return arrow::Status::OK();
+}
+
+arrow::Result<std::shared_ptr<arrow::Schema>> PostHogFlightQueryStream::GetSchema() {
+    if (schema_) {
+        return schema_;
+    }
+    if (info_) {
+        auto schema_result = info_->GetSchema(nullptr);
+        if (schema_result.ok()) {
+            schema_ = *schema_result;
+            return schema_;
+        }
+    }
+    auto status = OpenReader();
+    if (!status.ok()) {
+        return status;
+    }
+    auto schema_result = reader_->GetSchema();
+    if (!schema_result.ok()) {
+        return schema_result.status();
+    }
+    schema_ = *schema_result;
+    return schema_;
+}
+
+arrow::Result<arrow::flight::FlightStreamChunk> PostHogFlightQueryStream::Next() {
+    while (true) {
+        auto status = OpenReader();
+        if (!status.ok()) {
+            return status;
+        }
+        if (!reader_) {
+            return arrow::flight::FlightStreamChunk();
+        }
+        auto chunk_result = reader_->Next();
+        if (!chunk_result.ok()) {
+            return chunk_result.status();
+        }
+        auto chunk = std::move(*chunk_result);
+        if (chunk.data) {
+            return chunk;
+        }
+        reader_.reset();
+        endpoint_index_++;
+        if (!info_ || endpoint_index_ >= info_->endpoints().size()) {
+            return chunk;
+        }
+    }
 }
 
 } // namespace duckdb

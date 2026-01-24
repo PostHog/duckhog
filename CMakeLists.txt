@@ -30,6 +30,7 @@ set(EXTENSION_SOURCES
     src/utils/connection_string.cpp
     # Milestone 3: Arrow Flight SQL client integration
     src/flight/flight_client.cpp
+    src/flight/arrow_stream.cpp
     # Milestone 4: Virtual catalog with proxy table entries
     src/catalog/posthog_schema_entry.cpp
     src/catalog/posthog_table_entry.cpp
