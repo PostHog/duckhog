@@ -1,0 +1,35 @@
+# name: test/sql/queries/projection.test_slow
+# description: Column projection and filtering tests via Flight SQL
+# group: [queries]
+
+# Tests in this file require a running Flight SQL server
+# Run: ./scripts/start-flight-server.sh before executing
+
+require posthog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+statement ok
+ATTACH 'hog:test?token=demo&endpoint=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+
+# Test: Column projection with filter
+query T
+SELECT name FROM remote.main.numbers WHERE id = 5;
+----
+item_5
+
+# Test: Multiple column projection with ordering
+query IT
+SELECT id, name FROM remote.main.numbers WHERE id <= 3 ORDER BY id;
+----
+1	item_1
+2	item_2
+3	item_3
+
+# Test: Query types_test table (has int_col, float_col, str_col, bool_col, date_col)
+query IR
+SELECT int_col, float_col FROM remote.main.types_test;
+----
+1	1.5
