@@ -97,6 +97,7 @@ test/
     │   └── attach.test          # Connection string parsing tests
     └── queries/
         ├── basic_select.test_slow   # Basic queries (requires server)
+        ├── arrow_types.test_slow    # Arrow type/encoding coverage (requires server)
         ├── tables.test_slow         # Schema/table operations
         └── projection.test_slow     # Column projection tests
 ```

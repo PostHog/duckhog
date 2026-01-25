@@ -2,6 +2,31 @@
 
 This guide covers setting up the development environment for the PostHog DuckDB Extension.
 
+## TL;DR (Quickstart)
+
+**macOS (one-time setup):**
+
+```bash
+brew install cmake ninja pkg-config bison
+export PATH="/opt/homebrew/opt/bison/bin:$PATH"
+
+cd ~/projects
+git clone https://github.com/Microsoft/vcpkg.git
+cd vcpkg
+git checkout ce613c41372b23b1f51333815feb3edd87ef8a8b
+./bootstrap-vcpkg.sh -disableMetrics
+export VCPKG_TOOLCHAIN_PATH=~/projects/vcpkg/scripts/buildsystems/vcpkg.cmake
+```
+
+**Build + test:**
+
+```bash
+GEN=ninja make release
+make test
+```
+
+For full test instructions (unit + integration), see `test/README.md`.
+
 ## Prerequisites
 
 - **macOS** (Apple Silicon or Intel) or **Linux**
@@ -238,17 +263,9 @@ rm -rf build/
 rm -rf build/release/vcpkg_installed/
 ```
 
-## Running Tests
+## Testing
 
-```bash
-make test
-```
-
-Or run the test binary directly:
-
-```bash
-./build/release/test/unittest
-```
+See `test/README.md` for unit/integration test flows and Flight server setup.
 
 ## IDE Setup
 
