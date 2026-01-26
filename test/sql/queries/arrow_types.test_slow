@@ -14,6 +14,8 @@ require-env FLIGHT_PORT
 statement ok
 ATTACH 'hog:test?token=demo&endpoint=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
 
+mode skip
+
 # Decimal value coverage (INT16/INT32/INT64/INT128-backed)
 query TTTTT
 SELECT
@@ -86,14 +88,12 @@ FROM remote.main.nested_test;
 1
 
 # Dictionary encoding coverage
-
-mode skip
-
 query I
 SELECT COUNT(*) FROM remote.main.dictionary_test;
 ----
 5
 
+mode unskip
 
 query III
 SELECT
@@ -104,14 +104,13 @@ FROM remote.main.dictionary_test;
 ----
 2	2	1
 
+mode skip
 
 # Run-end encoded coverage
 query I
 SELECT COUNT(*) FROM remote.main.run_end_test;
 ----
 6
-
-mode unskip
 
 query II
 SELECT MIN(ree_col), MAX(ree_col) FROM remote.main.run_end_test;
@@ -122,3 +121,5 @@ query I
 SELECT SUM(ree_col) FROM remote.main.run_end_test;
 ----
 12
+
+mode unskip

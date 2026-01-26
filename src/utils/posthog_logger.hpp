@@ -19,11 +19,11 @@
 namespace duckdb {
 
 enum class PostHogLogLevel {
-    DEBUG = 0,
-    INFO = 1,
-    WARN = 2,
-    ERROR = 3,
-    NONE = 4
+    Debug = 0,
+    Info = 1,
+    Warn = 2,
+    Error = 3,
+    None = 4
 };
 
 class PostHogLogger {
@@ -52,22 +52,22 @@ public:
     // Log methods
     template<typename... Args>
     void Debug(const char* format, Args... args) {
-        Log(PostHogLogLevel::DEBUG, format, args...);
+        Log(PostHogLogLevel::Debug, format, args...);
     }
 
     template<typename... Args>
     void Info(const char* format, Args... args) {
-        Log(PostHogLogLevel::INFO, format, args...);
+        Log(PostHogLogLevel::Info, format, args...);
     }
 
     template<typename... Args>
     void Warn(const char* format, Args... args) {
-        Log(PostHogLogLevel::WARN, format, args...);
+        Log(PostHogLogLevel::Warn, format, args...);
     }
 
     template<typename... Args>
     void Error(const char* format, Args... args) {
-        Log(PostHogLogLevel::ERROR, format, args...);
+        Log(PostHogLogLevel::Error, format, args...);
     }
 
     // Convenience method for simple string logging
@@ -77,21 +77,21 @@ public:
     void Error(const std::string& msg) { Error("%s", msg.c_str()); }
 
 private:
-    PostHogLogger() : log_level_(PostHogLogLevel::INFO), show_timestamps_(false) {
+    PostHogLogger() : log_level_(PostHogLogLevel::Info), show_timestamps_(false) {
         // Check environment variable for log level
         const char* level_str = std::getenv("POSTHOG_LOG_LEVEL");
         if (level_str) {
             std::string level(level_str);
             if (level == "DEBUG" || level == "debug") {
-                log_level_ = PostHogLogLevel::DEBUG;
+                log_level_ = PostHogLogLevel::Debug;
             } else if (level == "INFO" || level == "info") {
-                log_level_ = PostHogLogLevel::INFO;
+                log_level_ = PostHogLogLevel::Info;
             } else if (level == "WARN" || level == "warn") {
-                log_level_ = PostHogLogLevel::WARN;
+                log_level_ = PostHogLogLevel::Warn;
             } else if (level == "ERROR" || level == "error") {
-                log_level_ = PostHogLogLevel::ERROR;
+                log_level_ = PostHogLogLevel::Error;
             } else if (level == "NONE" || level == "none") {
-                log_level_ = PostHogLogLevel::NONE;
+                log_level_ = PostHogLogLevel::None;
             }
         }
 
@@ -152,16 +152,16 @@ private:
 
         // Add level
         switch (level) {
-            case PostHogLogLevel::DEBUG:
+            case PostHogLogLevel::Debug:
                 oss << "[DEBUG] ";
                 break;
-            case PostHogLogLevel::INFO:
+            case PostHogLogLevel::Info:
                 oss << " ";
                 break;
-            case PostHogLogLevel::WARN:
+            case PostHogLogLevel::Warn:
                 oss << "[WARN] ";
                 break;
-            case PostHogLogLevel::ERROR:
+            case PostHogLogLevel::Error:
                 oss << "[ERROR] ";
                 break;
             default:

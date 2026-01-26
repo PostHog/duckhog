@@ -9,6 +9,7 @@
 #include "flight/arrow_stream.hpp"
 
 #include "catalog/posthog_catalog.hpp"
+#include "catalog/remote_scan.hpp"
 #include "duckdb/common/exception.hpp"
 
 #include <arrow/c/bridge.h>
@@ -32,16 +33,46 @@ void PostHogArrowStream::Initialize(ArrowArrayStream &stream, std::shared_ptr<Po
 
 unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream_factory_ptr,
                                                                 ArrowStreamParameters &parameters) {
-    (void)parameters;
+    auto *bind_data = reinterpret_cast<PostHogRemoteScanBindData *>(stream_factory_ptr);
+
+    // Build projected SQL from the column names DuckDB's planner selected.
+    auto &columns = parameters.projected_columns.columns;
+    string columns_str;
+    if (columns.empty()) {
+        // ROW_ID-only query (e.g. SELECT count(*)).  ArrowToDuckDB skips every
+        // COLUMN_IDENTIFIER_ROW_ID entry (arrow_conversion.cpp:1472) so no batch
+        // children are ever accessed — only arrow_array.length matters for row
+        // counting.  Project the first catalog column as a cheap placeholder to
+        // get valid batches from the Flight SQL backend.
+        D_ASSERT(!bind_data->column_names.empty());
+        columns_str = "\"" + bind_data->column_names[0] + "\"";
+    } else {
+        for (size_t i = 0; i < columns.size(); i++) {
+            if (i > 0) {
+                columns_str += ", ";
+            }
+            columns_str += "\"" + columns[i] + "\"";
+        }
+    }
+    string query = "SELECT " + columns_str + " FROM \"" + bind_data->schema_name + "\".\"" + bind_data->table_name + "\"";
+
+    // Execute the projected query via Flight SQL.
+    auto stream_state = std::make_shared<PostHogArrowStreamState>(bind_data->catalog, query);
+
+    // Build a temporary ArrowArrayStream and transfer it into the wrapper.
+    ArrowArrayStream tmp_stream;
+    Initialize(tmp_stream, std::move(stream_state));
+
     auto res = make_uniq<ArrowArrayStreamWrapper>();
-    auto stream = reinterpret_cast<ArrowArrayStream *>(stream_factory_ptr);
-    res->arrow_array_stream = *stream;
-    // Ownership of the stream is transferred to the wrapper; prevent double-release on the original.
-    stream->release = nullptr;
-    stream->get_schema = nullptr;
-    stream->get_next = nullptr;
-    stream->get_last_error = nullptr;
-    stream->private_data = nullptr;
+    res->arrow_array_stream = tmp_stream;
+
+    // Ownership transferred to the wrapper; prevent double-release on the local copy.
+    tmp_stream.release = nullptr;
+    tmp_stream.get_schema = nullptr;
+    tmp_stream.get_next = nullptr;
+    tmp_stream.get_last_error = nullptr;
+    tmp_stream.private_data = nullptr;
+
     return res;
 }
 

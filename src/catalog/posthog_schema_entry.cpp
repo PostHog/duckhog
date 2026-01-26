@@ -178,7 +178,7 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
         }
         create_info->columns.Finalize();
 
-        auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_);
+        auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, arrow_schema);
         table_cache_.emplace(table_name, std::move(table_entry));
     } catch (const std::exception &e) {
         std::cerr << "[PostHog] Failed to create table entry for " << name << "." << table_name << ": " << e.what()

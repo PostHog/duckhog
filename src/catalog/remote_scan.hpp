@@ -12,6 +12,12 @@
 #include "duckdb/function/table_function.hpp"
 #include "flight/arrow_stream.hpp"
 
+#include <memory>
+
+namespace arrow {
+class Schema;
+} // namespace arrow
+
 namespace duckdb {
 
 class PostHogCatalog;
@@ -32,11 +38,16 @@ struct PostHogRemoteScanBindData : public ArrowScanFunctionData {
     vector<string> column_names;
     vector<LogicalType> column_types;
 
-    // The query to execute (generated from table name + column projection)
-    string query;
-
-    std::shared_ptr<PostHogArrowStreamState> stream_state;
-    ArrowArrayStream arrow_stream;
+    // Patched C ArrowSchema child name pointers.  Each entry records the child
+    // schema, the original name pointer (owned by Arrow's private data), and the
+    // strdup'd replacement.  The destructor restores originals before the base
+    // class releases the ArrowSchema, avoiding a double-free.
+    struct PatchedName {
+        ArrowSchema *child;
+        const char *original;
+        char *patched;
+    };
+    vector<PatchedName> patched_schema_names;
 };
 
 //===----------------------------------------------------------------------===//
@@ -51,7 +62,8 @@ public:
     // Create bind data for a specific table scan
     static unique_ptr<FunctionData> CreateBindData(PostHogCatalog &catalog, const string &schema_name,
                                                    const string &table_name, const vector<string> &column_names,
-                                                   const vector<LogicalType> &column_types);
+                                                   const vector<LogicalType> &column_types,
+                                                   const std::shared_ptr<arrow::Schema> &arrow_schema);
 
 private:
     // Table function callbacks

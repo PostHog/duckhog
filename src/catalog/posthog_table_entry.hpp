@@ -11,6 +11,12 @@
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/storage/data_table.hpp"
 
+#include <memory>
+
+namespace arrow {
+class Schema;
+} // namespace arrow
+
 namespace duckdb {
 
 class PostHogCatalog;
@@ -19,7 +25,7 @@ class PostHogSchemaEntry;
 class PostHogTableEntry : public TableCatalogEntry {
 public:
     PostHogTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info,
-                      PostHogCatalog &posthog_catalog);
+                      PostHogCatalog &posthog_catalog, std::shared_ptr<arrow::Schema> arrow_schema);
     ~PostHogTableEntry() override;
 
 public:
@@ -50,9 +56,15 @@ public:
         return posthog_catalog_;
     }
 
+    // Get the cached Arrow schema from catalog creation
+    const std::shared_ptr<arrow::Schema> &GetArrowSchema() const {
+        return arrow_schema_;
+    }
+
 private:
     PostHogCatalog &posthog_catalog_;
     string schema_name_;
+    std::shared_ptr<arrow::Schema> arrow_schema_;
 };
 
 } // namespace duckdb
