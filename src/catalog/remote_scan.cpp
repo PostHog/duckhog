@@ -24,6 +24,7 @@ PostHogRemoteScanBindData::PostHogRemoteScanBindData(PostHogCatalog &catalog_p, 
                                                      const string &table_name_p)
     : ArrowScanFunctionData(&PostHogArrowStream::Produce, reinterpret_cast<uintptr_t>(&arrow_stream)),
       catalog(catalog_p), schema_name(schema_name_p), table_name(table_name_p) {
+    projection_pushdown_enabled = false;
     arrow_stream.get_schema = nullptr;
     arrow_stream.get_next = nullptr;
     arrow_stream.get_last_error = nullptr;
@@ -129,7 +130,9 @@ double PostHogRemoteScan::Progress(ClientContext &context, const FunctionData *b
 
 TableFunction PostHogRemoteScan::GetFunction() {
     TableFunction func("posthog_remote_scan", {}, Execute, Bind, InitGlobal, InitLocal);
-    func.projection_pushdown = true;  // Required for virtual tables
+    // We currently fetch all columns from Flight; disable projection pushdown to keep
+    // Arrow array column order aligned with DuckDB's expected indices.
+    func.projection_pushdown = false;
     func.filter_pushdown = false;     // TODO: Implement filter pushdown
     func.table_scan_progress = Progress;
     return func;

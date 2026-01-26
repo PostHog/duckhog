@@ -113,7 +113,7 @@ class FlightSQLServer(flight.FlightServerBase):
         return pa.array([1, 1, 2, 2, 3, 3], type=pa.int64())
 
     def _arrow_table_for_query(self, query: str):
-        match = re.search(r"FROM\\s+([^\\s;]+)", query, flags=re.IGNORECASE)
+        match = re.search(r"FROM\s+([^\s;]+)", query, flags=re.IGNORECASE)
         if not match:
             return None
         table_ref = match.group(1).strip().strip(";").replace('"', "")
@@ -260,8 +260,16 @@ class FlightSQLServer(flight.FlightServerBase):
         print(f"[FlightSQL] Preparing query: {query}")
 
         try:
-            result = self.conn.execute(query).fetch_arrow_table()
-            schema = result.schema
+            # Check if this query references a special Arrow table (e.g., dictionary_test)
+            # If so, use that table's schema to preserve encoding information
+            arrow_table = self._arrow_table_for_query(query)
+            if arrow_table is not None:
+                schema = arrow_table.schema
+                total_records = arrow_table.num_rows
+            else:
+                result = self.conn.execute(query).fetch_arrow_table()
+                schema = result.schema
+                total_records = result.num_rows
 
             ticket = flight.Ticket(f"QUERY:{query}".encode("utf-8"))
             endpoint = flight.FlightEndpoint(ticket, [self._location_uri])
@@ -270,7 +278,7 @@ class FlightSQLServer(flight.FlightServerBase):
                 schema=schema,
                 descriptor=descriptor,
                 endpoints=[endpoint],
-                total_records=result.num_rows,
+                total_records=total_records,
                 total_bytes=-1,
             )
         except Exception as e:

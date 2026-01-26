@@ -3,8 +3,10 @@
 #include "include/posthog_extension.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/shared_ptr.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/config.hpp"
+#include "duckdb/storage/storage_extension.hpp"
 
 #include "storage/posthog_storage.hpp"
 
@@ -22,7 +24,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
     // Register the storage extension for "hog:" protocol
     auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
-    config.storage_extensions["hog"] = make_uniq<PostHogStorageExtension>();
+    StorageExtension::Register(config, "hog", make_shared_ptr<PostHogStorageExtension>());
 
     // Register a simple version function to verify the extension loads
     auto posthog_version_func = ScalarFunction("posthog_version", {}, LogicalType::VARCHAR, PosthogVersionScalarFun);

@@ -1,0 +1,124 @@
+# name: test/sql/queries/arrow_types.test_slow
+# description: Arrow type coverage (decimals, nested types, encodings) via Flight SQL
+# group: [queries]
+
+# Tests in this file require a running Flight SQL server
+# Run: ./scripts/flight-server.sh start before executing
+
+require posthog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+statement ok
+ATTACH 'hog:test?token=demo&endpoint=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+
+# Decimal value coverage (INT16/INT32/INT64/INT128-backed)
+query TTTTT
+SELECT
+    CAST(dec_p4 AS VARCHAR),
+    CAST(dec_p9 AS VARCHAR),
+    CAST(dec_p18 AS VARCHAR),
+    CAST(dec_p38 AS VARCHAR),
+    CAST(dec_p10s2 AS VARCHAR)
+FROM remote.main.decimal_test;
+----
+1234	123456789	123456789012345678	12345678901234567890123456789012345678	123.45
+
+# Decimal schema precision/scale mapping
+query TII
+SELECT column_name, numeric_precision, numeric_scale
+FROM information_schema.columns
+WHERE table_catalog = 'remote'
+  AND table_schema = 'main'
+  AND table_name = 'decimal_test'
+ORDER BY column_name;
+----
+dec_p10s2	10	2
+dec_p18	18	0
+dec_p38	38	0
+dec_p4	4	0
+dec_p9	9	0
+
+# Nested list coverage (values, nulls, empty list)
+query II
+SELECT array_length(int_list), array_length(empty_list)
+FROM remote.main.nested_test;
+----
+3	0
+
+query III
+SELECT
+    list_extract(int_list, 1),
+    list_extract(int_list, 2),
+    CASE WHEN list_extract(int_list, 3) IS NULL THEN 1 ELSE 0 END
+FROM remote.main.nested_test;
+----
+1	2	1
+
+# Struct coverage
+query IT
+SELECT simple_struct.a, simple_struct.b
+FROM remote.main.nested_test;
+----
+1	hi
+
+query IT
+SELECT CASE WHEN struct_with_null.a IS NULL THEN 1 ELSE 0 END, struct_with_null.b
+FROM remote.main.nested_test;
+----
+1	bye
+
+# Map coverage (including null values)
+query II
+SELECT
+    map_extract_value(str_int_map, 'a'),
+    map_extract_value(str_int_map, 'b')
+FROM remote.main.nested_test;
+----
+1	2
+
+query I
+SELECT CASE WHEN map_extract_value(map_with_null, 'x') IS NULL THEN 1 ELSE 0 END
+FROM remote.main.nested_test;
+----
+1
+
+# Dictionary encoding coverage
+
+mode skip
+
+query I
+SELECT COUNT(*) FROM remote.main.dictionary_test;
+----
+5
+
+
+query III
+SELECT
+    SUM(CASE WHEN dict_col = 'alpha' THEN 1 ELSE 0 END),
+    SUM(CASE WHEN dict_col = 'beta' THEN 1 ELSE 0 END),
+    SUM(CASE WHEN dict_col = 'gamma' THEN 1 ELSE 0 END)
+FROM remote.main.dictionary_test;
+----
+2	2	1
+
+
+# Run-end encoded coverage
+query I
+SELECT COUNT(*) FROM remote.main.run_end_test;
+----
+6
+
+mode unskip
+
+query II
+SELECT MIN(ree_col), MAX(ree_col) FROM remote.main.run_end_test;
+----
+1	3
+
+query I
+SELECT SUM(ree_col) FROM remote.main.run_end_test;
+----
+12
