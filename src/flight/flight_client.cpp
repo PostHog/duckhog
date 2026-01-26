@@ -12,6 +12,7 @@
 #include <arrow/flight/api.h>
 #include <arrow/flight/sql/api.h>
 #include <arrow/io/memory.h>
+#include <arrow/ipc/dictionary.h>
 #include <arrow/ipc/reader.h>
 #include <stdexcept>
 
@@ -123,7 +124,8 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
     // Combine all batches into a single table
     if (batches.empty()) {
         // Return empty table - need schema from FlightInfo
-        auto schema_result = flight_info->GetSchema(nullptr);
+        arrow::ipc::DictionaryMemo memo;
+        auto schema_result = flight_info->GetSchema(&memo);
         if (schema_result.ok()) {
             auto empty_result = arrow::Table::MakeEmpty(*schema_result);
             if (empty_result.ok()) {
@@ -416,7 +418,8 @@ arrow::Result<std::shared_ptr<arrow::Schema>> PostHogFlightQueryStream::GetSchem
         return schema_;
     }
     if (info_) {
-        auto schema_result = info_->GetSchema(nullptr);
+        arrow::ipc::DictionaryMemo memo;
+        auto schema_result = info_->GetSchema(&memo);
         if (schema_result.ok()) {
             schema_ = *schema_result;
             return schema_;
