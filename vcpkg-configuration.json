@@ -1,0 +1,12 @@
+{
+  "default-registry": {
+    "kind": "builtin",
+    "baseline": "23dc124705fcac41cf35c33dd9541f5094a9c19f"
+  },
+  "overlay-ports": [
+    "./extension-ci-tools/vcpkg_ports"
+  ],
+  "overlay-triplets": [
+    "./extension-ci-tools/toolchains"
+  ]
+}

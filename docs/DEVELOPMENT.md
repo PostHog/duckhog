@@ -76,8 +76,20 @@ cd vcpkg
 We use a specific vcpkg commit for reproducible builds:
 
 ```bash
-git checkout ce613c41372b23b1f51333815feb3edd87ef8a8b
+git checkout 23dc124705fcac41cf35c33dd9541f5094a9c19f
 ```
+
+This repository also pins the vcpkg baseline in `vcpkg-configuration.json` so that
+dependency resolution is reproducible even if your vcpkg checkout is at a different commit.
+To upgrade dependencies, update the `baseline` commit in `vcpkg-configuration.json` and
+rebuild vcpkg-installed packages.
+
+### Bumping the vcpkg baseline safely
+
+1. Update your local vcpkg checkout to the desired commit.
+2. Replace the `baseline` hash in `vcpkg-configuration.json`.
+3. Remove installed packages for this build (e.g. `rm -rf build/release/vcpkg_installed/`).
+4. Rebuild and run the relevant tests.
 
 ### Step 3: Bootstrap vcpkg
 

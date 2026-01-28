@@ -9,11 +9,14 @@
 #include "flight/flight_client.hpp"
 
 #include <arrow/api.h>
+#include <arrow/device.h>
 #include <arrow/flight/api.h>
 #include <arrow/flight/sql/api.h>
 #include <arrow/io/memory.h>
 #include <arrow/ipc/dictionary.h>
+#include <arrow/ipc/options.h>
 #include <arrow/ipc/reader.h>
+#include <iostream>
 #include <stdexcept>
 
 namespace duckdb {
@@ -68,6 +71,12 @@ arrow::flight::FlightCallOptions PostHogFlightClient::GetCallOptions() const {
     if (!token_.empty()) {
         options.headers.push_back({"authorization", "Bearer " + token_});
     }
+
+    // controls new allocations Arrow performs while decoding
+    options.memory_manager = arrow::default_cpu_memory_manager();
+    options.read_options = arrow::ipc::IpcReadOptions::Defaults();
+    // Ensure Flight buffers are aligned even when gRPC buffers are misaligned.
+    options.read_options.ensure_alignment = arrow::ipc::Alignment::kDataTypeSpecificAlignment;
 
     return options;
 }
@@ -289,6 +298,19 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &sche
         // RecordBatch::GetColumnByName returns Array, not ChunkedArray
         auto table_col = chunk.data->GetColumnByName("table_name");
         if (table_col) {
+            std::cerr << "[PostHog] table_name Arrow type: " << table_col->type()->ToString()
+                      << " (id=" << static_cast<int>(table_col->type_id()) << ")" << std::endl;
+            auto table_data = table_col->data();
+            if (table_data && table_data->buffers.size() > 1 && table_data->buffers[1]) {
+                auto offsets_addr = reinterpret_cast<uintptr_t>(table_data->buffers[1]->data());
+                std::cerr << "[PostHog] table_name offsets buffer addr=0x" << std::hex << offsets_addr << std::dec
+                          << " align_mod4=" << (offsets_addr % alignof(int32_t)) << std::endl;
+            }
+            if (table_data && table_data->buffers.size() > 2 && table_data->buffers[2]) {
+                auto values_addr = reinterpret_cast<uintptr_t>(table_data->buffers[2]->data());
+                std::cerr << "[PostHog] table_name values buffer addr=0x" << std::hex << values_addr << std::dec
+                          << " align_mod1=" << (values_addr % alignof(uint8_t)) << std::endl;
+            }
             auto table_array = std::static_pointer_cast<arrow::StringArray>(table_col);
             for (int64_t i = 0; i < table_array->length(); i++) {
                 if (!table_array->IsNull(i)) {
