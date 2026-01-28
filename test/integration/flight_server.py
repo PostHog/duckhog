@@ -386,11 +386,16 @@ class FlightSQLServer(flight.FlightServerBase):
             table_schemas = []
 
             for table_name in table_names:
-                # Get the schema for each table
-                result = self.conn.execute(f"SELECT * FROM {table_name} LIMIT 0").fetch_arrow_table()
+                # Get the schema for each table (preserve Arrow encoding for special tables)
+                arrow_table = self.arrow_tables.get(table_name)
+                if arrow_table is not None:
+                    schema = arrow_table.schema
+                else:
+                    result = self.conn.execute(f"SELECT * FROM {table_name} LIMIT 0").fetch_arrow_table()
+                    schema = result.schema
                 # Serialize the schema using IPC
                 sink = pa.BufferOutputStream()
-                writer = pa.ipc.new_stream(sink, result.schema)
+                writer = pa.ipc.new_stream(sink, schema)
                 writer.close()
                 schema_bytes = sink.getvalue().to_pybytes()
                 table_schemas.append(schema_bytes)
