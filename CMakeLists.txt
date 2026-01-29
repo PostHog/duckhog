@@ -14,6 +14,10 @@ find_package(ArrowFlightSql REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(Protobuf REQUIRED)
 
+# HTTP client dependencies (Control Plane API)
+find_package(CURL REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
@@ -35,6 +39,8 @@ set(EXTENSION_SOURCES
     src/catalog/posthog_schema_entry.cpp
     src/catalog/posthog_table_entry.cpp
     src/catalog/remote_scan.cpp
+    # Control Plane HTTP client
+    src/http/control_plane_client.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
@@ -51,6 +57,8 @@ target_link_libraries(${EXTENSION_NAME}
     ArrowFlightSql::arrow_flight_sql_static
     gRPC::grpc++
     protobuf::libprotobuf
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
 )
 target_link_libraries(${LOADABLE_EXTENSION_NAME}
     Arrow::arrow_static
@@ -58,6 +66,8 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME}
     ArrowFlightSql::arrow_flight_sql_static
     gRPC::grpc++
     protobuf::libprotobuf
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
 )
 
 install(

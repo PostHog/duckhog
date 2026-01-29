@@ -1,0 +1,24 @@
+# name: test/sql/connection/control_plane.test
+# description: Control plane connection errors and validation
+# group: [connection]
+
+require posthog
+
+# Error: Control plane endpoint unreachable
+statement error
+ATTACH 'hog:test_db?token=demo&control_plane=http://127.0.0.1:1' AS cp_unreachable;
+----
+Control plane request failed
+
+# Error: Invalid control plane URL (DNS failure)
+statement error
+ATTACH 'hog:test_db?token=demo&control_plane=http://nonexistent.invalid:8080' AS cp_invalid_host;
+----
+Control plane request failed
+
+# Default control plane URL is used when not specified
+# This will fail because there's no control plane running, but validates the path is taken
+statement error
+ATTACH 'hog:test_db?token=demo' AS cp_default;
+----
+Control plane request failed

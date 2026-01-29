@@ -11,6 +11,7 @@
 #include "storage/posthog_transaction_manager.hpp"
 #include "catalog/posthog_catalog.hpp"
 #include "utils/connection_string.hpp"
+#include "http/control_plane_client.hpp"
 
 namespace duckdb {
 
@@ -34,11 +35,17 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
         if (config.control_plane.empty()) {
             config.control_plane = PostHogConnectionConfig::DEFAULT_CONTROL_PLANE;
         }
-        // TODO: Call control plane API to get flight_endpoint and session_token
-        // For now, throw an error indicating control plane is not yet implemented
-        throw InvalidInputException(
-            "PostHog: Control plane integration not yet implemented. "
-            "For development, use: ATTACH 'hog:database?token=TOKEN&flight_server=grpc://host:port'");
+
+        // Call control plane API to get flight_endpoint and session_token
+        auto cp_response = posthog::ControlPlaneClient::CreateSession(config.control_plane, config.token, config.database);
+
+        // Update config with the returned flight endpoint
+        config.flight_server = cp_response.flight_endpoint;
+
+        // If control plane returns a session token, use it instead of the original API token
+        if (cp_response.session_token.has_value()) {
+            config.token = cp_response.session_token.value();
+        }
     }
 
     // Dev mode: direct flight server connection

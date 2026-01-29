@@ -51,6 +51,22 @@ export FLIGHT_PORT=8815
 ./build/release/test/unittest "test/sql/queries/*"
 ```
 
+### Control Plane Integration Tests
+
+Control plane tests require both the Flight SQL server and the mock control plane server:
+
+```bash
+# Step 1: Start both servers
+python test/integration/flight_server.py --port 8815 &
+python test/integration/control_plane_server.py --port 8080 --flight-endpoint grpc://127.0.0.1:8815 &
+
+# Step 2: Run control plane integration tests
+./build/release/test/unittest "test/sql/queries/control_plane.test_slow"
+
+# Clean up
+kill %1 %2
+```
+
 **Background mode** (for CI or single terminal):
 
 ```bash
@@ -90,19 +106,22 @@ test/
 │   └── flight.json              # Test configuration for Flight SQL
 ├── integration/
 │   ├── flight_server.py         # Python Flight SQL test server
+│   ├── control_plane_server.py  # Mock control plane HTTP server
 │   └── requirements.txt         # Python dependencies
 └── sql/
     ├── posthog.test             # Extension loading tests
     ├── connection/
     │   ├── attach.test          # Connection string parsing tests
-    │   └── auth.test            # Authentication parameter validation
+    │   ├── auth.test            # Authentication parameter validation
+    │   └── control_plane.test   # Control plane error scenarios
     ├── errors/
     │   └── connection_errors.test  # Error message verification
     └── queries/
         ├── basic_select.test_slow   # Basic queries (requires server)
         ├── arrow_types.test_slow    # Arrow type/encoding coverage (requires server)
         ├── tables.test_slow         # Schema/table operations
-        └── projection.test_slow     # Column projection tests
+        ├── projection.test_slow     # Column projection tests
+        └── control_plane.test_slow  # Control plane integration (requires both servers)
 ```
 
 ## Test File Conventions
