@@ -9,16 +9,53 @@
 #include "catalog/posthog_schema_entry.hpp"
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_table_entry.hpp"
-#include "flight/arrow_conversion.hpp"
-
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/entry_lookup_info.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/function/table/arrow.hpp"
+#include "duckdb/main/config.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 
+#include <arrow/c/bridge.h>
+
+#include <cctype>
 #include <iostream>
 
 namespace duckdb {
+
+namespace {
+
+bool IsConnectionFailureMessage(const std::string &message) {
+    std::string lower;
+    lower.reserve(message.size());
+    for (unsigned char ch : message) {
+        lower.push_back(static_cast<char>(std::tolower(ch)));
+    }
+    return lower.find("failed to connect") != std::string::npos ||
+           lower.find("connection refused") != std::string::npos ||
+           lower.find("unavailable") != std::string::npos ||
+           lower.find("timed out") != std::string::npos;
+}
+
+} // namespace
+
+static void PopulateTableSchemaFromArrow(DBConfig &config, const std::shared_ptr<arrow::Schema> &schema,
+                                         vector<string> &names, vector<LogicalType> &types) {
+    ArrowSchema arrow_schema;
+    auto status = arrow::ExportSchema(*schema, &arrow_schema);
+    if (!status.ok()) {
+        throw IOException("PostHog: Failed to export Arrow schema: " + status.ToString());
+    }
+
+    ArrowTableSchema arrow_table;
+    ArrowTableFunction::PopulateArrowTableSchema(config, arrow_table, arrow_schema);
+    names = arrow_table.GetNames();
+    types = arrow_table.GetTypes();
+
+    if (arrow_schema.release) {
+        arrow_schema.release(&arrow_schema);
+    }
+}
 
 PostHogSchemaEntry::PostHogSchemaEntry(Catalog &catalog, CreateSchemaInfo &info, PostHogCatalog &posthog_catalog)
     : SchemaCatalogEntry(catalog, info), posthog_catalog_(posthog_catalog) {
@@ -128,6 +165,9 @@ void PostHogSchemaEntry::LoadTablesIfNeeded() {
 
     } catch (const std::exception &e) {
         std::cerr << "[PostHog] Failed to load tables for schema " << name << ": " << e.what() << std::endl;
+        if (IsConnectionFailureMessage(e.what())) {
+            throw CatalogException("PostHog: Not connected to remote server.");
+        }
     }
 }
 
@@ -147,28 +187,25 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
         auto &client = posthog_catalog_.GetFlightClient();
         auto arrow_schema = client.GetTableSchema(name, table_name);
 
-        // Convert Arrow schema to DuckDB column definitions
         vector<string> column_names;
         vector<LogicalType> column_types;
-        ArrowConversion::ArrowSchemaToDuckDB(arrow_schema, column_names, column_types);
+        PopulateTableSchemaFromArrow(DBConfig::GetConfig(posthog_catalog_.GetDatabase()), arrow_schema, column_names,
+                                     column_types);
 
-        // Create the table info
-        auto table_info = make_uniq<CreateTableInfo>();
-        table_info->table = table_name;
-        table_info->schema = name;
-        table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
-
-        for (size_t i = 0; i < column_names.size(); i++) {
-            table_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
+        auto create_info = make_uniq<CreateTableInfo>(*this, table_name);
+        for (idx_t i = 0; i < column_names.size(); i++) {
+            create_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
         }
+        create_info->columns.Finalize();
 
-        // Create the table entry and add to cache
-        auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *table_info, posthog_catalog_);
-        table_cache_[table_name] = std::move(table_entry);
-
+        auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, arrow_schema);
+        table_cache_.emplace(table_name, std::move(table_entry));
     } catch (const std::exception &e) {
         std::cerr << "[PostHog] Failed to create table entry for " << name << "." << table_name << ": " << e.what()
                   << std::endl;
+        if (IsConnectionFailureMessage(e.what())) {
+            throw CatalogException("PostHog: Not connected to remote server.");
+        }
     }
 }
 

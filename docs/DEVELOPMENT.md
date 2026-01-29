@@ -2,6 +2,31 @@
 
 This guide covers setting up the development environment for the PostHog DuckDB Extension.
 
+## TL;DR (Quickstart)
+
+**macOS (one-time setup):**
+
+```bash
+brew install cmake ninja pkg-config bison
+export PATH="/opt/homebrew/opt/bison/bin:$PATH"
+
+cd ~/projects
+git clone https://github.com/Microsoft/vcpkg.git
+cd vcpkg
+git checkout ce613c41372b23b1f51333815feb3edd87ef8a8b
+./bootstrap-vcpkg.sh -disableMetrics
+export VCPKG_TOOLCHAIN_PATH=~/projects/vcpkg/scripts/buildsystems/vcpkg.cmake
+```
+
+**Build + test:**
+
+```bash
+GEN=ninja make release
+make test
+```
+
+For full test instructions (unit + integration), see `test/README.md`.
+
 ## Prerequisites
 
 - **macOS** (Apple Silicon or Intel) or **Linux**
@@ -51,8 +76,20 @@ cd vcpkg
 We use a specific vcpkg commit for reproducible builds:
 
 ```bash
-git checkout ce613c41372b23b1f51333815feb3edd87ef8a8b
+git checkout 23dc124705fcac41cf35c33dd9541f5094a9c19f
 ```
+
+This repository also pins the vcpkg baseline in `vcpkg-configuration.json` so that
+dependency resolution is reproducible even if your vcpkg checkout is at a different commit.
+To upgrade dependencies, update the `baseline` commit in `vcpkg-configuration.json` and
+rebuild vcpkg-installed packages.
+
+### Bumping the vcpkg baseline safely
+
+1. Update your local vcpkg checkout to the desired commit.
+2. Replace the `baseline` hash in `vcpkg-configuration.json`.
+3. Remove installed packages for this build (e.g. `rm -rf build/release/vcpkg_installed/`).
+4. Rebuild and run the relevant tests.
 
 ### Step 3: Bootstrap vcpkg
 
@@ -103,11 +140,7 @@ GEN=ninja make release
 GEN=ninja make debug
 ```
 
-**Using make instead of ninja:**
-
-```bash
-make release
-```
+`GEN=ninja` is optional, it just speeds up the build.
 
 ### First Build Notes
 
@@ -157,8 +190,8 @@ posthog-duckdb-extension/
 │   ├── flight/
 │   │   ├── flight_client.cpp      # Arrow Flight SQL client
 │   │   ├── flight_client.hpp
-│   │   ├── arrow_conversion.cpp   # Arrow <-> DuckDB type conversion
-│   │   └── arrow_conversion.hpp
+│   │   ├── arrow_stream.cpp       # Arrow C stream bridge for DuckDB scan
+│   │   └── arrow_stream.hpp
 │   ├── storage/
 │   │   ├── posthog_storage.cpp    # Storage extension (hog: protocol)
 │   │   ├── posthog_storage.hpp
@@ -242,17 +275,9 @@ rm -rf build/
 rm -rf build/release/vcpkg_installed/
 ```
 
-## Running Tests
+## Testing
 
-```bash
-make test
-```
-
-Or run the test binary directly:
-
-```bash
-./build/release/test/unittest
-```
+See `test/README.md` for unit/integration test flows and Flight server setup.
 
 ## IDE Setup
 

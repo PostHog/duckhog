@@ -13,6 +13,7 @@ Requirements:
 """
 
 import argparse
+import re
 import struct
 from typing import Generator
 
@@ -48,6 +49,7 @@ class FlightSQLServer(flight.FlightServerBase):
 
         # Create test tables
         self._setup_test_data()
+        self._setup_arrow_test_tables()
 
         print(f"[FlightSQL] Server started on {location}")
 
@@ -61,12 +63,62 @@ class FlightSQLServer(flight.FlightServerBase):
         self.conn.execute(
             "CREATE TABLE types_test AS SELECT "
             "1 AS int_col, "
-            "1.5 AS float_col, "
+            "CAST(1.5 AS DOUBLE) AS float_col, "
             "'hello' AS str_col, "
             "TRUE AS bool_col, "
             "DATE '2024-01-15' AS date_col"
         )
-        print("[FlightSQL] Test tables created: test_data, numbers, types_test")
+        self.conn.execute(
+            "CREATE TABLE decimal_test AS SELECT "
+            "CAST(1234 AS DECIMAL(4,0)) AS dec_p4, "
+            "CAST(123456789 AS DECIMAL(9,0)) AS dec_p9, "
+            "CAST(123456789012345678 AS DECIMAL(18,0)) AS dec_p18, "
+            "CAST('12345678901234567890123456789012345678' AS DECIMAL(38,0)) AS dec_p38, "
+            "CAST(123.45 AS DECIMAL(10,2)) AS dec_p10s2"
+        )
+        self.conn.execute(
+            "CREATE TABLE nested_test AS SELECT "
+            "[1, 2, NULL]::INTEGER[] AS int_list, "
+            "[]::INTEGER[] AS empty_list, "
+            "struct_pack(a := 1, b := 'hi') AS simple_struct, "
+            "struct_pack(a := NULL, b := 'bye') AS struct_with_null, "
+            "map(['a','b'], [1,2]) AS str_int_map, "
+            "map(['x'], [NULL::INTEGER]) AS map_with_null"
+        )
+        print("[FlightSQL] Test tables created: test_data, numbers, types_test, decimal_test, nested_test, "
+              "dictionary_test, run_end_test")
+
+    def _setup_arrow_test_tables(self):
+        """Create Arrow tables for encoding-specific tests."""
+        self.arrow_tables = {}
+
+        dict_values = pa.array(["alpha", "beta", "gamma"])
+        dict_indices = pa.array([0, 1, 0, 2, 1], type=pa.int8())
+        dict_array = pa.DictionaryArray.from_arrays(dict_indices, dict_values)
+        self.arrow_tables["dictionary_test"] = pa.table({"dict_col": dict_array})
+
+        run_end_array = self._build_run_end_encoded_array()
+        self.arrow_tables["run_end_test"] = pa.table({"ree_col": run_end_array})
+
+        self.conn.execute("CREATE TABLE dictionary_test AS SELECT 'alpha'::VARCHAR AS dict_col LIMIT 0")
+        self.conn.execute("CREATE TABLE run_end_test AS SELECT 1::BIGINT AS ree_col LIMIT 0")
+
+    def _build_run_end_encoded_array(self):
+        run_ends = pa.array([2, 4, 6], type=pa.int32())
+        values = pa.array([1, 2, 3], type=pa.int64())
+        if hasattr(pa, "run_end_encoded_array"):
+            return pa.run_end_encoded_array(run_ends, values)
+        if hasattr(pa, "RunEndEncodedArray"):
+            return pa.RunEndEncodedArray.from_arrays(run_ends, values)
+        return pa.array([1, 1, 2, 2, 3, 3], type=pa.int64())
+
+    def _arrow_table_for_query(self, query: str):
+        match = re.search(r"FROM\s+([^\s;]+)", query, flags=re.IGNORECASE)
+        if not match:
+            return None
+        table_ref = match.group(1).strip().strip(";").replace('"', "")
+        table_name = table_ref.split(".")[-1]
+        return self.arrow_tables.get(table_name)
 
     def _is_flight_sql_command(self, command: bytes) -> bool:
         """Check if the command is a Flight SQL protocol buffer."""
@@ -208,8 +260,16 @@ class FlightSQLServer(flight.FlightServerBase):
         print(f"[FlightSQL] Preparing query: {query}")
 
         try:
-            result = self.conn.execute(query).fetch_arrow_table()
-            schema = result.schema
+            # Check if this query references a special Arrow table (e.g., dictionary_test)
+            # If so, use that table's schema to preserve encoding information
+            arrow_table = self._arrow_table_for_query(query)
+            if arrow_table is not None:
+                schema = arrow_table.schema
+                total_records = arrow_table.num_rows
+            else:
+                result = self.conn.execute(query).fetch_arrow_table()
+                schema = result.schema
+                total_records = result.num_rows
 
             ticket = flight.Ticket(f"QUERY:{query}".encode("utf-8"))
             endpoint = flight.FlightEndpoint(ticket, [self._location_uri])
@@ -218,7 +278,7 @@ class FlightSQLServer(flight.FlightServerBase):
                 schema=schema,
                 descriptor=descriptor,
                 endpoints=[endpoint],
-                total_records=result.num_rows,
+                total_records=total_records,
                 total_bytes=-1,
             )
         except Exception as e:
@@ -300,6 +360,9 @@ class FlightSQLServer(flight.FlightServerBase):
         if ticket_bytes.startswith(b"QUERY:"):
             query = ticket_bytes[6:].decode("utf-8")
             print(f"[FlightSQL] Executing query: {query}")
+            arrow_table = self._arrow_table_for_query(query)
+            if arrow_table is not None:
+                return flight.RecordBatchStream(arrow_table)
             result = self.conn.execute(query).fetch_arrow_table()
             return flight.RecordBatchStream(result)
 
@@ -323,11 +386,16 @@ class FlightSQLServer(flight.FlightServerBase):
             table_schemas = []
 
             for table_name in table_names:
-                # Get the schema for each table
-                result = self.conn.execute(f"SELECT * FROM {table_name} LIMIT 0").fetch_arrow_table()
+                # Get the schema for each table (preserve Arrow encoding for special tables)
+                arrow_table = self.arrow_tables.get(table_name)
+                if arrow_table is not None:
+                    schema = arrow_table.schema
+                else:
+                    result = self.conn.execute(f"SELECT * FROM {table_name} LIMIT 0").fetch_arrow_table()
+                    schema = result.schema
                 # Serialize the schema using IPC
                 sink = pa.BufferOutputStream()
-                writer = pa.ipc.new_stream(sink, result.schema)
+                writer = pa.ipc.new_stream(sink, schema)
                 writer.close()
                 schema_bytes = sink.getvalue().to_pybytes()
                 table_schemas.append(schema_bytes)
@@ -356,6 +424,9 @@ class FlightSQLServer(flight.FlightServerBase):
             try:
                 query = ticket_bytes.decode("utf-8")
                 print(f"[FlightSQL] Executing raw query: {query}")
+                arrow_table = self._arrow_table_for_query(query)
+                if arrow_table is not None:
+                    return flight.RecordBatchStream(arrow_table)
                 result = self.conn.execute(query).fetch_arrow_table()
                 return flight.RecordBatchStream(result)
             except Exception as e:

@@ -58,10 +58,14 @@ cd posthog-duckdb-extension
 # Set up vcpkg (one-time setup)
 cd ..
 git clone https://github.com/Microsoft/vcpkg.git
-cd vcpkg && git checkout ce613c41372b23b1f51333815feb3edd87ef8a8b
+cd vcpkg && git checkout 23dc124705fcac41cf35c33dd9541f5094a9c19f
 ./bootstrap-vcpkg.sh -disableMetrics
 export VCPKG_TOOLCHAIN_PATH=$(pwd)/scripts/buildsystems/vcpkg.cmake
 cd ../posthog-duckdb-extension
+
+# Note: this repo pins the vcpkg baseline in vcpkg-configuration.json.
+# If you use a different vcpkg checkout, vcpkg will still resolve to the pinned baseline.
+# To upgrade dependencies, update the baseline commit in vcpkg-configuration.json.
 
 # Build
 GEN=ninja make release
@@ -85,7 +89,7 @@ The extension is built on several key components:
 |-----------|--------|
 | Storage Extension & Protocol Registration | Complete |
 | Arrow Flight SQL Client Integration | Complete |
-| Virtual Catalog Implementation | In Progress |
+| Virtual Catalog Implementation | Complete |
 | Query Pushdown Optimization | Planned |
 
 ## Requirements

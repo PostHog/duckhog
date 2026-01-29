@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <cstddef>
 
 #include <arrow/flight/client.h>
 #include <arrow/flight/sql/client.h>
@@ -20,6 +21,26 @@
 #include <arrow/type.h>
 
 namespace duckdb {
+
+class PostHogFlightQueryStream {
+public:
+    PostHogFlightQueryStream(arrow::flight::sql::FlightSqlClient &client,
+                             arrow::flight::FlightCallOptions options,
+                             std::unique_ptr<arrow::flight::FlightInfo> info);
+
+    arrow::Result<std::shared_ptr<arrow::Schema>> GetSchema();
+    arrow::Result<arrow::flight::FlightStreamChunk> Next();
+
+private:
+    arrow::flight::sql::FlightSqlClient &client_;
+    arrow::flight::FlightCallOptions options_;
+    std::unique_ptr<arrow::flight::FlightInfo> info_;
+    std::unique_ptr<arrow::flight::FlightStreamReader> reader_;
+    size_t endpoint_index_ = 0;
+    std::shared_ptr<arrow::Schema> schema_;
+
+    arrow::Status OpenReader();
+};
 
 class PostHogFlightClient {
 public:
@@ -52,6 +73,9 @@ public:
 
     // Execute a SQL query and return results as an Arrow Table
     std::shared_ptr<arrow::Table> ExecuteQuery(const std::string &sql);
+
+    // Execute a SQL query and return results as a streaming reader
+    std::unique_ptr<PostHogFlightQueryStream> ExecuteQueryStream(const std::string &sql);
 
     // Get the schema of a query without executing it (uses Prepare)
     std::shared_ptr<arrow::Schema> GetQuerySchema(const std::string &sql);

@@ -1,0 +1,49 @@
+# Internal API Notes
+
+This document summarizes the key internal classes that make up the PostHog DuckDB extension.
+It is intended for maintainers and contributors.
+
+## Storage Extension
+
+- `PostHogStorageExtension` (`src/storage/posthog_storage.cpp`)
+  - Registers the `hog:` protocol for `ATTACH`.
+  - Parses connection strings and validates required parameters (token).
+  - Creates the `PostHogCatalog` instance.
+
+## Connection String
+
+- `ConnectionString` / `PostHogConnectionConfig` (`src/utils/connection_string.cpp`)
+  - Parses `database?token=...&endpoint=...`.
+  - URL-decodes values and stores extra options.
+  - Applies default endpoint when missing.
+
+## Flight SQL Client
+
+- `PostHogFlightClient` (`src/flight/flight_client.cpp`)
+  - Wraps Arrow Flight SQL client logic.
+  - Adds bearer token headers and exposes metadata APIs (schemas/tables).
+  - Provides both table and streaming query execution.
+
+## Catalog + Entries
+
+- `PostHogCatalog` (`src/catalog/posthog_catalog.cpp`)
+  - Owns the Flight client, connection state, and schema cache.
+  - Lazily loads schemas and exposes them via DuckDB's catalog interface.
+
+- `PostHogSchemaEntry` (`src/catalog/posthog_schema_entry.cpp`)
+  - Lazily loads tables for a schema with caching/TTL.
+  - Creates `PostHogTableEntry` instances from remote schemas.
+
+- `PostHogTableEntry` (`src/catalog/posthog_table_entry.cpp`)
+  - Maps remote tables to DuckDB table entries.
+  - Supplies the remote scan table function and cached Arrow schema.
+
+## Remote Scan + Arrow Stream
+
+- `PostHogRemoteScan` (`src/catalog/remote_scan.cpp`)
+  - Builds bind data and integrates with DuckDB's Arrow scan.
+  - Uses projection pushdown by generating a projected SQL query.
+
+- `PostHogArrowStream` (`src/flight/arrow_stream.cpp`)
+  - Bridges Flight SQL streaming results into DuckDB's Arrow scan.
+  - Provides schema and batch iteration via the C Arrow stream interface.

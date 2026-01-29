@@ -3,7 +3,7 @@
 # group: [queries]
 
 # Tests in this file require a running Flight SQL server
-# Run: ./scripts/start-flight-server.sh before executing
+# Run: ./scripts/flight-server.sh start before executing
 
 require posthog
 
@@ -25,6 +25,10 @@ query I rowsort
 SELECT table_name FROM information_schema.tables
 WHERE table_catalog = 'remote' AND table_schema = 'main';
 ----
+decimal_test
+dictionary_test
+nested_test
 numbers
+run_end_test
 test_data
 types_test

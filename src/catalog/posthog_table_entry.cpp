@@ -10,19 +10,22 @@
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_schema_entry.hpp"
 #include "catalog/remote_scan.hpp"
-#include "flight/arrow_conversion.hpp"
 
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
+
+#include <arrow/type.h>
 
 #include <iostream>
 
 namespace duckdb {
 
 PostHogTableEntry::PostHogTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info,
-                                     PostHogCatalog &posthog_catalog)
-    : TableCatalogEntry(catalog, schema, info), posthog_catalog_(posthog_catalog), schema_name_(schema.name) {
+                                     PostHogCatalog &posthog_catalog,
+                                     std::shared_ptr<arrow::Schema> arrow_schema)
+    : TableCatalogEntry(catalog, schema, info), posthog_catalog_(posthog_catalog), schema_name_(schema.name),
+      arrow_schema_(std::move(arrow_schema)) {
 }
 
 PostHogTableEntry::~PostHogTableEntry() = default;
@@ -42,7 +45,8 @@ TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_
         column_types.push_back(col.Type());
     }
 
-    bind_data = PostHogRemoteScan::CreateBindData(posthog_catalog_, schema_name_, name, column_names, column_types);
+    bind_data = PostHogRemoteScan::CreateBindData(posthog_catalog_, schema_name_, name, column_names, column_types,
+                                                   arrow_schema_);
 
     return PostHogRemoteScan::GetFunction();
 }

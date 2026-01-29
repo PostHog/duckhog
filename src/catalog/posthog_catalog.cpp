@@ -16,7 +16,25 @@
 #include "duckdb/planner/operator/logical_update.hpp"
 #include "duckdb/storage/database_size.hpp"
 
+#include <cctype>
+
 namespace duckdb {
+
+namespace {
+
+bool IsConnectionFailureMessage(const std::string &message) {
+    std::string lower;
+    lower.reserve(message.size());
+    for (unsigned char ch : message) {
+        lower.push_back(static_cast<char>(std::tolower(ch)));
+    }
+    return lower.find("failed to connect") != std::string::npos ||
+           lower.find("connection refused") != std::string::npos ||
+           lower.find("unavailable") != std::string::npos ||
+           lower.find("timed out") != std::string::npos;
+}
+
+} // namespace
 
 PostHogCatalog::PostHogCatalog(AttachedDatabase &db, const string &name, PostHogConnectionConfig config)
     : Catalog(db), database_name_(name), config_(std::move(config)) {
@@ -87,6 +105,9 @@ void PostHogCatalog::LoadSchemasIfNeeded() {
 
     } catch (const std::exception &e) {
         POSTHOG_LOG_ERROR("Failed to load schemas: %s", e.what());
+        if (IsConnectionFailureMessage(e.what())) {
+            throw CatalogException("PostHog: Not connected to remote server.");
+        }
     }
 }
 
