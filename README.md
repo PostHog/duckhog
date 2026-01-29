@@ -25,8 +25,11 @@ LOAD posthog;
 ### Usage
 
 ```sql
--- Attach a PostHog data source
-ATTACH 'hog:my_database?token=YOUR_API_TOKEN&endpoint=grpc://your-posthog-endpoint:8815' AS posthog_db;
+-- Production: Attach via control plane (recommended)
+ATTACH 'hog:my_database?token=YOUR_API_TOKEN' AS posthog_db;
+
+-- Development: Direct flight server connection (bypasses control plane)
+ATTACH 'hog:my_database?token=YOUR_API_TOKEN&flight_server=grpc://localhost:8815' AS posthog_db;
 
 -- Query your data
 SELECT * FROM posthog_db.events LIMIT 10;
@@ -35,14 +38,19 @@ SELECT * FROM posthog_db.events LIMIT 10;
 ### Connection String Format
 
 ```
-hog:<database_name>?token=<api_token>&endpoint=<flight_endpoint>
+hog:<database_name>?token=<api_token>[&control_plane=<url>][&flight_server=<url>]
 ```
 
 | Parameter | Description | Required |
 |-----------|-------------|----------|
 | `database_name` | Name of the database to connect to | Yes |
 | `token` | API authentication token | Yes |
-| `endpoint` | Flight SQL server endpoint (default: `grpc://localhost:8815`) | No |
+| `control_plane` | Control plane URL (default: `http://localhost:8080`) | No |
+| `flight_server` | Direct Flight SQL server endpoint (dev/testing only, bypasses control plane) | No |
+
+**Connection Modes:**
+- **Production (default)**: Uses `control_plane` to obtain a session and Flight endpoint dynamically
+- **Development**: Use `flight_server=` to connect directly to a Flight SQL server, bypassing the control plane
 
 ## Building from Source
 

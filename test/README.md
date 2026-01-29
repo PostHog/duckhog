@@ -137,7 +137,7 @@ The `test/configs/flight.json` file defines environment variables:
 require posthog
 
 statement ok
-ATTACH 'hog:test?token=demo&endpoint=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:test?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
 
 query I
 SELECT COUNT(*) FROM remote.main.numbers;

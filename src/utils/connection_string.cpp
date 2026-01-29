@@ -69,8 +69,11 @@ PostHogConnectionConfig ConnectionString::Parse(const std::string &connection_st
 
                 if (key == "token") {
                     config.token = value;
-                } else if (key == "endpoint") {
-                    config.endpoint = value;
+                } else if (key == "control_plane") {
+                    config.control_plane = value;
+                } else if (key == "flight_server") {
+                    // Direct Flight SQL server (dev/testing bypass)
+                    config.flight_server = value;
                 } else {
                     config.options[key] = value;
                 }

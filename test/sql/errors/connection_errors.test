@@ -6,7 +6,7 @@ require posthog
 
 # Attach succeeds even if endpoint is unreachable; queries should fail.
 statement ok
-ATTACH 'hog:test?token=demo&endpoint=grpc://127.0.0.1:1' AS remote;
+ATTACH 'hog:test?token=demo&flight_server=grpc://127.0.0.1:1' AS remote;
 
 statement error
 SELECT * FROM remote.main.test_data;

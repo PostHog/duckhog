@@ -26,13 +26,22 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
             "PostHog: Missing authentication token. Use: ATTACH 'hog:database?token=YOUR_TOKEN'");
     }
 
-    // Use default endpoint if not specified
-    if (config.endpoint.empty()) {
-        config.endpoint = PostHogConnectionConfig::DEFAULT_ENDPOINT;
+    // Determine connection mode:
+    // 1. If flight_server= is specified, use direct connection (dev/testing bypass)
+    // 2. Otherwise, use control plane (production path)
+    if (!config.UseDirectFlightServer()) {
+        // Production path: use control plane to get flight endpoint
+        if (config.control_plane.empty()) {
+            config.control_plane = PostHogConnectionConfig::DEFAULT_CONTROL_PLANE;
+        }
+        // TODO: Call control plane API to get flight_endpoint and session_token
+        // For now, throw an error indicating control plane is not yet implemented
+        throw InvalidInputException(
+            "PostHog: Control plane integration not yet implemented. "
+            "For development, use: ATTACH 'hog:database?token=TOKEN&flight_server=grpc://host:port'");
     }
 
-    // For now (Milestone 2), we don't actually connect to the Flight server
-    // Just create the catalog with the configuration
+    // Dev mode: direct flight server connection
     return make_uniq<PostHogCatalog>(db, name, std::move(config));
 }
 
