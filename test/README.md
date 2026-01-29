@@ -28,7 +28,7 @@ Unit tests (`.test` files) run without external dependencies:
 
 ```bash
 # Run only unit tests (exclude .test_slow)
-./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"
+./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test" "test/sql/errors/*.test"
 
 # Run specific test file
 ./build/release/test/unittest "test/sql/posthog.test"
@@ -94,7 +94,10 @@ test/
 └── sql/
     ├── posthog.test             # Extension loading tests
     ├── connection/
-    │   └── attach.test          # Connection string parsing tests
+    │   ├── attach.test          # Connection string parsing tests
+    │   └── auth.test            # Authentication parameter validation
+    ├── errors/
+    │   └── connection_errors.test  # Error message verification
     └── queries/
         ├── basic_select.test_slow   # Basic queries (requires server)
         ├── arrow_types.test_slow    # Arrow type/encoding coverage (requires server)

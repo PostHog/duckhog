@@ -1,0 +1,16 @@
+# name: test/sql/connection/auth.test
+# description: Authentication parameter validation
+# group: [connection]
+
+require posthog
+
+# Missing or empty token should fail
+statement error
+ATTACH 'hog:test?token=' AS remote;
+----
+Missing authentication token
+
+statement error
+ATTACH 'hog:test?endpoint=grpc://127.0.0.1:8815' AS remote;
+----
+Missing authentication token

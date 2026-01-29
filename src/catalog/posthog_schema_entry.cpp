@@ -18,9 +18,26 @@
 
 #include <arrow/c/bridge.h>
 
+#include <cctype>
 #include <iostream>
 
 namespace duckdb {
+
+namespace {
+
+bool IsConnectionFailureMessage(const std::string &message) {
+    std::string lower;
+    lower.reserve(message.size());
+    for (unsigned char ch : message) {
+        lower.push_back(static_cast<char>(std::tolower(ch)));
+    }
+    return lower.find("failed to connect") != std::string::npos ||
+           lower.find("connection refused") != std::string::npos ||
+           lower.find("unavailable") != std::string::npos ||
+           lower.find("timed out") != std::string::npos;
+}
+
+} // namespace
 
 static void PopulateTableSchemaFromArrow(DBConfig &config, const std::shared_ptr<arrow::Schema> &schema,
                                          vector<string> &names, vector<LogicalType> &types) {
@@ -148,6 +165,9 @@ void PostHogSchemaEntry::LoadTablesIfNeeded() {
 
     } catch (const std::exception &e) {
         std::cerr << "[PostHog] Failed to load tables for schema " << name << ": " << e.what() << std::endl;
+        if (IsConnectionFailureMessage(e.what())) {
+            throw CatalogException("PostHog: Not connected to remote server.");
+        }
     }
 }
 
@@ -183,6 +203,9 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
     } catch (const std::exception &e) {
         std::cerr << "[PostHog] Failed to create table entry for " << name << "." << table_name << ": " << e.what()
                   << std::endl;
+        if (IsConnectionFailureMessage(e.what())) {
+            throw CatalogException("PostHog: Not connected to remote server.");
+        }
     }
 }
 

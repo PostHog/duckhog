@@ -89,7 +89,7 @@ The extension is built on several key components:
 |-----------|--------|
 | Storage Extension & Protocol Registration | Complete |
 | Arrow Flight SQL Client Integration | Complete |
-| Virtual Catalog Implementation | In Progress |
+| Virtual Catalog Implementation | Complete |
 | Query Pushdown Optimization | Planned |
 
 ## Requirements
