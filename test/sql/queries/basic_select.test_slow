@@ -13,7 +13,7 @@ require-env FLIGHT_PORT
 
 # Connect to the Flight SQL server
 statement ok
-ATTACH 'hog:test?token=demo&endpoint=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:test?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
 
 # Test 1: Basic SELECT 1
 query I

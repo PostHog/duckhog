@@ -15,11 +15,18 @@ namespace duckdb {
 struct PostHogConnectionConfig {
     std::string database;
     std::string token;
-    std::string endpoint;
+    std::string control_plane;
+    // Direct Flight SQL server override (dev/testing only, bypasses control plane)
+    std::string flight_server;
     std::unordered_map<std::string, std::string> options;
 
-    // Default Flight SQL endpoint
-    static constexpr const char *DEFAULT_ENDPOINT = "grpc://localhost:8815";
+    // Default control plane endpoint (production path)
+    static constexpr const char *DEFAULT_CONTROL_PLANE = "http://localhost:8080";
+
+    // Check if using direct flight server bypass (dev mode)
+    bool UseDirectFlightServer() const {
+        return !flight_server.empty();
+    }
 };
 
 class ConnectionString {

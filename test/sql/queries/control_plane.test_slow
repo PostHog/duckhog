@@ -1,0 +1,42 @@
+# name: test/sql/queries/control_plane.test_slow
+# description: Integration tests for control plane session creation
+# group: [queries]
+# Requires both control_plane_server.py and flight_server.py running
+
+require posthog
+
+# Connect via control plane (default path)
+# Control plane returns flight endpoint, extension connects to Flight server
+statement ok
+ATTACH 'hog:test_db?token=demo&control_plane=http://127.0.0.1:8080' AS cp_test;
+
+# Verify we can query through the connection
+query I
+SELECT value FROM cp_test.main.test_data;
+----
+1
+
+# Query a larger table
+query II
+SELECT id, name FROM cp_test.main.numbers WHERE id <= 3 ORDER BY id;
+----
+1	item_1
+2	item_2
+3	item_3
+
+# Clean up
+statement ok
+DETACH cp_test;
+
+# Test with session token override
+# The control plane returns a session_token that should be used instead of the original token
+statement ok
+ATTACH 'hog:another_db?token=test-token&control_plane=http://127.0.0.1:8080' AS session_test;
+
+query I
+SELECT value FROM session_test.main.test_data;
+----
+1
+
+statement ok
+DETACH session_test;
