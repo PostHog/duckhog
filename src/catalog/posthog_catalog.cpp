@@ -52,7 +52,14 @@ void PostHogCatalog::Initialize(bool load_builtin) {
     try {
         flight_client_ = make_uniq<PostHogFlightClient>(config_.flight_server, config_.token);
         flight_client_->Authenticate();
-        POSTHOG_LOG_INFO("Successfully connected to Flight server");
+        POSTHOG_LOG_INFO("Initialized Flight SQL client");
+        auto ping_status = flight_client_->Ping();
+        if (ping_status.ok()) {
+            POSTHOG_LOG_INFO("Flight server is reachable");
+        } else {
+            POSTHOG_LOG_WARN("Flight server not reachable yet: %s", ping_status.ToString().c_str());
+            POSTHOG_LOG_WARN("Catalog created in disconnected mode. Queries will fail until connection is restored.");
+        }
     } catch (const std::exception &e) {
         // Log the error but don't throw - allow catalog to be created even if connection fails
         // This enables testing the extension without a running server
@@ -90,7 +97,9 @@ void PostHogCatalog::LoadSchemasIfNeeded() {
 
     try {
         POSTHOG_LOG_DEBUG("Loading schemas from remote server...");
-        auto schema_names = flight_client_->ListSchemas();
+        // Query all remote catalogs by default. The local attached database name (e.g. "remote")
+        // is a DuckDB concept and does not necessarily match the remote Flight SQL catalog_name.
+        auto schema_names = flight_client_->ListSchemas("");
 
         // Create schema entries (don't clear existing ones to preserve loaded tables)
         for (const auto &schema_name : schema_names) {

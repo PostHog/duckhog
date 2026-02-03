@@ -17,6 +17,7 @@
 #include <arrow/ipc/options.h>
 #include <arrow/ipc/reader.h>
 #include <iostream>
+#include <string_view>
 #include <stdexcept>
 
 namespace duckdb {
@@ -62,6 +63,43 @@ void PostHogFlightClient::Authenticate() {
     // For more complex authentication flows (username/password, OAuth, etc.),
     // this method would call the Authenticate RPC
     authenticated_ = true;
+}
+
+arrow::Status PostHogFlightClient::Ping() {
+    std::lock_guard<std::mutex> lock(client_mutex_);
+
+    if (!authenticated_) {
+        return arrow::Status::Invalid("Not authenticated. Call Authenticate() first.");
+    }
+    if (!sql_client_) {
+        return arrow::Status::Invalid("SQL client not initialized");
+    }
+
+    auto call_options = GetCallOptions();
+    // Prefer a metadata RPC that our servers/tests already implement (GetDbSchemas),
+    // since some Flight SQL servers may not implement SqlInfo.
+    auto info_result = sql_client_->GetDbSchemas(call_options, nullptr, nullptr);
+    if (!info_result.ok()) {
+        return info_result.status();
+    }
+
+    auto info = std::move(*info_result);
+    if (!info || info->endpoints().empty()) {
+        return arrow::Status::OK();
+    }
+
+    // Ensure we can open and read at least once from the stream.
+    auto stream_result = sql_client_->DoGet(call_options, info->endpoints()[0].ticket);
+    if (!stream_result.ok()) {
+        return stream_result.status();
+    }
+    auto stream = std::move(*stream_result);
+    auto chunk_result = stream->Next();
+    if (!chunk_result.ok()) {
+        return chunk_result.status();
+    }
+
+    return arrow::Status::OK();
 }
 
 arrow::flight::FlightCallOptions PostHogFlightClient::GetCallOptions() const {
@@ -192,7 +230,7 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::st
     return prepared_statement->dataset_schema();
 }
 
-std::vector<std::string> PostHogFlightClient::ListSchemas() {
+std::vector<std::string> PostHogFlightClient::ListSchemas(const std::string &catalog) {
     std::lock_guard<std::mutex> lock(client_mutex_);
 
     if (!authenticated_) {
@@ -203,7 +241,7 @@ std::vector<std::string> PostHogFlightClient::ListSchemas() {
 
     // GetDbSchemas returns information about schemas/catalogs
     // Parameters: options, catalog (nullptr = all), db_schema_filter_pattern (nullptr = all)
-    auto info_result = sql_client_->GetDbSchemas(call_options, nullptr, nullptr);
+    auto info_result = sql_client_->GetDbSchemas(call_options, catalog.empty() ? nullptr : &catalog, nullptr);
     if (!info_result.ok()) {
         throw std::runtime_error("PostHog: Failed to list schemas: " + info_result.status().ToString());
     }
@@ -234,26 +272,67 @@ std::vector<std::string> PostHogFlightClient::ListSchemas() {
             break;
         }
 
+        auto catalog_col = chunk.data->GetColumnByName("catalog_name");
+
         // RecordBatch::GetColumnByName returns Array, not ChunkedArray
         auto schema_col = chunk.data->GetColumnByName("db_schema_name");
         if (!schema_col) {
             schema_col = chunk.data->GetColumnByName("schema_name");
         }
 
-        if (schema_col) {
+        if (!schema_col) {
+            continue;
+        }
+
+        auto row_matches_catalog = [&](int64_t row) -> bool {
+            if (catalog.empty() || !catalog_col) {
+                return true;
+            }
+            switch (catalog_col->type_id()) {
+            case arrow::Type::STRING: {
+                auto catalog_array = std::static_pointer_cast<arrow::StringArray>(catalog_col);
+                return !catalog_array->IsNull(row) && catalog_array->GetView(row) == catalog;
+            }
+            case arrow::Type::LARGE_STRING: {
+                auto catalog_array = std::static_pointer_cast<arrow::LargeStringArray>(catalog_col);
+                return !catalog_array->IsNull(row) && catalog_array->GetView(row) == catalog;
+            }
+            default:
+                throw std::runtime_error("PostHog: Unexpected catalog_name column type: " +
+                                         catalog_col->type()->ToString());
+            }
+        };
+
+        switch (schema_col->type_id()) {
+        case arrow::Type::STRING: {
             auto schema_array = std::static_pointer_cast<arrow::StringArray>(schema_col);
             for (int64_t i = 0; i < schema_array->length(); i++) {
-                if (!schema_array->IsNull(i)) {
-                    schemas.push_back(std::string(schema_array->GetView(i)));
+                if (!row_matches_catalog(i) || schema_array->IsNull(i)) {
+                    continue;
                 }
+                schemas.push_back(std::string(schema_array->GetView(i)));
             }
+            break;
+        }
+        case arrow::Type::LARGE_STRING: {
+            auto schema_array = std::static_pointer_cast<arrow::LargeStringArray>(schema_col);
+            for (int64_t i = 0; i < schema_array->length(); i++) {
+                if (!row_matches_catalog(i) || schema_array->IsNull(i)) {
+                    continue;
+                }
+                schemas.push_back(std::string(schema_array->GetView(i)));
+            }
+            break;
+        }
+        default:
+            throw std::runtime_error("PostHog: Unexpected schema name column type: " + schema_col->type()->ToString());
         }
     }
 
     return schemas;
 }
 
-std::vector<std::string> PostHogFlightClient::ListTables(const std::string &schema) {
+std::vector<std::string> PostHogFlightClient::ListTables(const std::string &catalog, const std::string &schema) {
     std::lock_guard<std::mutex> lock(client_mutex_);
 
     if (!authenticated_) {
@@ -264,7 +343,8 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &sche
 
     // GetTables returns information about tables
     // Parameters: catalog, schema_filter_pattern, table_name_filter_pattern, include_schema, table_types
-    auto info_result = sql_client_->GetTables(call_options, nullptr, &schema, nullptr, false, nullptr);
+    auto info_result = sql_client_->GetTables(call_options, catalog.empty() ? nullptr : &catalog, &schema, nullptr,
+                                              false, nullptr);
     if (!info_result.ok()) {
         throw std::runtime_error("PostHog: Failed to list tables: " + info_result.status().ToString());
     }
@@ -295,14 +375,37 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &sche
             break;
         }
 
+        auto catalog_col = chunk.data->GetColumnByName("catalog_name");
         auto table_col = chunk.data->GetColumnByName("table_name");
         if (table_col) {
+            auto row_matches_catalog = [&](int64_t row) -> bool {
+                if (catalog.empty() || !catalog_col) {
+                    return true;
+                }
+                switch (catalog_col->type_id()) {
+                case arrow::Type::STRING: {
+                    auto catalog_array = std::static_pointer_cast<arrow::StringArray>(catalog_col);
+                    return !catalog_array->IsNull(row) && catalog_array->GetView(row) == catalog;
+                }
+                case arrow::Type::LARGE_STRING: {
+                    auto catalog_array = std::static_pointer_cast<arrow::LargeStringArray>(catalog_col);
+                    return !catalog_array->IsNull(row) && catalog_array->GetView(row) == catalog;
+                }
+                default:
+                    throw std::runtime_error("PostHog: Unexpected catalog_name column type: " +
+                                             catalog_col->type()->ToString());
+                }
+            };
+
             switch (table_col->type_id()) {
             case arrow::Type::STRING: {
                 auto table_array = std::static_pointer_cast<arrow::StringArray>(table_col);
                 tables.reserve(tables.size() + static_cast<size_t>(table_array->length()));
                 for (int64_t i = 0; i < table_array->length(); i++) {
-                    if (!table_array->IsNull(i)) {
+                    if (!row_matches_catalog(i) || table_array->IsNull(i)) {
+                        continue;
+                    }
+                    {
                         tables.push_back(std::string(table_array->GetView(i)));
                     }
                 }
@@ -312,7 +415,10 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &sche
                 auto table_array = std::static_pointer_cast<arrow::LargeStringArray>(table_col);
                 tables.reserve(tables.size() + static_cast<size_t>(table_array->length()));
                 for (int64_t i = 0; i < table_array->length(); i++) {
-                    if (!table_array->IsNull(i)) {
+                    if (!row_matches_catalog(i) || table_array->IsNull(i)) {
+                        continue;
+                    }
+                    {
                         tables.push_back(std::string(table_array->GetView(i)));
                     }
                 }
@@ -328,7 +434,8 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &sche
     return tables;
 }
 
-std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::string &schema,
+std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::string &catalog,
+                                                                    const std::string &schema,
                                                                     const std::string &table) {
     std::lock_guard<std::mutex> lock(client_mutex_);
 
@@ -339,7 +446,8 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
     auto call_options = GetCallOptions();
 
     // GetTables with include_schema=true returns serialized schema in the result
-    auto info_result = sql_client_->GetTables(call_options, nullptr, &schema, &table, true, nullptr);
+    auto info_result = sql_client_->GetTables(call_options, catalog.empty() ? nullptr : &catalog, &schema, &table, true,
+                                              nullptr);
     if (!info_result.ok()) {
         throw std::runtime_error("PostHog: Failed to get table schema: " + info_result.status().ToString());
     }
@@ -374,19 +482,58 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
         throw std::runtime_error("PostHog: Server did not return table schema for: " + schema + "." + table);
     }
 
+    auto catalog_col = chunk.data->GetColumnByName("catalog_name");
     auto table_name_col = chunk.data->GetColumnByName("table_name");
     if (!table_name_col) {
         throw std::runtime_error("PostHog: Server did not return table_name column");
     }
 
-    auto schema_array = std::static_pointer_cast<arrow::BinaryArray>(schema_col);
-    auto table_name_array = std::static_pointer_cast<arrow::StringArray>(table_name_col);
-
     // Find the row matching the requested table name
     int64_t row_idx = -1;
     for (int64_t i = 0; i < chunk.data->num_rows(); i++) {
-        if (!table_name_array->IsNull(i) && table_name_array->GetView(i) == table) {
-            row_idx = i;
+        if (!catalog.empty() && catalog_col) {
+            switch (catalog_col->type_id()) {
+            case arrow::Type::STRING: {
+                auto catalog_array = std::static_pointer_cast<arrow::StringArray>(catalog_col);
+                if (catalog_array->IsNull(i) || catalog_array->GetView(i) != catalog) {
+                    continue;
+                }
+                break;
+            }
+            case arrow::Type::LARGE_STRING: {
+                auto catalog_array = std::static_pointer_cast<arrow::LargeStringArray>(catalog_col);
+                if (catalog_array->IsNull(i) || catalog_array->GetView(i) != catalog) {
+                    continue;
+                }
+                break;
+            }
+            default:
+                throw std::runtime_error("PostHog: Unexpected catalog_name column type: " +
+                                         catalog_col->type()->ToString());
+            }
+        }
+
+        switch (table_name_col->type_id()) {
+        case arrow::Type::STRING: {
+            auto table_name_array = std::static_pointer_cast<arrow::StringArray>(table_name_col);
+            if (!table_name_array->IsNull(i) && table_name_array->GetView(i) == table) {
+                row_idx = i;
+            }
+            break;
+        }
+        case arrow::Type::LARGE_STRING: {
+            auto table_name_array = std::static_pointer_cast<arrow::LargeStringArray>(table_name_col);
+            if (!table_name_array->IsNull(i) && table_name_array->GetView(i) == table) {
+                row_idx = i;
+            }
+            break;
+        }
+        default:
+            throw std::runtime_error("PostHog: Unexpected table_name column type: " +
+                                     table_name_col->type()->ToString());
+        }
+
+        if (row_idx >= 0) {
             break;
         }
     }
@@ -395,11 +542,27 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
         throw std::runtime_error("PostHog: Table not found in metadata: " + schema + "." + table);
     }
 
-    if (schema_array->IsNull(row_idx)) {
-        throw std::runtime_error("PostHog: Table schema is null for: " + schema + "." + table);
+    std::string_view schema_bytes;
+    switch (schema_col->type_id()) {
+    case arrow::Type::BINARY: {
+        auto schema_array = std::static_pointer_cast<arrow::BinaryArray>(schema_col);
+        if (schema_array->IsNull(row_idx)) {
+            throw std::runtime_error("PostHog: Table schema is null for: " + schema + "." + table);
+        }
+        schema_bytes = schema_array->GetView(row_idx);
+        break;
     }
-
-    auto schema_bytes = schema_array->GetView(row_idx);
+    case arrow::Type::LARGE_BINARY: {
+        auto schema_array = std::static_pointer_cast<arrow::LargeBinaryArray>(schema_col);
+        if (schema_array->IsNull(row_idx)) {
+            throw std::runtime_error("PostHog: Table schema is null for: " + schema + "." + table);
+        }
+        schema_bytes = schema_array->GetView(row_idx);
+        break;
+    }
+    default:
+        throw std::runtime_error("PostHog: Unexpected table_schema column type: " + schema_col->type()->ToString());
+    }
 
     // Deserialize the Arrow schema from IPC format
     arrow::ipc::DictionaryMemo dict_memo;

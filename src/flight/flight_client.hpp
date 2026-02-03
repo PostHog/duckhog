@@ -84,14 +84,19 @@ public:
     // Metadata Operations
     //===--------------------------------------------------------------------===//
 
-    // List all schemas (catalogs) in the remote database
-    std::vector<std::string> ListSchemas();
+    // Best-effort connectivity check (runs a lightweight Flight SQL RPC).
+    // This is intended for logging/debugging; it does not change client state.
+    arrow::Status Ping();
+
+    // List all schemas in a specific catalog
+    std::vector<std::string> ListSchemas(const std::string &catalog);
 
     // List all tables in a schema
-    std::vector<std::string> ListTables(const std::string &schema);
+    std::vector<std::string> ListTables(const std::string &catalog, const std::string &schema);
 
     // Get the schema of a specific table
-    std::shared_ptr<arrow::Schema> GetTableSchema(const std::string &schema, const std::string &table);
+    std::shared_ptr<arrow::Schema> GetTableSchema(const std::string &catalog, const std::string &schema,
+                                                  const std::string &table);
 
     //===--------------------------------------------------------------------===//
     // Connection Info
