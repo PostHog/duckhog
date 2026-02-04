@@ -13,11 +13,10 @@ GEN=ninja make release
 make test
 
 # Run integration tests (requires Flight SQL server)
-./scripts/flight-server.sh start --background
-export FLIGHT_HOST=127.0.0.1
-export FLIGHT_PORT=8815
+./scripts/test-servers.sh start --background
+eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
-./scripts/flight-server.sh stop
+./scripts/test-servers.sh stop
 ```
 
 ## Running Tests
@@ -43,11 +42,10 @@ Integration tests (`.test_slow` files) require a running Flight SQL server:
 
 ```bash
 # Step 1: Start the Flight SQL server
-./scripts/flight-server.sh start
+./scripts/test-servers.sh start
 
 # Step 2 (in another terminal): Run integration tests
-export FLIGHT_HOST=127.0.0.1
-export FLIGHT_PORT=8815
+eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
 ```
 
@@ -56,30 +54,29 @@ export FLIGHT_PORT=8815
 Control plane tests require both the Flight SQL server and the mock control plane server:
 
 ```bash
-# Step 1: Start both servers
-python test/integration/flight_server.py --port 8815 &
-python test/integration/control_plane_server.py --port 8080 --flight-endpoint grpc://127.0.0.1:8815 &
+# Step 1: Start both servers (Flight SQL + mock control plane)
+./scripts/test-servers.sh start --background --control-plane
 
 # Step 2: Run control plane integration tests
+eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/control_plane.test_slow"
 
 # Clean up
-kill %1 %2
+./scripts/test-servers.sh stop
 ```
 
 **Background mode** (for CI or single terminal):
 
 ```bash
 # Start server in background
-./scripts/flight-server.sh start --background
+./scripts/test-servers.sh start --background
 
 # Run tests
-export FLIGHT_HOST=127.0.0.1
-export FLIGHT_PORT=8815
+eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
 
 # Stop server when done
-./scripts/flight-server.sh stop
+./scripts/test-servers.sh stop
 ```
 
 **Full suite with config file** (optional, mirrors DuckDB test config behavior):

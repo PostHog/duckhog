@@ -31,6 +31,7 @@ set(EXTENSION_SOURCES
     src/storage/posthog_storage.cpp
     src/storage/posthog_transaction_manager.cpp
     src/catalog/posthog_catalog.cpp
+    src/catalog/posthog_stub_catalog.cpp
     src/utils/connection_string.cpp
     # Milestone 3: Arrow Flight SQL client integration
     src/flight/flight_client.cpp

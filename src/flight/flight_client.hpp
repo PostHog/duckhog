@@ -22,6 +22,11 @@
 
 namespace duckdb {
 
+struct PostHogDbSchemaInfo {
+    std::string catalog_name;
+    std::string schema_name;
+};
+
 class PostHogFlightQueryStream {
 public:
     PostHogFlightQueryStream(arrow::flight::sql::FlightSqlClient &client,
@@ -84,14 +89,20 @@ public:
     // Metadata Operations
     //===--------------------------------------------------------------------===//
 
-    // List all schemas (catalogs) in the remote database
-    std::vector<std::string> ListSchemas();
+    // Best-effort connectivity check (runs a lightweight Flight SQL RPC).
+    // This is intended for logging/debugging; it does not change client state.
+    arrow::Status Ping();
+
+    // List all schemas and preserve remote catalog_name (Flight SQL GetDbSchemas response).
+    // If catalog is non-empty, the results are filtered to that catalog.
+    std::vector<PostHogDbSchemaInfo> ListDbSchemas(const std::string &catalog);
 
     // List all tables in a schema
-    std::vector<std::string> ListTables(const std::string &schema);
+    std::vector<std::string> ListTables(const std::string &catalog, const std::string &schema);
 
     // Get the schema of a specific table
-    std::shared_ptr<arrow::Schema> GetTableSchema(const std::string &schema, const std::string &table);
+    std::shared_ptr<arrow::Schema> GetTableSchema(const std::string &catalog, const std::string &schema,
+                                                  const std::string &table);
 
     //===--------------------------------------------------------------------===//
     // Connection Info

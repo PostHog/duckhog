@@ -49,4 +49,5 @@ venv/
 # Test artifacts
 testext
 test/integration/.flight_server.pid
+test/integration/.control_plane.pid
 test/integration/.venv/

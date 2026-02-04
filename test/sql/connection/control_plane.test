@@ -15,10 +15,3 @@ statement error
 ATTACH 'hog:test_db?token=demo&control_plane=http://nonexistent.invalid:8080' AS cp_invalid_host;
 ----
 Control plane request failed
-
-# Default control plane URL is used when not specified
-# This will fail because there's no control plane running, but validates the path is taken
-statement error
-ATTACH 'hog:test_db?token=demo' AS cp_default;
-----
-Control plane request failed

@@ -1,0 +1,72 @@
+# name: test/sql/queries/multi_catalog_schemas.test_slow
+# description: Test multi-catalog auto-discovery when no database is specified
+# group: [queries]
+
+# Tests in this file require a running Flight SQL server
+# Run: ./scripts/test-servers.sh start before executing
+
+require posthog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+# When no catalog is specified in the connection string, the extension
+# auto-discovers all remote catalogs from the Flight server.
+# The test server returns two catalogs: "alt" and "test".
+# All discovered catalogs use the prefix pattern: <alias>_<catalog_name>
+statement ok
+ATTACH 'hog:?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+
+# Verify remote_alt has the 'main' schema
+query I
+SELECT COUNT(*) FROM information_schema.schemata WHERE catalog_name = 'remote_alt' AND schema_name = 'main';
+----
+1
+
+# Verify remote_test has the 'main' schema
+query I
+SELECT COUNT(*) FROM information_schema.schemata WHERE catalog_name = 'remote_test' AND schema_name = 'main';
+----
+1
+
+# Ensure both catalogs have working table access
+query I
+SELECT COUNT(*) FROM remote_alt.main.numbers;
+----
+10
+
+query I
+SELECT COUNT(*) FROM remote_test.main.numbers;
+----
+10
+
+# The primary alias 'remote' is a stub catalog with no tables.
+# Verify it has no schemas in information_schema
+query I
+SELECT COUNT(*) FROM information_schema.schemata WHERE catalog_name = 'remote';
+----
+0
+
+# The stub catalog still appears in duckdb_databases (not hidden)
+# This is a DuckDB limitation - storage extensions can't hide the primary attachment
+query I
+SELECT COUNT(*) FROM duckdb_databases() WHERE database_name = 'remote';
+----
+1
+
+# Attempting to query the stub catalog should fail with a helpful error message
+statement error
+SELECT * FROM remote.main.numbers;
+----
+PostHog: 'remote' is a stub catalog with no tables. Use 'remote_<catalog>' instead
+
+# Cleanup: detach all catalogs
+statement ok
+DETACH remote_alt;
+
+statement ok
+DETACH remote_test;
+
+statement ok
+DETACH remote;

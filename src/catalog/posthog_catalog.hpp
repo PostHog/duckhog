@@ -22,7 +22,9 @@ class PostHogSchemaEntry;
 
 class PostHogCatalog : public Catalog {
 public:
-    PostHogCatalog(AttachedDatabase &db, const string &name, PostHogConnectionConfig config);
+    // Constructor for multi-catalog attach: each PostHogCatalog maps to exactly one remote catalog
+    PostHogCatalog(AttachedDatabase &db, const string &name, PostHogConnectionConfig config,
+                   const string &remote_catalog);
     ~PostHogCatalog() override;
 
 public:
@@ -61,6 +63,11 @@ public:
         return database_name_;
     }
 
+    // Get the remote catalog name this instance maps to
+    const string &GetRemoteCatalog() const {
+        return remote_catalog_;
+    }
+
     // Access to Flight client for query execution
     PostHogFlightClient &GetFlightClient() {
         return *flight_client_;
@@ -88,10 +95,11 @@ private:
 
 private:
     string database_name_;
+    string remote_catalog_;  // The remote catalog this instance maps to
     PostHogConnectionConfig config_;
     unique_ptr<PostHogFlightClient> flight_client_;
 
-    // Schema cache
+    // Schema cache (keyed by schema name only, since this catalog maps to one remote catalog)
     mutable std::mutex schemas_mutex_;
     bool schemas_loaded_ = false;
     std::chrono::steady_clock::time_point schemas_loaded_at_;

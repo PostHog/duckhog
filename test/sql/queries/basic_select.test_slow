@@ -3,7 +3,7 @@
 # group: [queries]
 
 # Tests in this file require a running Flight SQL server
-# Run: ./scripts/flight-server.sh start before executing
+# Run: ./scripts/test-servers.sh start before executing
 
 require posthog
 

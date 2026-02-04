@@ -120,6 +120,22 @@ class FlightSQLServer(flight.FlightServerBase):
         table_name = table_ref.split(".")[-1]
         return self.arrow_tables.get(table_name)
 
+    def _rewrite_query(self, query: str) -> str:
+        """Rewrite query to strip catalog names since DuckDB uses default catalog.
+
+        Converts 3-part qualified names (catalog.schema.table) to 2-part (schema.table).
+        E.g., "test"."main"."numbers" -> "main"."numbers"
+        """
+        # Pattern to match 3-part qualified table references: "catalog"."schema"."table" or catalog.schema.table
+        # This handles both quoted and unquoted identifiers
+        pattern = r'(?:FROM|JOIN)\s+("?\w+"?)\.("?\w+"?)\.("?\w+"?)'
+
+        def replace_match(m):
+            # Keep only schema.table (drop catalog)
+            return f'FROM {m.group(2)}.{m.group(3)}'
+
+        return re.sub(pattern, replace_match, query, flags=re.IGNORECASE)
+
     def _is_flight_sql_command(self, command: bytes) -> bool:
         """Check if the command is a Flight SQL protocol buffer."""
         # Just check if the type URL is present anywhere in the command
@@ -156,23 +172,11 @@ class FlightSQLServer(flight.FlightServerBase):
             shift += 7
         return value, idx
 
-    def _extract_query_from_statement_command(self, command: bytes) -> str:
-        """Extract the SQL query from a CommandStatementQuery protobuf.
-
-        The command is an Any proto with:
-        - Field 1 (type_url): string
-        - Field 2 (value): bytes containing CommandStatementQuery
-
-        CommandStatementQuery has:
-        - Field 1 (query): string
-        """
+    def _extract_inner_value(self, command: bytes) -> bytes:
+        """Extract the inner value (field 2) from an Any protobuf."""
         try:
             idx = 0
-            inner_value = None
-
-            # Parse the Any proto
             while idx < len(command):
-                # Read field tag
                 if idx >= len(command):
                     break
                 tag = command[idx]
@@ -187,45 +191,75 @@ class FlightSQLServer(flight.FlightServerBase):
                     idx += length
 
                     if field_num == 2:  # This is the 'value' field of Any
-                        inner_value = field_value
-                        break
+                        return field_value
                 elif wire_type == 0:  # Varint
                     _, idx = self._read_varint(command, idx)
                 else:
-                    # Skip unknown wire types
                     break
+        except Exception as e:
+            print(f"[FlightSQL] Error extracting inner value: {e}")
+        return b""
 
-            if inner_value is None:
-                return ""
-
-            # Now parse CommandStatementQuery from inner_value
+    def _extract_string_field(self, data: bytes, target_field_num: int) -> str:
+        """Extract a string field from a protobuf message."""
+        try:
             idx = 0
-            while idx < len(inner_value):
-                if idx >= len(inner_value):
+            while idx < len(data):
+                if idx >= len(data):
                     break
-                tag = inner_value[idx]
+                tag = data[idx]
                 idx += 1
 
                 field_num = tag >> 3
                 wire_type = tag & 0x07
 
                 if wire_type == 2:  # Length-delimited
-                    length, idx = self._read_varint(inner_value, idx)
-                    field_value = inner_value[idx:idx+length]
+                    length, idx = self._read_varint(data, idx)
+                    field_value = data[idx:idx+length]
                     idx += length
 
-                    if field_num == 1:  # This is the 'query' field
+                    if field_num == target_field_num:
                         return field_value.decode("utf-8")
                 elif wire_type == 0:  # Varint
-                    _, idx = self._read_varint(inner_value, idx)
+                    _, idx = self._read_varint(data, idx)
                 else:
                     break
-
         except Exception as e:
-            print(f"[FlightSQL] Error extracting query: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"[FlightSQL] Error extracting string field: {e}")
         return ""
+
+    def _extract_query_from_statement_command(self, command: bytes) -> str:
+        """Extract the SQL query from a CommandStatementQuery protobuf.
+
+        The command is an Any proto with:
+        - Field 1 (type_url): string
+        - Field 2 (value): bytes containing CommandStatementQuery
+
+        CommandStatementQuery has:
+        - Field 1 (query): string
+        """
+        inner_value = self._extract_inner_value(command)
+        if not inner_value:
+            return ""
+        return self._extract_string_field(inner_value, 1)  # Field 1 is query
+
+    def _extract_catalog_filter_from_command(self, command: bytes) -> str:
+        """Extract the catalog filter from CommandGetDbSchemas or CommandGetTables.
+
+        CommandGetDbSchemas has:
+        - Field 1 (catalog): optional string
+
+        CommandGetTables has:
+        - Field 1 (catalog): optional string
+        - Field 2 (db_schema_filter_pattern): optional string
+        - Field 3 (table_name_filter_pattern): optional string
+        - Field 4 (table_types): repeated string
+        - Field 5 (include_schema): bool
+        """
+        inner_value = self._extract_inner_value(command)
+        if not inner_value:
+            return ""
+        return self._extract_string_field(inner_value, 1)  # Field 1 is catalog
 
     def get_flight_info(self, context, descriptor):
         """Handle GetFlightInfo requests."""
@@ -236,9 +270,11 @@ class FlightSQLServer(flight.FlightServerBase):
             print(f"[FlightSQL] GetFlightInfo for command type: {cmd_type.split(b'.')[-1].decode()}")
 
             if cmd_type == self.CMD_GET_DB_SCHEMAS:
-                return self._get_db_schemas_info(descriptor)
+                catalog_filter = self._extract_catalog_filter_from_command(command)
+                return self._get_db_schemas_info(descriptor, catalog_filter)
             elif cmd_type == self.CMD_GET_TABLES:
-                return self._get_tables_info(descriptor)
+                catalog_filter = self._extract_catalog_filter_from_command(command)
+                return self._get_tables_info(descriptor, catalog_filter)
             elif cmd_type == self.CMD_GET_CATALOGS:
                 return self._get_catalogs_info(descriptor)
             elif cmd_type == self.CMD_GET_TABLE_TYPES:
@@ -257,6 +293,7 @@ class FlightSQLServer(flight.FlightServerBase):
 
     def _get_query_info(self, query: str, descriptor) -> flight.FlightInfo:
         """Get FlightInfo for a SQL query."""
+        query = self._rewrite_query(query)
         print(f"[FlightSQL] Preparing query: {query}")
 
         try:
@@ -284,14 +321,16 @@ class FlightSQLServer(flight.FlightServerBase):
         except Exception as e:
             raise flight.FlightServerError(f"Failed to prepare query: {e}")
 
-    def _get_db_schemas_info(self, descriptor) -> flight.FlightInfo:
+    def _get_db_schemas_info(self, descriptor, catalog_filter: str = "") -> flight.FlightInfo:
         """Return FlightInfo for GetDbSchemas command."""
         schema = pa.schema([
             ("catalog_name", pa.string()),
             ("db_schema_name", pa.string()),
         ])
 
-        ticket = flight.Ticket(b"CMD:GET_DB_SCHEMAS")
+        # Encode catalog filter in ticket
+        ticket_data = f"CMD:GET_DB_SCHEMAS:{catalog_filter}"
+        ticket = flight.Ticket(ticket_data.encode("utf-8"))
         endpoint = flight.FlightEndpoint(ticket, [self._location_uri])
 
         return flight.FlightInfo(
@@ -302,7 +341,7 @@ class FlightSQLServer(flight.FlightServerBase):
             total_bytes=-1,
         )
 
-    def _get_tables_info(self, descriptor) -> flight.FlightInfo:
+    def _get_tables_info(self, descriptor, catalog_filter: str = "") -> flight.FlightInfo:
         """Return FlightInfo for GetTables command."""
         schema = pa.schema([
             ("catalog_name", pa.string()),
@@ -312,7 +351,9 @@ class FlightSQLServer(flight.FlightServerBase):
             ("table_schema", pa.binary()),  # Serialized Arrow schema
         ])
 
-        ticket = flight.Ticket(b"CMD:GET_TABLES")
+        # Encode catalog filter in ticket
+        ticket_data = f"CMD:GET_TABLES:{catalog_filter}"
+        ticket = flight.Ticket(ticket_data.encode("utf-8"))
         endpoint = flight.FlightEndpoint(ticket, [self._location_uri])
 
         return flight.FlightInfo(
@@ -359,6 +400,7 @@ class FlightSQLServer(flight.FlightServerBase):
 
         if ticket_bytes.startswith(b"QUERY:"):
             query = ticket_bytes[6:].decode("utf-8")
+            query = self._rewrite_query(query)
             print(f"[FlightSQL] Executing query: {query}")
             arrow_table = self._arrow_table_for_query(query)
             if arrow_table is not None:
@@ -366,16 +408,30 @@ class FlightSQLServer(flight.FlightServerBase):
             result = self.conn.execute(query).fetch_arrow_table()
             return flight.RecordBatchStream(result)
 
-        elif ticket_bytes == b"CMD:GET_DB_SCHEMAS":
-            print("[FlightSQL] Returning schemas")
+        elif ticket_bytes.startswith(b"CMD:GET_DB_SCHEMAS:"):
+            catalog_filter = ticket_bytes[len(b"CMD:GET_DB_SCHEMAS:"):].decode("utf-8")
+            print(f"[FlightSQL] Returning schemas (catalog_filter='{catalog_filter}')")
+
+            # All catalogs have a 'main' schema
+            all_catalogs = ["test", "alt"]
+
+            if catalog_filter:
+                # Filter to specific catalog
+                catalogs = [c for c in all_catalogs if c == catalog_filter]
+            else:
+                # Return all catalogs
+                catalogs = all_catalogs
+
             table = pa.table({
-                "catalog_name": [""],
-                "db_schema_name": ["main"],
+                "catalog_name": catalogs,
+                "db_schema_name": ["main"] * len(catalogs),
             })
             return flight.RecordBatchStream(table)
 
-        elif ticket_bytes == b"CMD:GET_TABLES":
-            print("[FlightSQL] Returning tables")
+        elif ticket_bytes.startswith(b"CMD:GET_TABLES:"):
+            catalog_filter = ticket_bytes[len(b"CMD:GET_TABLES:"):].decode("utf-8")
+            print(f"[FlightSQL] Returning tables (catalog_filter='{catalog_filter}')")
+
             # Get all tables from DuckDB
             tables = self.conn.execute(
                 "SELECT table_name FROM information_schema.tables "
@@ -400,13 +456,47 @@ class FlightSQLServer(flight.FlightServerBase):
                 schema_bytes = sink.getvalue().to_pybytes()
                 table_schemas.append(schema_bytes)
 
-            table = pa.table({
-                "catalog_name": [""] * len(table_names),
-                "db_schema_name": ["main"] * len(table_names),
-                "table_name": table_names,
-                "table_type": ["TABLE"] * len(table_names),
-                "table_schema": table_schemas,
-            })
+            # Tables exist in BOTH 'test' and 'alt' catalogs for backward compatibility
+            # This allows queries to either remote.main.table or remote_test.main.table
+            all_catalogs = ["test", "alt"]
+
+            if catalog_filter:
+                if catalog_filter in all_catalogs:
+                    catalogs_for_tables = [catalog_filter] * len(table_names)
+                else:
+                    # No tables in this catalog
+                    table_names = []
+                    table_schemas = []
+                    catalogs_for_tables = []
+            else:
+                # Return tables for all catalogs - duplicate tables for each catalog
+                original_table_names = table_names[:]
+                original_table_schemas = table_schemas[:]
+                table_names = []
+                table_schemas = []
+                catalogs_for_tables = []
+                for cat in all_catalogs:
+                    table_names.extend(original_table_names)
+                    table_schemas.extend(original_table_schemas)
+                    catalogs_for_tables.extend([cat] * len(original_table_names))
+
+            if table_names:
+                table = pa.table({
+                    "catalog_name": catalogs_for_tables,
+                    "db_schema_name": ["main"] * len(table_names),
+                    "table_name": table_names,
+                    "table_type": ["TABLE"] * len(table_names),
+                    "table_schema": table_schemas,
+                })
+            else:
+                # Return empty table with correct schema
+                table = pa.table({
+                    "catalog_name": pa.array([], type=pa.string()),
+                    "db_schema_name": pa.array([], type=pa.string()),
+                    "table_name": pa.array([], type=pa.string()),
+                    "table_type": pa.array([], type=pa.string()),
+                    "table_schema": pa.array([], type=pa.binary()),
+                })
             return flight.RecordBatchStream(table)
 
         elif ticket_bytes == b"CMD:GET_CATALOGS":
