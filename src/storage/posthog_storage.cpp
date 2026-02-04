@@ -128,7 +128,7 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
         // Create AttachOptions
         unordered_map<string, Value> opts;
         opts["type"] = Value("hog");
-        AttachOptions additional_options(opts, AccessMode::READ_ONLY);
+        AttachOptions additional_options(opts, attach_options.access_mode);
 
         try {
             db_manager.AttachDatabase(context, additional_info, additional_options);
