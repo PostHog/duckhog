@@ -10,6 +10,7 @@
 #include "storage/posthog_storage.hpp"
 #include "storage/posthog_transaction_manager.hpp"
 #include "catalog/posthog_catalog.hpp"
+#include "catalog/posthog_stub_catalog.hpp"
 #include "utils/connection_string.hpp"
 #include "http/control_plane_client.hpp"
 #include "flight/flight_client.hpp"
@@ -136,17 +137,15 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
         }
     }
 
-    // Return the first catalog for the primary attachment (required by DuckDB)
-    // This makes the user-specified name (e.g., 'remote') also work, pointing to the first catalog
-    const string &first_catalog = remote_catalogs[0];
-    POSTHOG_LOG_INFO("Attaching primary remote catalog '%s' as '%s'", first_catalog.c_str(), name.c_str());
-    return make_uniq<PostHogCatalog>(db, name, std::move(config), first_catalog);
+    // Return a stub catalog for the primary attachment (required by DuckDB)
+    // The stub catalog has no tables - users should use the prefixed catalogs instead
+    POSTHOG_LOG_INFO("Attaching stub catalog as '%s' (use '%s_<catalog>' for queries)", name.c_str(), name.c_str());
+    return make_uniq<PostHogStubCatalog>(db, name);
 }
 
 static unique_ptr<TransactionManager> PostHogCreateTransactionManager(
     optional_ptr<StorageExtensionInfo> storage_info, AttachedDatabase &db, Catalog &catalog) {
-    auto &posthog_catalog = catalog.Cast<PostHogCatalog>();
-    return make_uniq<PostHogTransactionManager>(db, posthog_catalog);
+    return make_uniq<PostHogTransactionManager>(db);
 }
 
 PostHogStorageExtension::PostHogStorageExtension() {

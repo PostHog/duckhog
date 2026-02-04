@@ -40,3 +40,33 @@ query I
 SELECT COUNT(*) FROM remote_test.main.numbers;
 ----
 10
+
+# The primary alias 'remote' is a stub catalog with no tables.
+# Verify it has no schemas in information_schema
+query I
+SELECT COUNT(*) FROM information_schema.schemata WHERE catalog_name = 'remote';
+----
+0
+
+# The stub catalog still appears in duckdb_databases (not hidden)
+# This is a DuckDB limitation - storage extensions can't hide the primary attachment
+query I
+SELECT COUNT(*) FROM duckdb_databases() WHERE database_name = 'remote';
+----
+1
+
+# Attempting to query the stub catalog should fail with a helpful error message
+statement error
+SELECT * FROM remote.main.numbers;
+----
+PostHog: 'remote' is a stub catalog with no tables. Use 'remote_<catalog>' instead
+
+# Cleanup: detach all catalogs
+statement ok
+DETACH remote_alt;
+
+statement ok
+DETACH remote_test;
+
+statement ok
+DETACH remote;

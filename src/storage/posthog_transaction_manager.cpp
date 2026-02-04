@@ -6,12 +6,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "storage/posthog_transaction_manager.hpp"
-#include "catalog/posthog_catalog.hpp"
 
 namespace duckdb {
 
-PostHogTransactionManager::PostHogTransactionManager(AttachedDatabase &db_p, PostHogCatalog &catalog)
-    : TransactionManager(db_p), catalog_(catalog) {
+PostHogTransactionManager::PostHogTransactionManager(AttachedDatabase &db_p)
+    : TransactionManager(db_p) {
 }
 
 Transaction &PostHogTransactionManager::StartTransaction(ClientContext &context) {

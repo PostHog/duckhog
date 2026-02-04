@@ -129,8 +129,11 @@ void PostHogCatalog::CreateSchemaEntry(const string &schema_name) {
     schema_info->schema = schema_name;
     schema_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 
-    // Mark metadata catalog schemas as internal for UI cleanliness
-    if (remote_catalog_.find("__ducklake_metadata_") != string::npos) {
+    // Mark internal/metadata catalogs as internal for UI cleanliness
+    // - DuckLake metadata catalogs: "__ducklake_metadata_*"
+    // - DuckDB internal catalogs: "system", "temp"
+    if (remote_catalog_ == "system" || remote_catalog_ == "temp" ||
+        remote_catalog_.find("__ducklake_metadata_") != string::npos) {
         schema_info->internal = true;
     }
 
