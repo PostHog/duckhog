@@ -16,7 +16,7 @@
 - Unit tests only: `./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"`
 - Integration tests:
   - `./scripts/test-servers.sh start --background`
-  - `export FLIGHT_HOST=127.0.0.1 FLIGHT_PORT=8815`
+  - `eval "$(./scripts/test-servers.sh env)"`
   - `./build/release/test/unittest "test/sql/queries/*"`
   - `./scripts/test-servers.sh stop`
 

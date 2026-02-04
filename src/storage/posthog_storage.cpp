@@ -12,8 +12,25 @@
 #include "catalog/posthog_catalog.hpp"
 #include "utils/connection_string.hpp"
 #include "http/control_plane_client.hpp"
+#include "flight/flight_client.hpp"
+#include "duckdb/main/database_manager.hpp"
+#include "utils/posthog_logger.hpp"
+
+#include <set>
 
 namespace duckdb {
+
+// Helper to enumerate all distinct catalog names from the remote Flight server
+static std::vector<string> EnumerateRemoteCatalogs(PostHogFlightClient &client) {
+    std::set<string> catalog_set;
+    auto schema_infos = client.ListDbSchemas("");
+    for (const auto &info : schema_infos) {
+        if (!info.catalog_name.empty()) {
+            catalog_set.insert(info.catalog_name);
+        }
+    }
+    return std::vector<string>(catalog_set.begin(), catalog_set.end());
+}
 
 static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
                                          AttachedDatabase &db, const string &name, AttachInfo &info,
@@ -48,8 +65,82 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
         }
     }
 
-    // Dev mode: direct flight server connection
-    return make_uniq<PostHogCatalog>(db, name, std::move(config));
+    // Check if this is a secondary catalog attachment (has __remote_catalog parameter)
+    // If so, skip enumeration and just attach this specific catalog
+    auto remote_catalog_it = config.options.find("__remote_catalog");
+    if (remote_catalog_it != config.options.end()) {
+        POSTHOG_LOG_INFO("Attaching secondary remote catalog '%s' as '%s'",
+                         remote_catalog_it->second.c_str(), name.c_str());
+        return make_uniq<PostHogCatalog>(db, name, std::move(config), remote_catalog_it->second);
+    }
+
+    // If user specified a database/catalog in the connection string, use only that catalog
+    if (!config.database.empty()) {
+        string remote_catalog = config.database;
+        POSTHOG_LOG_INFO("Attaching remote catalog '%s' as '%s'", remote_catalog.c_str(), name.c_str());
+        return make_uniq<PostHogCatalog>(db, name, std::move(config), remote_catalog);
+    }
+
+    // No specific catalog requested: enumerate all remote catalogs and attach them
+    std::vector<string> remote_catalogs;
+    try {
+        PostHogFlightClient temp_client(config.flight_server, config.token);
+        temp_client.Authenticate();
+        remote_catalogs = EnumerateRemoteCatalogs(temp_client);
+    } catch (const std::exception &e) {
+        // If we can't connect, fall back to single catalog mode with empty remote_catalog
+        POSTHOG_LOG_WARN("Failed to enumerate remote catalogs: %s. Using single catalog mode.", e.what());
+        return make_uniq<PostHogCatalog>(db, name, std::move(config), "");
+    }
+
+    if (remote_catalogs.empty()) {
+        // No catalogs found, use empty remote_catalog
+        POSTHOG_LOG_WARN("No remote catalogs found. Using single catalog mode.");
+        return make_uniq<PostHogCatalog>(db, name, std::move(config), "");
+    }
+
+    // Attach ALL remote catalogs with <name>_<catalog> naming convention
+    auto &db_manager = DatabaseManager::Get(context);
+    for (const string &remote_catalog : remote_catalogs) {
+        string local_db_name = name + "_" + remote_catalog;
+
+        // Check if this database is already attached
+        if (db_manager.GetDatabase(context, local_db_name)) {
+            POSTHOG_LOG_DEBUG("Database '%s' already attached, skipping.", local_db_name.c_str());
+            continue;
+        }
+
+        POSTHOG_LOG_INFO("Attaching remote catalog '%s' as '%s'", remote_catalog.c_str(), local_db_name.c_str());
+
+        // Create AttachInfo for the catalog
+        AttachInfo additional_info;
+        additional_info.path = info.path;
+        // Add the remote_catalog as a query parameter
+        if (additional_info.path.find('?') == string::npos) {
+            additional_info.path += "?";
+        } else {
+            additional_info.path += "&";
+        }
+        additional_info.path += "__remote_catalog=" + remote_catalog;
+        additional_info.name = local_db_name;
+
+        // Create AttachOptions
+        unordered_map<string, Value> opts;
+        opts["type"] = Value("hog");
+        AttachOptions additional_options(opts, AccessMode::READ_ONLY);
+
+        try {
+            db_manager.AttachDatabase(context, additional_info, additional_options);
+        } catch (const std::exception &e) {
+            POSTHOG_LOG_ERROR("Failed to attach catalog '%s': %s", remote_catalog.c_str(), e.what());
+        }
+    }
+
+    // Return the first catalog for the primary attachment (required by DuckDB)
+    // This makes the user-specified name (e.g., 'remote') also work, pointing to the first catalog
+    const string &first_catalog = remote_catalogs[0];
+    POSTHOG_LOG_INFO("Attaching primary remote catalog '%s' as '%s'", first_catalog.c_str(), name.c_str());
+    return make_uniq<PostHogCatalog>(db, name, std::move(config), first_catalog);
 }
 
 static unique_ptr<TransactionManager> PostHogCreateTransactionManager(

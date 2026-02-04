@@ -148,9 +148,10 @@ void PostHogSchemaEntry::LoadTablesIfNeeded() {
     }
 
     try {
-        std::cerr << "[PostHog] Loading tables for schema: " << name << std::endl;
+        const auto &remote_catalog = posthog_catalog_.GetRemoteCatalog();
+        std::cerr << "[PostHog] Loading tables for catalog." << remote_catalog << ".schema." << name << std::endl;
         auto &client = posthog_catalog_.GetFlightClient();
-        auto table_names = client.ListTables("", name);
+        auto table_names = client.ListTables(remote_catalog, name);
 
         // Create entries for tables not already in cache
         for (const auto &table_name : table_names) {
@@ -185,7 +186,8 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
 
     try {
         auto &client = posthog_catalog_.GetFlightClient();
-        auto arrow_schema = client.GetTableSchema("", name, table_name);
+        const auto &remote_catalog = posthog_catalog_.GetRemoteCatalog();
+        auto arrow_schema = client.GetTableSchema(remote_catalog, name, table_name);
 
         vector<string> column_names;
         vector<LogicalType> column_types;

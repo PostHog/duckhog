@@ -54,7 +54,15 @@ unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream
             columns_str += "\"" + columns[i] + "\"";
         }
     }
-    string query = "SELECT " + columns_str + " FROM \"" + bind_data->schema_name + "\".\"" + bind_data->table_name + "\"";
+    // Build 3-part qualified query: "catalog"."schema"."table"
+    // If remote_catalog is empty (backward compatibility), fall back to 2-part qualification
+    const auto &remote_catalog = bind_data->catalog.GetRemoteCatalog();
+    string query;
+    if (remote_catalog.empty()) {
+        query = "SELECT " + columns_str + " FROM \"" + bind_data->schema_name + "\".\"" + bind_data->table_name + "\"";
+    } else {
+        query = "SELECT " + columns_str + " FROM \"" + remote_catalog + "\".\"" + bind_data->schema_name + "\".\"" + bind_data->table_name + "\"";
+    }
 
     // Execute the projected query via Flight SQL.
     auto stream_state = std::make_shared<PostHogArrowStreamState>(bind_data->catalog, query);

@@ -36,15 +36,16 @@ bool IsConnectionFailureMessage(const std::string &message) {
 
 } // namespace
 
-PostHogCatalog::PostHogCatalog(AttachedDatabase &db, const string &name, PostHogConnectionConfig config)
-    : Catalog(db), database_name_(name), config_(std::move(config)) {
+PostHogCatalog::PostHogCatalog(AttachedDatabase &db, const string &name, PostHogConnectionConfig config,
+                               const string &remote_catalog)
+    : Catalog(db), database_name_(name), remote_catalog_(remote_catalog), config_(std::move(config)) {
 }
 
 PostHogCatalog::~PostHogCatalog() = default;
 
 void PostHogCatalog::Initialize(bool load_builtin) {
     // Log attachment attempt
-    POSTHOG_LOG_INFO("Connecting to remote database: %s", config_.database.c_str());
+    POSTHOG_LOG_INFO("Attaching catalog '%s' -> remote catalog '%s'", database_name_.c_str(), remote_catalog_.c_str());
     POSTHOG_LOG_INFO("Flight server: %s", config_.flight_server.c_str());
     POSTHOG_LOG_DEBUG("Token: %s", config_.token.empty() ? "(none)" : "(provided)");
 
@@ -96,21 +97,24 @@ void PostHogCatalog::LoadSchemasIfNeeded() {
     }
 
     try {
-        POSTHOG_LOG_DEBUG("Loading schemas from remote server...");
-        // Query all remote catalogs by default. The local attached database name (e.g. "remote")
-        // is a DuckDB concept and does not necessarily match the remote Flight SQL catalog_name.
-        auto schema_names = flight_client_->ListSchemas("");
+        POSTHOG_LOG_DEBUG("Loading schemas for remote catalog '%s'...", remote_catalog_.c_str());
+        // Query schemas only for this catalog's remote_catalog_
+        auto schema_infos = flight_client_->ListDbSchemas(remote_catalog_);
 
         // Create schema entries (don't clear existing ones to preserve loaded tables)
-        for (const auto &schema_name : schema_names) {
+        size_t loaded_count = 0;
+        for (const auto &schema_info : schema_infos) {
+            const auto &schema_name = schema_info.schema_name;
+
             if (schema_cache_.find(schema_name) == schema_cache_.end()) {
                 CreateSchemaEntry(schema_name);
+                loaded_count++;
             }
         }
 
         schemas_loaded_ = true;
         schemas_loaded_at_ = std::chrono::steady_clock::now();
-        POSTHOG_LOG_INFO("Loaded %zu schemas", schema_names.size());
+        POSTHOG_LOG_INFO("Loaded %zu schemas for remote catalog '%s'", loaded_count, remote_catalog_.c_str());
 
     } catch (const std::exception &e) {
         POSTHOG_LOG_ERROR("Failed to load schemas: %s", e.what());
@@ -125,6 +129,11 @@ void PostHogCatalog::CreateSchemaEntry(const string &schema_name) {
     schema_info->schema = schema_name;
     schema_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 
+    // Mark metadata catalog schemas as internal for UI cleanliness
+    if (remote_catalog_.find("__ducklake_metadata_") != string::npos) {
+        schema_info->internal = true;
+    }
+
     auto schema_entry = make_uniq<PostHogSchemaEntry>(*this, *schema_info, *this);
     schema_cache_[schema_name] = std::move(schema_entry);
 }
@@ -132,6 +141,7 @@ void PostHogCatalog::CreateSchemaEntry(const string &schema_name) {
 optional_ptr<PostHogSchemaEntry> PostHogCatalog::GetOrCreateSchema(const string &schema_name) {
     std::lock_guard<std::mutex> lock(schemas_mutex_);
 
+    // Look up in the schema cache for this catalog
     auto it = schema_cache_.find(schema_name);
     if (it != schema_cache_.end()) {
         return it->second.get();
@@ -155,8 +165,8 @@ void PostHogCatalog::RefreshSchemas() {
     std::lock_guard<std::mutex> lock(schemas_mutex_);
     schemas_loaded_ = false;
     // Also refresh tables in each schema
-    for (auto &entry : schema_cache_) {
-        entry.second->RefreshTables();
+    for (auto &schema_entry : schema_cache_) {
+        schema_entry.second->RefreshTables();
     }
 }
 

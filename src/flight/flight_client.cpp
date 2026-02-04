@@ -230,7 +230,7 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::st
     return prepared_statement->dataset_schema();
 }
 
-std::vector<std::string> PostHogFlightClient::ListSchemas(const std::string &catalog) {
+std::vector<PostHogDbSchemaInfo> PostHogFlightClient::ListDbSchemas(const std::string &catalog) {
     std::lock_guard<std::mutex> lock(client_mutex_);
 
     if (!authenticated_) {
@@ -243,10 +243,10 @@ std::vector<std::string> PostHogFlightClient::ListSchemas(const std::string &cat
     // Parameters: options, catalog (nullptr = all), db_schema_filter_pattern (nullptr = all)
     auto info_result = sql_client_->GetDbSchemas(call_options, catalog.empty() ? nullptr : &catalog, nullptr);
     if (!info_result.ok()) {
-        throw std::runtime_error("PostHog: Failed to list schemas: " + info_result.status().ToString());
+        throw std::runtime_error("PostHog: Failed to list db schemas: " + info_result.status().ToString());
     }
 
-    std::vector<std::string> schemas;
+    std::vector<PostHogDbSchemaInfo> schemas;
     auto flight_info = std::move(*info_result);
 
     if (flight_info->endpoints().empty()) {
@@ -284,48 +284,36 @@ std::vector<std::string> PostHogFlightClient::ListSchemas(const std::string &cat
             continue;
         }
 
-        auto row_matches_catalog = [&](int64_t row) -> bool {
-            if (catalog.empty() || !catalog_col) {
-                return true;
+        auto read_string = [&](const std::shared_ptr<arrow::Array> &array, int64_t row) -> std::string {
+            if (!array) {
+                return "";
             }
-            switch (catalog_col->type_id()) {
+            switch (array->type_id()) {
             case arrow::Type::STRING: {
-                auto catalog_array = std::static_pointer_cast<arrow::StringArray>(catalog_col);
-                return !catalog_array->IsNull(row) && catalog_array->GetView(row) == catalog;
+                auto str_array = std::static_pointer_cast<arrow::StringArray>(array);
+                return str_array->IsNull(row) ? "" : std::string(str_array->GetView(row));
             }
             case arrow::Type::LARGE_STRING: {
-                auto catalog_array = std::static_pointer_cast<arrow::LargeStringArray>(catalog_col);
-                return !catalog_array->IsNull(row) && catalog_array->GetView(row) == catalog;
+                auto str_array = std::static_pointer_cast<arrow::LargeStringArray>(array);
+                return str_array->IsNull(row) ? "" : std::string(str_array->GetView(row));
             }
             default:
-                throw std::runtime_error("PostHog: Unexpected catalog_name column type: " +
-                                         catalog_col->type()->ToString());
+                throw std::runtime_error("PostHog: Unexpected string column type: " + array->type()->ToString());
             }
         };
 
-        switch (schema_col->type_id()) {
-        case arrow::Type::STRING: {
-            auto schema_array = std::static_pointer_cast<arrow::StringArray>(schema_col);
-            for (int64_t i = 0; i < schema_array->length(); i++) {
-                if (!row_matches_catalog(i) || schema_array->IsNull(i)) {
-                    continue;
-                }
-                schemas.push_back(std::string(schema_array->GetView(i)));
+        for (int64_t i = 0; i < chunk.data->num_rows(); i++) {
+            if (schema_col->IsNull(i)) {
+                continue;
             }
-            break;
-        }
-        case arrow::Type::LARGE_STRING: {
-            auto schema_array = std::static_pointer_cast<arrow::LargeStringArray>(schema_col);
-            for (int64_t i = 0; i < schema_array->length(); i++) {
-                if (!row_matches_catalog(i) || schema_array->IsNull(i)) {
-                    continue;
-                }
-                schemas.push_back(std::string(schema_array->GetView(i)));
+            PostHogDbSchemaInfo entry;
+            entry.catalog_name = read_string(catalog_col, i);
+            entry.schema_name = read_string(schema_col, i);
+
+            if (!catalog.empty() && catalog_col && entry.catalog_name != catalog) {
+                continue;
             }
-            break;
-        }
-        default:
-            throw std::runtime_error("PostHog: Unexpected schema name column type: " + schema_col->type()->ToString());
+            schemas.push_back(std::move(entry));
         }
     }
 
