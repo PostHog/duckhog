@@ -145,7 +145,8 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
 
 static unique_ptr<TransactionManager> PostHogCreateTransactionManager(
     optional_ptr<StorageExtensionInfo> storage_info, AttachedDatabase &db, Catalog &catalog) {
-    return make_uniq<PostHogTransactionManager>(db);
+    auto *posthog_catalog = dynamic_cast<PostHogCatalog *>(&catalog);
+    return make_uniq<PostHogTransactionManager>(db, posthog_catalog);
 }
 
 PostHogStorageExtension::PostHogStorageExtension() {

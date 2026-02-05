@@ -6,11 +6,11 @@ require posthog
 
 # Missing or empty token should fail
 statement error
-ATTACH 'hog:test?token=' AS remote;
+ATTACH 'hog:memory?token=' AS remote;
 ----
 Missing authentication token
 
 statement error
-ATTACH 'hog:test?flight_server=grpc://127.0.0.1:8815' AS remote;
+ATTACH 'hog:memory?flight_server=grpc://127.0.0.1:8815' AS remote;
 ----
 Missing authentication token

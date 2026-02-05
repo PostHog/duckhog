@@ -13,9 +13,11 @@
 
 namespace duckdb {
 
+class PostHogCatalog;
+
 class PostHogTransactionManager : public TransactionManager {
 public:
-    explicit PostHogTransactionManager(AttachedDatabase &db_p);
+    explicit PostHogTransactionManager(AttachedDatabase &db_p, PostHogCatalog *catalog);
 
     Transaction &StartTransaction(ClientContext &context) override;
     ErrorData CommitTransaction(ClientContext &context, Transaction &transaction) override;
@@ -25,6 +27,7 @@ public:
 private:
     mutex transaction_lock_;
     reference_map_t<Transaction, unique_ptr<PostHogTransaction>> transactions_;
+    PostHogCatalog *catalog_;
 };
 
 } // namespace duckdb

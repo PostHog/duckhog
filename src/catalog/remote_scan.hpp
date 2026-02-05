@@ -13,6 +13,7 @@
 #include "flight/arrow_stream.hpp"
 
 #include <memory>
+#include <optional>
 
 namespace arrow {
 class Schema;
@@ -48,6 +49,13 @@ struct PostHogRemoteScanBindData : public ArrowScanFunctionData {
         char *patched;
     };
     vector<PatchedName> patched_schema_names;
+};
+
+// Per-execution stream factory passed to PostHogArrowStream::Produce.
+// Owns the transaction id captured during InitGlobal.
+struct PostHogRemoteScanStreamFactory {
+    const PostHogRemoteScanBindData *bind_data;
+    std::optional<TransactionId> txn_id;
 };
 
 //===----------------------------------------------------------------------===//

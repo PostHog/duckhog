@@ -1,0 +1,123 @@
+# name: test/sql/queries/ddl_tables_schemas.test_slow
+# description: Remote DDL (schemas + tables) with transactional semantics via Flight SQL
+# group: [queries]
+#
+# Requires the Go duckling Flight SQL server (posthog-duckdb-server) because DDL uses StatementUpdate and Flight SQL transactions.
+# Run: ./scripts/test-servers.sh start --background --seed
+
+require posthog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+statement ok
+ATTACH 'hog:memory?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+
+# Cleanup from older versions of this test that created objects in `main`.
+statement ok
+DROP TABLE IF EXISTS remote.main.ddl_t;
+
+# CREATE/DROP SCHEMA
+statement ok
+DROP SCHEMA IF EXISTS remote.ddl_test CASCADE;
+
+statement ok
+CREATE SCHEMA remote.ddl_test;
+
+query I
+SELECT COUNT(*) FROM information_schema.schemata
+WHERE catalog_name = 'remote' AND schema_name = 'ddl_test';
+----
+1
+
+statement ok
+DROP SCHEMA remote.ddl_test;
+
+query I
+SELECT COUNT(*) FROM information_schema.schemata
+WHERE catalog_name = 'remote' AND schema_name = 'ddl_test';
+----
+0
+
+# Ensure schema exists for the rest of the test (avoid polluting `main`).
+statement ok
+CREATE SCHEMA remote.ddl_test;
+
+# Transactional CREATE TABLE rollback
+statement ok
+BEGIN;
+
+statement ok
+CREATE TABLE remote.ddl_test.ddl_t(id INT);
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT COUNT(*) FROM information_schema.tables
+WHERE table_catalog = 'remote' AND table_schema = 'ddl_test' AND table_name = 'ddl_t';
+----
+0
+
+# Transactional CREATE TABLE commit
+statement ok
+BEGIN;
+
+statement ok
+CREATE TABLE remote.ddl_test.ddl_t(id INT);
+
+statement ok
+COMMIT;
+
+query I
+SELECT COUNT(*) FROM information_schema.tables
+WHERE table_catalog = 'remote' AND table_schema = 'ddl_test' AND table_name = 'ddl_t';
+----
+1
+
+query I
+SELECT COUNT(*) FROM remote.ddl_test.ddl_t;
+----
+0
+
+# ALTER TABLE
+#
+# NOTE: DuckDB's internal `AlterTableInfo::ToString()` for ADD COLUMN is currently unimplemented
+# in the pinned DuckDB submodule (it throws: "FIXME: column definition to string").
+# Our remote DDL path currently relies on `ToString()` to generate SQL for Flight SQL updates,
+# so this test is skipped until we special-case SQL generation for ADD COLUMN.
+mode skip
+
+statement ok
+ALTER TABLE remote.ddl_test.ddl_t ADD COLUMN extra INT;
+
+query I rowsort
+SELECT column_name
+FROM information_schema.columns
+WHERE table_catalog = 'remote' AND table_schema = 'ddl_test' AND table_name = 'ddl_t';
+----
+extra
+id
+
+mode unskip
+
+# DROP TABLE
+statement ok
+DROP TABLE remote.ddl_test.ddl_t;
+
+query I
+SELECT COUNT(*) FROM information_schema.tables
+WHERE table_catalog = 'remote' AND table_schema = 'ddl_test' AND table_name = 'ddl_t';
+----
+0
+
+# Final cleanup
+statement ok
+DROP SCHEMA remote.ddl_test;
+
+query I
+SELECT COUNT(*) FROM information_schema.schemata
+WHERE catalog_name = 'remote' AND schema_name = 'ddl_test';
+----
+0

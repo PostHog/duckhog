@@ -7,6 +7,7 @@
 
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_schema_entry.hpp"
+#include "storage/posthog_transaction.hpp"
 #include "utils/posthog_logger.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
@@ -15,6 +16,7 @@
 #include "duckdb/planner/operator/logical_delete.hpp"
 #include "duckdb/planner/operator/logical_update.hpp"
 #include "duckdb/storage/database_size.hpp"
+#include "duckdb/common/unordered_set.hpp"
 
 #include <cctype>
 
@@ -70,7 +72,32 @@ void PostHogCatalog::Initialize(bool load_builtin) {
 }
 
 optional_ptr<CatalogEntry> PostHogCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
-    throw NotImplementedException("PostHog: CreateSchema not supported on remote database");
+    if (!IsConnected()) {
+        throw CatalogException("PostHog: Not connected to remote server. CREATE SCHEMA failed for '%s'.",
+                               info.schema.c_str());
+    }
+
+    std::optional<TransactionId> remote_txn_id;
+    if (transaction.HasContext()) {
+        remote_txn_id = PostHogTransaction::Get(transaction.GetContext(), *this).remote_txn_id;
+    }
+
+    auto copied = info.Copy();
+    auto &remote_info = copied->Cast<CreateSchemaInfo>();
+    remote_info.catalog = remote_catalog_;
+    auto sql = remote_info.ToString();
+
+    flight_client_->ExecuteUpdate(sql, remote_txn_id);
+
+    std::lock_guard<std::mutex> lock(schemas_mutex_);
+    auto it = schema_cache_.find(info.schema);
+    if (it == schema_cache_.end()) {
+        CreateSchemaEntry(info.schema);
+        it = schema_cache_.find(info.schema);
+    }
+    schemas_loaded_ = true;
+    schemas_loaded_at_ = std::chrono::steady_clock::now();
+    return it != schema_cache_.end() ? it->second.get() : nullptr;
 }
 
 //===----------------------------------------------------------------------===//
@@ -78,50 +105,78 @@ optional_ptr<CatalogEntry> PostHogCatalog::CreateSchema(CatalogTransaction trans
 //===----------------------------------------------------------------------===//
 
 void PostHogCatalog::LoadSchemasIfNeeded() {
-    std::lock_guard<std::mutex> lock(schemas_mutex_);
+    bool should_load = false;
+    {
+        std::lock_guard<std::mutex> lock(schemas_mutex_);
 
-    // Check if cache is still valid
-    if (schemas_loaded_) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - schemas_loaded_at_).count();
-        if (elapsed < CACHE_TTL_SECONDS) {
-            return; // Cache is still valid
+        // Check if cache is still valid
+        if (schemas_loaded_) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - schemas_loaded_at_).count();
+            if (elapsed < CACHE_TTL_SECONDS) {
+                return; // Cache is still valid
+            }
+            // Cache expired, need to refresh
+            POSTHOG_LOG_DEBUG("Schema cache expired, refreshing...");
         }
-        // Cache expired, need to refresh
-        POSTHOG_LOG_DEBUG("Schema cache expired, refreshing...");
+
+        if (!IsConnected()) {
+            POSTHOG_LOG_DEBUG("Cannot load schemas: not connected");
+            return;
+        }
+        should_load = true;
     }
 
-    if (!IsConnected()) {
-        POSTHOG_LOG_DEBUG("Cannot load schemas: not connected");
+    if (!should_load) {
         return;
     }
 
+    std::vector<PostHogDbSchemaInfo> schema_infos;
     try {
         POSTHOG_LOG_DEBUG("Loading schemas for remote catalog '%s'...", remote_catalog_.c_str());
         // Query schemas only for this catalog's remote_catalog_
-        auto schema_infos = flight_client_->ListDbSchemas(remote_catalog_);
-
-        // Create schema entries (don't clear existing ones to preserve loaded tables)
-        size_t loaded_count = 0;
-        for (const auto &schema_info : schema_infos) {
-            const auto &schema_name = schema_info.schema_name;
-
-            if (schema_cache_.find(schema_name) == schema_cache_.end()) {
-                CreateSchemaEntry(schema_name);
-                loaded_count++;
-            }
-        }
-
-        schemas_loaded_ = true;
-        schemas_loaded_at_ = std::chrono::steady_clock::now();
-        POSTHOG_LOG_INFO("Loaded %zu schemas for remote catalog '%s'", loaded_count, remote_catalog_.c_str());
+        schema_infos = flight_client_->ListDbSchemas(remote_catalog_);
 
     } catch (const std::exception &e) {
         POSTHOG_LOG_ERROR("Failed to load schemas: %s", e.what());
         if (IsConnectionFailureMessage(e.what())) {
             throw CatalogException("PostHog: Not connected to remote server.");
         }
+        return;
     }
+
+    unordered_set<string> remote_schemas;
+    remote_schemas.reserve(schema_infos.size());
+    for (const auto &schema_info : schema_infos) {
+        remote_schemas.insert(schema_info.schema_name);
+    }
+
+    std::lock_guard<std::mutex> lock(schemas_mutex_);
+
+    // Prune schemas that no longer exist remotely.
+    size_t pruned_count = 0;
+    for (auto it = schema_cache_.begin(); it != schema_cache_.end();) {
+        if (remote_schemas.find(it->first) == remote_schemas.end()) {
+            it = schema_cache_.erase(it);
+            pruned_count++;
+            continue;
+        }
+        ++it;
+    }
+
+    // Create schema entries for newly discovered schemas.
+    size_t loaded_count = 0;
+    for (const auto &schema_name : remote_schemas) {
+        if (schema_cache_.find(schema_name) == schema_cache_.end()) {
+            CreateSchemaEntry(schema_name);
+            loaded_count++;
+        }
+    }
+
+    schemas_loaded_ = true;
+    schemas_loaded_at_ = std::chrono::steady_clock::now();
+    POSTHOG_LOG_INFO("Loaded %zu schemas (pruned %zu) for remote catalog '%s'", loaded_count, pruned_count,
+                     remote_catalog_.c_str());
 }
 
 void PostHogCatalog::CreateSchemaEntry(const string &schema_name) {
@@ -263,7 +318,23 @@ string PostHogCatalog::GetDBPath() {
 }
 
 void PostHogCatalog::DropSchema(ClientContext &context, DropInfo &info) {
-    throw NotImplementedException("PostHog: DROP SCHEMA not yet implemented");
+    if (!IsConnected()) {
+        throw CatalogException("PostHog: Not connected to remote server. DROP SCHEMA failed for '%s'.",
+                               info.name.c_str());
+    }
+
+    auto remote_txn_id = PostHogTransaction::Get(context, *this).remote_txn_id;
+
+    auto copied = info.Copy();
+    copied->catalog = remote_catalog_;
+    auto sql = copied->ToString();
+
+    flight_client_->ExecuteUpdate(sql, remote_txn_id);
+
+    std::lock_guard<std::mutex> lock(schemas_mutex_);
+    schema_cache_.erase(info.name);
+    schemas_loaded_ = true;
+    schemas_loaded_at_ = std::chrono::steady_clock::now();
 }
 
 } // namespace duckdb

@@ -1,7 +1,7 @@
 # name: test/sql/queries/control_plane.test_slow
 # description: Integration tests for control plane session creation
 # group: [queries]
-# Requires both control_plane_server.py and flight_server.py running
+# Requires both control_plane_server.py and Duckling (Go) running
 
 require posthog
 
@@ -14,7 +14,7 @@ require-env CONTROL_PLANE_PORT
 # Connect via control plane (default path)
 # Control plane returns flight endpoint, extension connects to Flight server
 statement ok
-ATTACH 'hog:test?token=demo&control_plane=http://${CONTROL_PLANE_HOST}:${CONTROL_PLANE_PORT}' AS cp_test;
+ATTACH 'hog:memory?token=demo&control_plane=http://${CONTROL_PLANE_HOST}:${CONTROL_PLANE_PORT}' AS cp_test;
 
 # Verify we can query through the connection
 query I
@@ -37,7 +37,7 @@ DETACH cp_test;
 # Test with session token override
 # The control plane returns a session_token that should be used instead of the original token
 statement ok
-ATTACH 'hog:test?token=test-token&control_plane=http://${CONTROL_PLANE_HOST}:${CONTROL_PLANE_PORT}' AS session_test;
+ATTACH 'hog:memory?token=test-token&control_plane=http://${CONTROL_PLANE_HOST}:${CONTROL_PLANE_PORT}' AS session_test;
 
 query I
 SELECT value FROM session_test.main.test_data;

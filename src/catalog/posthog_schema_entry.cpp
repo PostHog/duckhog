@@ -9,12 +9,18 @@
 #include "catalog/posthog_schema_entry.hpp"
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_table_entry.hpp"
+#include "storage/posthog_transaction.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/entry_lookup_info.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
+#include "duckdb/common/unordered_set.hpp"
 #include "duckdb/function/table/arrow.hpp"
 #include "duckdb/main/config.hpp"
+#include "duckdb/parser/parsed_data/alter_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/parsed_data/drop_info.hpp"
+#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 
 #include <arrow/c/bridge.h>
 
@@ -35,6 +41,18 @@ bool IsConnectionFailureMessage(const std::string &message) {
            lower.find("connection refused") != std::string::npos ||
            lower.find("unavailable") != std::string::npos ||
            lower.find("timed out") != std::string::npos;
+}
+
+string QuoteIdent(const string &ident) {
+    auto escaped = StringUtil::Replace(ident, "\"", "\"\"");
+    return "\"" + escaped + "\"";
+}
+
+string QualifyTable(const string &catalog, const string &schema, const string &table) {
+    if (catalog.empty()) {
+        return QuoteIdent(schema) + "." + QuoteIdent(table);
+    }
+    return QuoteIdent(catalog) + "." + QuoteIdent(schema) + "." + QuoteIdent(table);
 }
 
 } // namespace
@@ -68,7 +86,49 @@ PostHogSchemaEntry::~PostHogSchemaEntry() = default;
 //===----------------------------------------------------------------------===//
 
 optional_ptr<CatalogEntry> PostHogSchemaEntry::CreateTable(CatalogTransaction transaction, BoundCreateTableInfo &info) {
-    throw NotImplementedException("PostHog: CREATE TABLE not supported on remote database");
+    if (!posthog_catalog_.IsConnected()) {
+        throw CatalogException("PostHog: Not connected to remote server.");
+    }
+
+    if (info.query) {
+        throw NotImplementedException("PostHog: CREATE TABLE AS SELECT is not supported for remote databases");
+    }
+
+    auto &context = transaction.GetContext();
+    auto remote_txn_id = PostHogTransaction::Get(context, posthog_catalog_).remote_txn_id;
+
+    const auto &remote_catalog = posthog_catalog_.GetRemoteCatalog();
+    auto copied = info.Base().Copy();
+    auto &remote_info = copied->Cast<CreateTableInfo>();
+    remote_info.catalog = remote_catalog;
+    auto sql = remote_info.ToString();
+
+    auto &client = posthog_catalog_.GetFlightClient();
+    client.ExecuteUpdate(sql, remote_txn_id);
+
+    // Refresh local table entry using query schema inference (works for uncommitted DDL in the same txn).
+    auto qualified = QualifyTable(remote_catalog, name, remote_info.table);
+    auto arrow_schema = client.GetQuerySchema("SELECT * FROM " + qualified, remote_txn_id);
+
+    vector<string> column_names;
+    vector<LogicalType> column_types;
+    PopulateTableSchemaFromArrow(DBConfig::GetConfig(posthog_catalog_.GetDatabase()), arrow_schema, column_names,
+                                 column_types);
+
+    auto create_info = make_uniq<CreateTableInfo>(*this, remote_info.table);
+    for (idx_t i = 0; i < column_names.size(); i++) {
+        create_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
+    }
+    create_info->columns.Finalize();
+
+    std::lock_guard<std::mutex> lock(tables_mutex_);
+    auto table_entry =
+        make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, std::move(arrow_schema));
+    auto *result = table_entry.get();
+    table_cache_[remote_info.table] = std::move(table_entry);
+    tables_loaded_ = true;
+    tables_loaded_at_ = std::chrono::steady_clock::now();
+    return result;
 }
 
 optional_ptr<CatalogEntry> PostHogSchemaEntry::CreateFunction(CatalogTransaction transaction, CreateFunctionInfo &info) {
@@ -116,11 +176,69 @@ optional_ptr<CatalogEntry> PostHogSchemaEntry::CreateType(CatalogTransaction tra
 //===----------------------------------------------------------------------===//
 
 void PostHogSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
-    throw NotImplementedException("PostHog: ALTER not supported on remote database");
+    if (!posthog_catalog_.IsConnected()) {
+        throw CatalogException("PostHog: Not connected to remote server.");
+    }
+
+    if (info.type != AlterType::ALTER_TABLE) {
+        throw NotImplementedException("PostHog: only ALTER TABLE is supported for remote databases");
+    }
+
+    auto &context = transaction.GetContext();
+    auto remote_txn_id = PostHogTransaction::Get(context, posthog_catalog_).remote_txn_id;
+
+    const auto &remote_catalog = posthog_catalog_.GetRemoteCatalog();
+    auto copied = info.Copy();
+    copied->catalog = remote_catalog;
+    auto sql = copied->ToString();
+
+    auto &client = posthog_catalog_.GetFlightClient();
+    client.ExecuteUpdate(sql, remote_txn_id);
+
+    auto qualified = QualifyTable(remote_catalog, name, info.name);
+    auto arrow_schema = client.GetQuerySchema("SELECT * FROM " + qualified, remote_txn_id);
+
+    vector<string> column_names;
+    vector<LogicalType> column_types;
+    PopulateTableSchemaFromArrow(DBConfig::GetConfig(posthog_catalog_.GetDatabase()), arrow_schema, column_names,
+                                 column_types);
+
+    auto create_info = make_uniq<CreateTableInfo>(*this, info.name);
+    for (idx_t i = 0; i < column_names.size(); i++) {
+        create_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
+    }
+    create_info->columns.Finalize();
+
+    std::lock_guard<std::mutex> lock(tables_mutex_);
+    table_cache_.erase(info.name);
+    table_cache_[info.name] =
+        make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, std::move(arrow_schema));
+    tables_loaded_ = true;
+    tables_loaded_at_ = std::chrono::steady_clock::now();
 }
 
 void PostHogSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {
-    throw NotImplementedException("PostHog: DROP not supported on remote database");
+    if (!posthog_catalog_.IsConnected()) {
+        throw CatalogException("PostHog: Not connected to remote server.");
+    }
+
+    if (info.type != CatalogType::TABLE_ENTRY) {
+        throw NotImplementedException("PostHog: only DROP TABLE is supported for remote databases");
+    }
+
+    auto remote_txn_id = PostHogTransaction::Get(context, posthog_catalog_).remote_txn_id;
+
+    const auto &remote_catalog = posthog_catalog_.GetRemoteCatalog();
+    auto copied = info.Copy();
+    copied->catalog = remote_catalog;
+    auto sql = copied->ToString();
+
+    posthog_catalog_.GetFlightClient().ExecuteUpdate(sql, remote_txn_id);
+
+    std::lock_guard<std::mutex> lock(tables_mutex_);
+    table_cache_.erase(info.name);
+    tables_loaded_ = true;
+    tables_loaded_at_ = std::chrono::steady_clock::now();
 }
 
 //===----------------------------------------------------------------------===//
@@ -152,6 +270,21 @@ void PostHogSchemaEntry::LoadTablesIfNeeded() {
         std::cerr << "[PostHog] Loading tables for catalog." << remote_catalog << ".schema." << name << std::endl;
         auto &client = posthog_catalog_.GetFlightClient();
         auto table_names = client.ListTables(remote_catalog, name);
+
+        unordered_set<string> remote_tables;
+        remote_tables.reserve(table_names.size());
+        for (const auto &t : table_names) {
+            remote_tables.insert(t);
+        }
+
+        // Prune tables that no longer exist remotely.
+        for (auto it = table_cache_.begin(); it != table_cache_.end();) {
+            if (remote_tables.find(it->first) == remote_tables.end()) {
+                it = table_cache_.erase(it);
+                continue;
+            }
+            ++it;
+        }
 
         // Create entries for tables not already in cache
         for (const auto &table_name : table_names) {

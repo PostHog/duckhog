@@ -12,7 +12,7 @@ require-env FLIGHT_HOST
 require-env FLIGHT_PORT
 
 statement ok
-ATTACH 'hog:test?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:memory?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
 
 mode skip
 

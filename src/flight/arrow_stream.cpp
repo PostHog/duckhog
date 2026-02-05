@@ -18,9 +18,10 @@
 
 namespace duckdb {
 
-PostHogArrowStreamState::PostHogArrowStreamState(PostHogCatalog &catalog_p, std::string query_p)
-    : catalog(catalog_p), query(std::move(query_p)) {
-    query_stream = catalog.GetFlightClient().ExecuteQueryStream(query);
+PostHogArrowStreamState::PostHogArrowStreamState(PostHogCatalog &catalog_p, std::string query_p,
+                                                 std::optional<TransactionId> txn_id_p)
+    : catalog(catalog_p), query(std::move(query_p)), txn_id(std::move(txn_id_p)) {
+    query_stream = catalog.GetFlightClient().ExecuteQueryStream(query, txn_id);
 }
 
 void PostHogArrowStream::Initialize(ArrowArrayStream &stream, std::shared_ptr<PostHogArrowStreamState> state) {
@@ -33,7 +34,8 @@ void PostHogArrowStream::Initialize(ArrowArrayStream &stream, std::shared_ptr<Po
 
 unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream_factory_ptr,
                                                                 ArrowStreamParameters &parameters) {
-    auto *bind_data = reinterpret_cast<PostHogRemoteScanBindData *>(stream_factory_ptr);
+    auto *factory = reinterpret_cast<PostHogRemoteScanStreamFactory *>(stream_factory_ptr);
+    auto *bind_data = factory->bind_data;
 
     // Build projected SQL from the column names DuckDB's planner selected.
     auto &columns = parameters.projected_columns.columns;
@@ -65,7 +67,8 @@ unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream
     }
 
     // Execute the projected query via Flight SQL.
-    auto stream_state = std::make_shared<PostHogArrowStreamState>(bind_data->catalog, query);
+    auto stream_state =
+        std::make_shared<PostHogArrowStreamState>(bind_data->catalog, query, factory->txn_id);
 
     // Build a temporary ArrowArrayStream and transfer it into the wrapper.
     ArrowArrayStream tmp_stream;
