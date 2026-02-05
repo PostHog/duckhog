@@ -264,8 +264,18 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::st
 
     auto prepared_statement = std::move(*prepared_result);
 
-    // Get the result schema from the dataset schema
-    return prepared_statement->dataset_schema();
+    // Get the result schema from the dataset schema.
+    //
+    // Important: explicitly Close() with call options. Arrow's PreparedStatement destructor
+    // calls Close() with default FlightCallOptions (no headers), which breaks when the server
+    // requires Authorization for ClosePreparedStatement.
+    auto schema = prepared_statement->dataset_schema();
+    auto close_status = prepared_statement->Close(call_options);
+    if (!close_status.ok()) {
+        std::cerr << "[PostHog] Warning: Failed to close prepared statement after schema inference: "
+                  << close_status.ToString() << std::endl;
+    }
+    return schema;
 }
 
 TransactionId PostHogFlightClient::BeginTransaction() {
