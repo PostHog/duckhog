@@ -82,13 +82,6 @@ SELECT COUNT(*) FROM remote.ddl_test.ddl_t;
 0
 
 # ALTER TABLE
-#
-# NOTE: DuckDB's internal `AlterTableInfo::ToString()` for ADD COLUMN is currently unimplemented
-# in the pinned DuckDB submodule (it throws: "FIXME: column definition to string").
-# Our remote DDL path currently relies on `ToString()` to generate SQL for Flight SQL updates,
-# so this test is skipped until we special-case SQL generation for ADD COLUMN.
-mode skip
-
 statement ok
 ALTER TABLE remote.ddl_test.ddl_t ADD COLUMN extra INT;
 
@@ -99,8 +92,6 @@ WHERE table_catalog = 'remote' AND table_schema = 'ddl_test' AND table_name = 'd
 ----
 extra
 id
-
-mode unskip
 
 # DROP TABLE
 statement ok

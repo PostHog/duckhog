@@ -78,6 +78,32 @@ require_duckdb_cli() {
     fi
 }
 
+pid_is_running_pid() {
+    local pid="$1"
+    if [ -z "$pid" ]; then
+        return 1
+    fi
+
+    if kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+
+    # In sandboxed environments, kill -0 can return EPERM for live processes.
+    local kill_output
+    kill_output="$(kill -0 "$pid" 2>&1 || true)"
+    if [[ "$kill_output" == *"operation not permitted"* ]] || [[ "$kill_output" == *"Operation not permitted"* ]]; then
+        return 0
+    fi
+
+    if command -v ps >/dev/null 2>&1; then
+        if ps -p "$pid" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 pid_is_running() {
     local pid_file="$1"
     if [ ! -f "$pid_file" ]; then
@@ -85,10 +111,7 @@ pid_is_running() {
     fi
     local pid
     pid="$(cat "$pid_file" 2>/dev/null || true)"
-    if [ -z "$pid" ]; then
-        return 1
-    fi
-    kill -0 "$pid" 2>/dev/null
+    pid_is_running_pid "$pid"
 }
 
 stop_pid_file() {
@@ -97,13 +120,48 @@ stop_pid_file() {
     if [ -f "$pid_file" ]; then
         local pid
         pid="$(cat "$pid_file" 2>/dev/null || true)"
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            log_info "Stopping ${name} (PID: ${pid})..."
-            kill "$pid" 2>/dev/null || true
-        else
-            log_info "${name} not running (stale PID file)"
+        if [ -z "$pid" ]; then
+            rm -f "$pid_file"
+            return
         fi
-        rm -f "$pid_file"
+
+        if ! pid_is_running_pid "$pid"; then
+            log_info "${name} not running (stale PID file)"
+            rm -f "$pid_file"
+            return
+        fi
+
+        log_info "Stopping ${name} (PID: ${pid})..."
+        if ! kill "$pid" 2>/dev/null; then
+            log_warn "Could not signal ${name} (PID: ${pid}); keeping PID file"
+            return
+        fi
+
+        local attempt=0
+        while [ $attempt -lt 30 ]; do
+            if ! pid_is_running_pid "$pid"; then
+                rm -f "$pid_file"
+                return
+            fi
+            sleep 0.1
+            attempt=$((attempt + 1))
+        done
+
+        log_warn "${name} did not stop after SIGTERM; sending SIGKILL"
+        kill -9 "$pid" 2>/dev/null || true
+
+        attempt=0
+        while [ $attempt -lt 10 ]; do
+            if ! pid_is_running_pid "$pid"; then
+                rm -f "$pid_file"
+                return
+            fi
+            sleep 0.1
+            attempt=$((attempt + 1))
+        done
+
+        log_warn "${name} is still running (PID: ${pid}); keeping PID file"
+        return
     fi
 }
 

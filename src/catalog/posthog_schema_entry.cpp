@@ -14,11 +14,12 @@
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/entry_lookup_info.hpp"
 #include "duckdb/common/exception.hpp"
-#include "duckdb/common/string_util.hpp"
 #include "duckdb/common/unordered_set.hpp"
 #include "duckdb/function/table/arrow.hpp"
 #include "duckdb/main/config.hpp"
-#include "duckdb/parser/parsed_data/alter_info.hpp"
+#include "duckdb/parser/expression/cast_expression.hpp"
+#include "duckdb/parser/keyword_helper.hpp"
+#include "duckdb/parser/parsed_data/alter_table_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
@@ -45,8 +46,108 @@ bool IsConnectionFailureMessage(const std::string &message) {
 }
 
 string QuoteIdent(const string &ident) {
-    auto escaped = StringUtil::Replace(ident, "\"", "\"\"");
-    return "\"" + escaped + "\"";
+    return KeywordHelper::WriteOptionallyQuoted(ident);
+}
+
+string QualifyTable(const string &catalog, const string &schema, const string &table);
+
+string RenderSafeDefaultExpression(const ParsedExpression &expression) {
+    if (expression.HasSubquery() || expression.HasParameter() || expression.IsAggregate() || expression.IsWindow()) {
+        throw NotImplementedException(
+            "PostHog: only constant DEFAULT expressions are supported for remote ALTER TABLE ADD COLUMN/ADD FIELD");
+    }
+
+    switch (expression.GetExpressionClass()) {
+    case ExpressionClass::CONSTANT:
+        return expression.ToString();
+    case ExpressionClass::CAST: {
+        auto &cast_expression = expression.Cast<CastExpression>();
+        if (cast_expression.try_cast) {
+            throw NotImplementedException(
+                "PostHog: TRY_CAST is not supported in DEFAULT expressions for remote ALTER TABLE ADD COLUMN/ADD FIELD");
+        }
+        return "CAST(" + RenderSafeDefaultExpression(*cast_expression.child) + " AS " +
+               cast_expression.cast_type.ToString() + ")";
+    }
+    default:
+        throw NotImplementedException(
+            "PostHog: only constant DEFAULT expressions are supported for remote ALTER TABLE ADD COLUMN/ADD FIELD");
+    }
+}
+
+string RenderColumnTypeAndDefault(const ColumnDefinition &column_definition) {
+    if (column_definition.Generated()) {
+        throw NotImplementedException(
+            "PostHog: generated columns are not supported for remote ALTER TABLE ADD COLUMN/ADD FIELD");
+    }
+    if (column_definition.Category() != TableColumnType::STANDARD) {
+        throw NotImplementedException(
+            "PostHog: only standard columns are supported for remote ALTER TABLE ADD COLUMN/ADD FIELD");
+    }
+
+    string sql = " " + column_definition.Type().ToString();
+    if (column_definition.HasDefaultValue()) {
+        sql += " DEFAULT ";
+        sql += RenderSafeDefaultExpression(column_definition.DefaultValue());
+    }
+    return sql;
+}
+
+string RenderAlterTablePrefix(const AlterTableInfo &info) {
+    string sql = "ALTER TABLE";
+    if (info.if_not_found == OnEntryNotFound::RETURN_NULL) {
+        sql += " IF EXISTS";
+    }
+    sql += " " + QualifyTable(info.catalog, info.schema, info.name);
+    return sql;
+}
+
+string RenderAddColumnSQL(const AddColumnInfo &info) {
+    string sql = RenderAlterTablePrefix(info);
+    sql += " ADD COLUMN";
+    if (info.if_column_not_exists) {
+        sql += " IF NOT EXISTS";
+    }
+    sql += " " + QuoteIdent(info.new_column.Name());
+    sql += RenderColumnTypeAndDefault(info.new_column);
+    sql += ";";
+    return sql;
+}
+
+string RenderAddFieldSQL(const AddFieldInfo &info) {
+    if (info.column_path.empty()) {
+        throw InternalException("PostHog: ADD FIELD requires a non-empty column path");
+    }
+
+    string sql = RenderAlterTablePrefix(info);
+    sql += " ADD COLUMN";
+    if (info.if_field_not_exists) {
+        sql += " IF NOT EXISTS";
+    }
+    sql += " ";
+    for (idx_t i = 0; i < info.column_path.size(); i++) {
+        if (i > 0) {
+            sql += ".";
+        }
+        sql += QuoteIdent(info.column_path[i]);
+    }
+    sql += ".";
+    sql += QuoteIdent(info.new_field.Name());
+    sql += RenderColumnTypeAndDefault(info.new_field);
+    sql += ";";
+    return sql;
+}
+
+string RenderAlterTableSQL(const AlterInfo &info) {
+    auto &alter_table_info = info.Cast<AlterTableInfo>();
+    switch (alter_table_info.alter_table_type) {
+    case AlterTableType::ADD_COLUMN:
+        return RenderAddColumnSQL(info.Cast<AddColumnInfo>());
+    case AlterTableType::ADD_FIELD:
+        return RenderAddFieldSQL(info.Cast<AddFieldInfo>());
+    default:
+        return info.ToString();
+    }
 }
 
 string QualifyTable(const string &catalog, const string &schema, const string &table) {
@@ -191,7 +292,7 @@ void PostHogSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) 
     const auto &remote_catalog = posthog_catalog_.GetRemoteCatalog();
     auto copied = info.Copy();
     copied->catalog = remote_catalog;
-    auto sql = copied->ToString();
+    auto sql = RenderAlterTableSQL(*copied);
 
     auto &client = posthog_catalog_.GetFlightClient();
     client.ExecuteUpdate(sql, remote_txn_id);
