@@ -10,6 +10,7 @@
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_table_entry.hpp"
 #include "storage/posthog_transaction.hpp"
+#include "utils/posthog_logger.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/entry_lookup_info.hpp"
 #include "duckdb/common/exception.hpp"
@@ -336,8 +337,8 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
         auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, arrow_schema);
         table_cache_.emplace(table_name, std::move(table_entry));
     } catch (const std::exception &e) {
-        std::cerr << "[PostHog] Failed to create table entry for " << name << "." << table_name << ": " << e.what()
-                  << std::endl;
+        POSTHOG_LOG_INFO("Table metadata hydration skipped for '%s.%s': %s", name.c_str(), table_name.c_str(),
+                         e.what());
         if (IsConnectionFailureMessage(e.what())) {
             throw CatalogException("PostHog: Not connected to remote server.");
         }

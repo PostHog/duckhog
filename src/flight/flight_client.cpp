@@ -536,7 +536,7 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
     auto flight_info = std::move(*info_result);
 
     if (flight_info->endpoints().empty()) {
-        throw std::runtime_error("PostHog: Table not found: " + schema + "." + table);
+        throw std::runtime_error("PostHog: Table not found(endpoint empty): " + schema + "." + table);
     }
 
     // Fetch the table metadata
@@ -553,7 +553,7 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
 
     auto chunk = std::move(*chunk_result);
     if (!chunk.data || chunk.data->num_rows() == 0) {
-        throw std::runtime_error("PostHog: Table not found: " + schema + "." + table);
+        throw std::runtime_error("PostHog: Table not found(no data): " + schema + "." + table);
     }
 
     // The table_schema column contains the IPC-serialized Arrow schema
