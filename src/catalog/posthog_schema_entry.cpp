@@ -438,7 +438,7 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
         auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, arrow_schema);
         table_cache_.emplace(table_name, std::move(table_entry));
     } catch (const std::exception &e) {
-        POSTHOG_LOG_INFO("Table metadata hydration skipped for '%s.%s': %s", name.c_str(), table_name.c_str(),
+        POSTHOG_LOG_DEBUG("Table metadata hydration skipped for '%s.%s': %s", name.c_str(), table_name.c_str(),
                          e.what());
         if (IsConnectionFailureMessage(e.what())) {
             throw CatalogException("PostHog: Not connected to remote server.");
