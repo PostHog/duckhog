@@ -1,7 +1,7 @@
--- Example usage of the PostHog DuckDB extension
+-- Example usage of the DuckHog DuckDB extension
 -- Requires a built extension and a running Flight SQL server.
 
-LOAD 'build/release/extension/posthog/posthog.duckdb_extension';
+LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';
 ATTACH 'hog:test?token=demo&endpoint=grpc://127.0.0.1:8815' AS remote;
 
 SELECT 1;

@@ -1,9 +1,9 @@
 {
-  "description": "Run PostHog tests with Flight SQL server",
+  "description": "Run DuckHog tests with Flight SQL server",
   "on_init": "SET logging_level = 'INFO';",
   "autoloading": "all",
   "statically_loaded_extensions": [
-    "posthog"
+    "duckhog"
   ],
   "test_env": [
     {

@@ -2,7 +2,7 @@
 # description: Test ATTACH statement parsing and connection error handling
 # group: [connection]
 
-require posthog
+require duckhog
 
 # Test: Invalid connection string (missing token) should fail
 statement error

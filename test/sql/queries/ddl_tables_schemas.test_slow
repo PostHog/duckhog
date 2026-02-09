@@ -5,7 +5,7 @@
 # Requires the Go duckling Flight SQL server (posthog-duckdb-server) because DDL uses StatementUpdate and Flight SQL transactions.
 # Run: ./scripts/test-servers.sh start --background --seed
 
-require posthog
+require duckhog
 
 require-env FLIGHT_HOST
 

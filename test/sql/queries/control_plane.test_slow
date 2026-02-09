@@ -3,7 +3,7 @@
 # group: [queries]
 # Requires both control_plane_server.py and Duckling (Go) running
 
-require posthog
+require duckhog
 
 # This file is intentionally guarded: unlike direct Flight integration tests (which are guarded by FLIGHT_HOST/FLIGHT_PORT),
 # these tests also require a control plane HTTP server to be listening.

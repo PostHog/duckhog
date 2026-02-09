@@ -1,6 +1,6 @@
 # Development Environment Setup
 
-This guide covers setting up the development environment for the PostHog DuckDB Extension.
+This guide covers setting up the development environment for the DuckHog DuckDB Extension.
 
 ## TL;DR (Quickstart)
 
@@ -116,8 +116,8 @@ echo 'export VCPKG_TOOLCHAIN_PATH=~/projects/vcpkg/scripts/buildsystems/vcpkg.cm
 ### Clone the Repository
 
 ```bash
-git clone --recurse-submodules https://github.com/PostHog/posthog-duckdb-extension.git
-cd posthog-duckdb-extension
+git clone --recurse-submodules https://github.com/PostHog/duckhog.git
+cd duckhog
 ```
 
 If you already cloned without submodules:
@@ -159,13 +159,13 @@ Subsequent builds will be much faster as dependencies are cached in `~/.cache/vc
 After a successful build, verify the extension loads correctly:
 
 ```bash
-./build/release/duckdb -cmd "LOAD 'build/release/extension/posthog/posthog.duckdb_extension';"
+./build/release/duckdb -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';"
 ```
 
 Check that the extension is registered:
 
 ```bash
-echo "SELECT * FROM duckdb_extensions() WHERE extension_name = 'posthog';" | ./build/release/duckdb
+echo "SELECT * FROM duckdb_extensions() WHERE extension_name = 'duckhog';" | ./build/release/duckdb
 ```
 
 Expected output:
@@ -174,16 +174,16 @@ Expected output:
 │ extension_name │ loaded  │ installed │ install_path │ description │  aliases  │ extension_version │   install_mode    │ installed_from │
 │    varchar     │ boolean │  boolean  │   varchar    │   varchar   │ varchar[] │      varchar      │      varchar      │    varchar     │
 ├────────────────┼─────────┼───────────┼──────────────┼─────────────┼───────────┼───────────────────┼───────────────────┼────────────────┤
-│ posthog        │ true    │ true      │ (BUILT-IN)   │             │ []        │ ...               │ STATICALLY_LINKED │                │
+│ duckhog        │ true    │ true      │ (BUILT-IN)   │             │ []        │ ...               │ STATICALLY_LINKED │                │
 └────────────────┴─────────┴───────────┴──────────────┴─────────────┴───────────┴───────────────────┴───────────────────┴────────────────┘
 ```
 
 ## Project Structure
 
 ```
-posthog-duckdb-extension/
+duckhog/
 ├── src/
-│   ├── posthog_extension.cpp      # Extension entry point
+│   ├── duckhog_extension.cpp      # Extension entry point
 │   ├── catalog/
 │   │   ├── posthog_catalog.cpp    # Catalog implementation
 │   │   └── posthog_catalog.hpp

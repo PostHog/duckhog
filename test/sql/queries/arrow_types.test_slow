@@ -5,7 +5,7 @@
 # Tests in this file require a running Flight SQL server
 # Run: ./scripts/test-servers.sh start before executing
 
-require posthog
+require duckhog
 
 require-env FLIGHT_HOST
 

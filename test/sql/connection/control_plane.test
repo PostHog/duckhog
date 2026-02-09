@@ -2,7 +2,7 @@
 # description: Control plane connection errors and validation
 # group: [connection]
 
-require posthog
+require duckhog
 
 # Error: Control plane endpoint unreachable
 statement error
