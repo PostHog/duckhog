@@ -192,7 +192,7 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
     return *table_result;
 }
 
-std::unique_ptr<PostHogFlightQueryStream> PostHogFlightClient::ExecuteQueryStream(const std::string &sql) {
+int64_t PostHogFlightClient::ExecuteUpdate(const std::string &sql, const std::optional<TransactionId> &txn_id) {
     std::lock_guard<std::mutex> lock(client_mutex_);
 
     if (!authenticated_) {
@@ -201,15 +201,47 @@ std::unique_ptr<PostHogFlightQueryStream> PostHogFlightClient::ExecuteQueryStrea
 
     auto call_options = GetCallOptions();
 
-    auto info_result = sql_client_->Execute(call_options, sql);
+    arrow::Result<int64_t> result;
+    if (txn_id.has_value()) {
+        arrow::flight::sql::Transaction txn(*txn_id);
+        result = sql_client_->ExecuteUpdate(call_options, sql, txn);
+    } else {
+        result = sql_client_->ExecuteUpdate(call_options, sql);
+    }
+    if (!result.ok()) {
+        throw std::runtime_error("PostHog: Update execution failed: " + result.status().ToString());
+    }
+
+    return *result;
+}
+
+std::unique_ptr<PostHogFlightQueryStream> PostHogFlightClient::ExecuteQueryStream(const std::string &sql,
+                                                                                  const std::optional<TransactionId> &txn_id) {
+    std::lock_guard<std::mutex> lock(client_mutex_);
+
+    if (!authenticated_) {
+        throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
+    }
+
+    auto call_options = GetCallOptions();
+
+    arrow::Result<std::unique_ptr<arrow::flight::FlightInfo>> info_result;
+    if (txn_id.has_value()) {
+        arrow::flight::sql::Transaction txn(*txn_id);
+        info_result = sql_client_->Execute(call_options, sql, txn);
+    } else {
+        info_result = sql_client_->Execute(call_options, sql);
+    }
     if (!info_result.ok()) {
         throw std::runtime_error("PostHog: Query execution failed: " + info_result.status().ToString());
     }
 
-    return std::make_unique<PostHogFlightQueryStream>(*sql_client_, call_options, std::move(*info_result));
+    return std::make_unique<PostHogFlightQueryStream>(*sql_client_, client_mutex_, call_options,
+                                                      std::move(*info_result));
 }
 
-std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::string &sql) {
+std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::string &sql,
+                                                                   const std::optional<TransactionId> &txn_id) {
     std::lock_guard<std::mutex> lock(client_mutex_);
 
     if (!authenticated_) {
@@ -219,15 +251,76 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::st
     auto call_options = GetCallOptions();
 
     // Use Prepare to get schema without full execution
-    auto prepared_result = sql_client_->Prepare(call_options, sql);
+    arrow::Result<std::shared_ptr<arrow::flight::sql::PreparedStatement>> prepared_result;
+    if (txn_id.has_value()) {
+        arrow::flight::sql::Transaction txn(*txn_id);
+        prepared_result = sql_client_->Prepare(call_options, sql, txn);
+    } else {
+        prepared_result = sql_client_->Prepare(call_options, sql);
+    }
     if (!prepared_result.ok()) {
         throw std::runtime_error("PostHog: Failed to prepare query: " + prepared_result.status().ToString());
     }
 
     auto prepared_statement = std::move(*prepared_result);
 
-    // Get the result schema from the dataset schema
-    return prepared_statement->dataset_schema();
+    // Get the result schema from the dataset schema.
+    //
+    // Important: explicitly Close() with call options. Arrow's PreparedStatement destructor
+    // calls Close() with default FlightCallOptions (no headers), which breaks when the server
+    // requires Authorization for ClosePreparedStatement.
+    auto schema = prepared_statement->dataset_schema();
+    auto close_status = prepared_statement->Close(call_options);
+    if (!close_status.ok()) {
+        std::cerr << "[PostHog] Warning: Failed to close prepared statement after schema inference: "
+                  << close_status.ToString() << std::endl;
+    }
+    return schema;
+}
+
+TransactionId PostHogFlightClient::BeginTransaction() {
+    std::lock_guard<std::mutex> lock(client_mutex_);
+
+    if (!authenticated_) {
+        throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
+    }
+
+    auto call_options = GetCallOptions();
+    auto result = sql_client_->BeginTransaction(call_options);
+    if (!result.ok()) {
+        throw std::runtime_error("PostHog: BeginTransaction failed: " + result.status().ToString());
+    }
+    return result->transaction_id();
+}
+
+void PostHogFlightClient::CommitTransaction(const TransactionId &txn_id) {
+    std::lock_guard<std::mutex> lock(client_mutex_);
+
+    if (!authenticated_) {
+        throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
+    }
+
+    auto call_options = GetCallOptions();
+    arrow::flight::sql::Transaction txn(txn_id);
+    auto status = sql_client_->Commit(call_options, txn);
+    if (!status.ok()) {
+        throw std::runtime_error("PostHog: CommitTransaction failed: " + status.ToString());
+    }
+}
+
+void PostHogFlightClient::RollbackTransaction(const TransactionId &txn_id) {
+    std::lock_guard<std::mutex> lock(client_mutex_);
+
+    if (!authenticated_) {
+        throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
+    }
+
+    auto call_options = GetCallOptions();
+    arrow::flight::sql::Transaction txn(txn_id);
+    auto status = sql_client_->Rollback(call_options, txn);
+    if (!status.ok()) {
+        throw std::runtime_error("PostHog: RollbackTransaction failed: " + status.ToString());
+    }
 }
 
 std::vector<PostHogDbSchemaInfo> PostHogFlightClient::ListDbSchemas(const std::string &catalog) {
@@ -443,7 +536,7 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
     auto flight_info = std::move(*info_result);
 
     if (flight_info->endpoints().empty()) {
-        throw std::runtime_error("PostHog: Table not found: " + schema + "." + table);
+        throw std::runtime_error("PostHog: Table not found(endpoint empty): " + schema + "." + table);
     }
 
     // Fetch the table metadata
@@ -460,7 +553,7 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
 
     auto chunk = std::move(*chunk_result);
     if (!chunk.data || chunk.data->num_rows() == 0) {
-        throw std::runtime_error("PostHog: Table not found: " + schema + "." + table);
+        throw std::runtime_error("PostHog: Table not found(no data): " + schema + "." + table);
     }
 
     // The table_schema column contains the IPC-serialized Arrow schema
@@ -568,9 +661,10 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
 }
 
 PostHogFlightQueryStream::PostHogFlightQueryStream(arrow::flight::sql::FlightSqlClient &client,
+                                                   std::mutex &client_mutex,
                                                    arrow::flight::FlightCallOptions options,
                                                    std::unique_ptr<arrow::flight::FlightInfo> info)
-    : client_(client), options_(std::move(options)), info_(std::move(info)) {
+    : client_(client), client_mutex_(client_mutex), options_(std::move(options)), info_(std::move(info)) {
 }
 
 arrow::Status PostHogFlightQueryStream::OpenReader() {
@@ -583,6 +677,7 @@ arrow::Status PostHogFlightQueryStream::OpenReader() {
     if (endpoint_index_ >= info_->endpoints().size()) {
         return arrow::Status::OK();
     }
+    std::lock_guard<std::mutex> lock(client_mutex_);
     auto stream_result = client_.DoGet(options_, info_->endpoints()[endpoint_index_].ticket);
     if (!stream_result.ok()) {
         return stream_result.status();

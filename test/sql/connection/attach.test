@@ -6,7 +6,7 @@ require posthog
 
 # Test: Invalid connection string (missing token) should fail
 statement error
-ATTACH 'hog:test' AS remote;
+ATTACH 'hog:memory' AS remote;
 ----
 Missing authentication token
 

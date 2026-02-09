@@ -48,6 +48,13 @@ venv/
 
 # Test artifacts
 testext
-test/integration/.flight_server.pid
 test/integration/.control_plane.pid
+test/integration/.duckling_go.pid
 test/integration/.venv/
+test/integration/.gocache/
+test/integration/duckling_go.yaml
+test/integration/memory.duckdb*
+test/integration/duckling_go_server
+
+# Local ccache (used in sandboxed builds)
+.ccache/

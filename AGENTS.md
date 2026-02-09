@@ -14,8 +14,8 @@
 ## Tests
 - Full suite: `make test` (integration runs only when the Flight server is running and env vars are set)
 - Unit tests only: `./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"`
-- Integration tests:
-  - `./scripts/test-servers.sh start --background`
+- Integration tests (Duckling / `posthog-duckdb-server` submodule):
+  - `./scripts/test-servers.sh start --background --seed`
   - `eval "$(./scripts/test-servers.sh env)"`
   - `./build/release/test/unittest "test/sql/queries/*"`
   - `./scripts/test-servers.sh stop`

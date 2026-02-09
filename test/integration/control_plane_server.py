@@ -24,6 +24,10 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
 
     # Set by main() based on command line args
     flight_endpoint = "grpc://127.0.0.1:8815"
+    # Session token returned to the client (the extension). Duckling (Go) currently
+    # accepts a single configured token, so we return a fixed token by default to
+    # keep integration tests deterministic.
+    session_token = os.environ.get("CONTROL_PLANE_SESSION_TOKEN", "demo")
     valid_tokens = {"demo", "test-token", "valid-api-key"}
 
     def do_POST(self):
@@ -71,7 +75,7 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
         # Build response
         response = {
             "flight_endpoint": self.flight_endpoint,
-            "session_token": f"session-{token}-{database}",
+            "session_token": self.session_token,
             "expires_at": (datetime.utcnow() + timedelta(hours=1)).isoformat() + "Z",
         }
 
@@ -106,14 +110,21 @@ def main():
         default=os.environ.get("FLIGHT_ENDPOINT", "grpc://127.0.0.1:8815"),
         help="Flight SQL server endpoint to return",
     )
+    parser.add_argument(
+        "--session-token",
+        default=os.environ.get("CONTROL_PLANE_SESSION_TOKEN", "demo"),
+        help="Session token to return (must match Duckling's configured token in tests)",
+    )
     args = parser.parse_args()
 
     # Configure the handler
     ControlPlaneHandler.flight_endpoint = args.flight_endpoint
+    ControlPlaneHandler.session_token = args.session_token
 
     server = HTTPServer((args.host, args.port), ControlPlaneHandler)
     print(f"[ControlPlane] Mock server started on http://{args.host}:{args.port}")
     print(f"[ControlPlane] Flight endpoint: {args.flight_endpoint}")
+    print(f"[ControlPlane] Session token: {args.session_token}")
     print("[ControlPlane] Press Ctrl+C to stop")
 
     try:

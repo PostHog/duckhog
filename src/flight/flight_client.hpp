@@ -13,6 +13,7 @@
 #include <vector>
 #include <mutex>
 #include <cstddef>
+#include <optional>
 
 #include <arrow/flight/client.h>
 #include <arrow/flight/sql/client.h>
@@ -22,6 +23,9 @@
 
 namespace duckdb {
 
+// Opaque bytes representing a Flight SQL TransactionId (no encoding assumptions).
+using TransactionId = std::string;
+
 struct PostHogDbSchemaInfo {
     std::string catalog_name;
     std::string schema_name;
@@ -29,7 +33,7 @@ struct PostHogDbSchemaInfo {
 
 class PostHogFlightQueryStream {
 public:
-    PostHogFlightQueryStream(arrow::flight::sql::FlightSqlClient &client,
+    PostHogFlightQueryStream(arrow::flight::sql::FlightSqlClient &client, std::mutex &client_mutex,
                              arrow::flight::FlightCallOptions options,
                              std::unique_ptr<arrow::flight::FlightInfo> info);
 
@@ -38,6 +42,7 @@ public:
 
 private:
     arrow::flight::sql::FlightSqlClient &client_;
+    std::mutex &client_mutex_;
     arrow::flight::FlightCallOptions options_;
     std::unique_ptr<arrow::flight::FlightInfo> info_;
     std::unique_ptr<arrow::flight::FlightStreamReader> reader_;
@@ -79,11 +84,24 @@ public:
     // Execute a SQL query and return results as an Arrow Table
     std::shared_ptr<arrow::Table> ExecuteQuery(const std::string &sql);
 
+    // Execute a SQL update/DDL statement (Flight SQL StatementUpdate).
+    int64_t ExecuteUpdate(const std::string &sql, const std::optional<TransactionId> &txn_id = std::nullopt);
+
     // Execute a SQL query and return results as a streaming reader
-    std::unique_ptr<PostHogFlightQueryStream> ExecuteQueryStream(const std::string &sql);
+    std::unique_ptr<PostHogFlightQueryStream> ExecuteQueryStream(const std::string &sql,
+                                                                  const std::optional<TransactionId> &txn_id = std::nullopt);
 
     // Get the schema of a query without executing it (uses Prepare)
-    std::shared_ptr<arrow::Schema> GetQuerySchema(const std::string &sql);
+    std::shared_ptr<arrow::Schema> GetQuerySchema(const std::string &sql,
+                                                  const std::optional<TransactionId> &txn_id = std::nullopt);
+
+    //===--------------------------------------------------------------------===//
+    // Transactions (Flight SQL BeginTransaction/EndTransaction)
+    //===--------------------------------------------------------------------===//
+
+    TransactionId BeginTransaction();
+    void CommitTransaction(const TransactionId &txn_id);
+    void RollbackTransaction(const TransactionId &txn_id);
 
     //===--------------------------------------------------------------------===//
     // Metadata Operations

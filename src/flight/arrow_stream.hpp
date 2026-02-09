@@ -14,6 +14,7 @@
 #include "flight/flight_client.hpp"
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace duckdb {
@@ -21,10 +22,11 @@ namespace duckdb {
 class PostHogCatalog;
 
 struct PostHogArrowStreamState {
-    PostHogArrowStreamState(PostHogCatalog &catalog, std::string query);
+    PostHogArrowStreamState(PostHogCatalog &catalog, std::string query, std::optional<TransactionId> txn_id);
 
     PostHogCatalog &catalog;
     std::string query;
+    std::optional<TransactionId> txn_id;
     std::unique_ptr<PostHogFlightQueryStream> query_stream;
     std::string last_error;
     bool released = false;

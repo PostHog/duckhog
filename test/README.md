@@ -13,7 +13,7 @@ GEN=ninja make release
 make test
 
 # Run integration tests (requires Flight SQL server)
-./scripts/test-servers.sh start --background
+./scripts/test-servers.sh start --background --seed
 eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
 ./scripts/test-servers.sh stop
@@ -42,7 +42,7 @@ Integration tests (`.test_slow` files) require a running Flight SQL server:
 
 ```bash
 # Step 1: Start the Flight SQL server
-./scripts/test-servers.sh start
+./scripts/test-servers.sh start --seed
 
 # Step 2 (in another terminal): Run integration tests
 eval "$(./scripts/test-servers.sh env)"
@@ -55,7 +55,7 @@ Control plane tests require both the Flight SQL server and the mock control plan
 
 ```bash
 # Step 1: Start both servers (Flight SQL + mock control plane)
-./scripts/test-servers.sh start --background --control-plane
+./scripts/test-servers.sh start --background --control-plane --seed
 
 # Step 2: Run control plane integration tests
 eval "$(./scripts/test-servers.sh env)"
@@ -69,7 +69,7 @@ eval "$(./scripts/test-servers.sh env)"
 
 ```bash
 # Start server in background
-./scripts/test-servers.sh start --background
+./scripts/test-servers.sh start --background --seed
 
 # Run tests
 eval "$(./scripts/test-servers.sh env)"
@@ -102,9 +102,8 @@ test/
 ├── configs/
 │   └── flight.json              # Test configuration for Flight SQL
 ├── integration/
-│   ├── flight_server.py         # Python Flight SQL test server
 │   ├── control_plane_server.py  # Mock control plane HTTP server
-│   └── requirements.txt         # Python dependencies
+│   └── memory.duckdb            # Seeded DuckDB database (generated)
 └── sql/
     ├── posthog.test             # Extension loading tests
     ├── connection/
@@ -153,7 +152,7 @@ The `test/configs/flight.json` file defines environment variables:
 require posthog
 
 statement ok
-ATTACH 'hog:test?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:memory?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
 
 query I
 SELECT COUNT(*) FROM remote.main.numbers;

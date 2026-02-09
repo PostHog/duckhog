@@ -128,7 +128,7 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
         // Create AttachOptions
         unordered_map<string, Value> opts;
         opts["type"] = Value("hog");
-        AttachOptions additional_options(opts, AccessMode::READ_ONLY);
+        AttachOptions additional_options(opts, attach_options.access_mode);
 
         try {
             db_manager.AttachDatabase(context, additional_info, additional_options);
@@ -145,7 +145,8 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
 
 static unique_ptr<TransactionManager> PostHogCreateTransactionManager(
     optional_ptr<StorageExtensionInfo> storage_info, AttachedDatabase &db, Catalog &catalog) {
-    return make_uniq<PostHogTransactionManager>(db);
+    auto *posthog_catalog = dynamic_cast<PostHogCatalog *>(&catalog);
+    return make_uniq<PostHogTransactionManager>(db, posthog_catalog);
 }
 
 PostHogStorageExtension::PostHogStorageExtension() {

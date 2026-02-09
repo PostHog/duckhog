@@ -8,10 +8,13 @@
 
 #include "catalog/remote_scan.hpp"
 #include "catalog/posthog_catalog.hpp"
+#include "storage/posthog_transaction.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/table/arrow.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/main/database.hpp"
 #include "duckdb/main/config.hpp"
 
 #include <arrow/c/bridge.h>
@@ -19,6 +22,10 @@
 #include <cstring>
 
 namespace duckdb {
+
+struct PostHogRemoteScanGlobalState : public ArrowScanGlobalState {
+    std::unique_ptr<PostHogRemoteScanStreamFactory> stream_factory;
+};
 
 //===----------------------------------------------------------------------===//
 // Bind Data
@@ -103,7 +110,48 @@ unique_ptr<FunctionData> PostHogRemoteScan::CreateBindData(PostHogCatalog &catal
 
 unique_ptr<GlobalTableFunctionState> PostHogRemoteScan::InitGlobal(ClientContext &context,
                                                                     TableFunctionInitInput &input) {
-    return ArrowTableFunction::ArrowScanInitGlobal(context, input);
+    auto &bind_data = input.bind_data->Cast<PostHogRemoteScanBindData>();
+
+    std::optional<TransactionId> remote_txn_id;
+    try {
+        remote_txn_id = PostHogTransaction::Get(context, bind_data.catalog).remote_txn_id;
+    } catch (const std::exception &) {
+        remote_txn_id = std::nullopt;
+    }
+
+    ArrowStreamParameters parameters;
+    D_ASSERT(!input.column_ids.empty());
+    auto &arrow_types = bind_data.arrow_table.GetColumns();
+    for (idx_t idx = 0; idx < input.column_ids.size(); idx++) {
+        auto col_idx = input.column_ids[idx];
+        if (col_idx != COLUMN_IDENTIFIER_ROW_ID) {
+            auto &schema_c = *bind_data.schema_root.arrow_schema.children[col_idx];
+            arrow_types.at(col_idx)->ThrowIfInvalid();
+            parameters.projected_columns.projection_map[idx] = schema_c.name;
+            parameters.projected_columns.columns.emplace_back(schema_c.name);
+            parameters.projected_columns.filter_to_col[idx] = col_idx;
+        }
+    }
+    parameters.filters = input.filters.get();
+
+    auto result = make_uniq<PostHogRemoteScanGlobalState>();
+    result->stream_factory = make_uniq<PostHogRemoteScanStreamFactory>();
+    result->stream_factory->bind_data = &bind_data;
+    result->stream_factory->txn_id = std::move(remote_txn_id);
+    result->stream = bind_data.scanner_producer(reinterpret_cast<uintptr_t>(result->stream_factory.get()), parameters);
+
+    result->max_threads = context.db->NumberOfThreads();
+    if (!input.projection_ids.empty()) {
+        result->projection_ids = input.projection_ids;
+        for (const auto &col_idx : input.column_ids) {
+            if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
+                result->scanned_types.emplace_back(LogicalType::ROW_TYPE);
+            } else {
+                result->scanned_types.push_back(bind_data.all_types[col_idx]);
+            }
+        }
+    }
+    return std::move(result);
 }
 
 unique_ptr<LocalTableFunctionState> PostHogRemoteScan::InitLocal(ExecutionContext &context,
