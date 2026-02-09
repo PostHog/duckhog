@@ -2,7 +2,7 @@
 # description: Authentication parameter validation
 # group: [connection]
 
-require posthog
+require duckhog
 
 # Missing or empty token should fail
 statement error

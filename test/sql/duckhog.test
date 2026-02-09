@@ -1,0 +1,18 @@
+# name: test/sql/duckhog.test
+# description: test duckhog extension
+# group: [sql]
+
+# Before we load the extension, this will fail
+statement error
+SELECT duckhog_version();
+----
+Catalog Error: Scalar Function with name duckhog_version does not exist!
+
+# Require statement will ensure this test is run with this extension loaded
+require duckhog
+
+# Confirm the extension works
+query I
+SELECT duckhog_version();
+----
+DuckHog DuckDB Extension v0.1.0

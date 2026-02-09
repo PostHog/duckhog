@@ -4,7 +4,7 @@
 
 namespace duckdb {
 
-class PosthogExtension : public Extension {
+class DuckhogExtension : public Extension {
 public:
     void Load(ExtensionLoader &loader) override;
     std::string Name() override;

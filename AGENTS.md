@@ -1,8 +1,8 @@
-# PostHog DuckDB Extension Agent Guide (Codex)
+# DuckHog DuckDB Extension Agent Guide (Codex)
 
 ## Quick commands
 - Build release: `GEN=ninja make release`
-- Load extension: `./build/release/duckdb -cmd "LOAD 'build/release/extension/posthog/posthog.duckdb_extension';"`
+- Load extension: `./build/release/duckdb -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';"`
 
 ## Working Style
 - Prefer small, incremental PRs aligned to deliverables.

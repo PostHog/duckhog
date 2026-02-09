@@ -1,6 +1,6 @@
 # Testing (Following DuckLake Pattern)
 
-This directory contains all tests for the PostHog DuckDB extension, following the [DuckLake testing conventions](https://duckdb.org/dev/sqllogictest/intro.html).
+This directory contains all tests for the DuckHog DuckDB extension, following the [DuckLake testing conventions](https://duckdb.org/dev/sqllogictest/intro.html).
 
 ## Quick Start
 
@@ -30,7 +30,7 @@ Unit tests (`.test` files) run without external dependencies:
 ./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test" "test/sql/errors/*.test"
 
 # Run specific test file
-./build/release/test/unittest "test/sql/posthog.test"
+./build/release/test/unittest "test/sql/duckhog.test"
 
 # Run tests matching a pattern
 ./build/release/test/unittest "test/sql/connection/*"
@@ -92,7 +92,7 @@ DUCKDB_TEST_CONFIG=test/configs/flight.json make test
 ./build/release/test/unittest "test/sql/queries/basic_select.test_slow"
 
 # Using DuckDB CLI directly
-./build/release/duckdb -unsigned -cmd "LOAD 'build/release/extension/posthog/posthog.duckdb_extension';" < test/sql/queries/basic_select.test_slow
+./build/release/duckdb -unsigned -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';" < test/sql/queries/basic_select.test_slow
 ```
 
 ## Test Structure
@@ -105,7 +105,7 @@ test/
 │   ├── control_plane_server.py  # Mock control plane HTTP server
 │   └── memory.duckdb            # Seeded DuckDB database (generated)
 └── sql/
-    ├── posthog.test             # Extension loading tests
+    ├── duckhog.test             # Extension loading tests
     ├── connection/
     │   ├── attach.test          # Connection string parsing tests
     │   ├── auth.test            # Authentication parameter validation
@@ -149,7 +149,7 @@ The `test/configs/flight.json` file defines environment variables:
 # description: Description of what this tests
 # group: [queries]
 
-require posthog
+require duckhog
 
 statement ok
 ATTACH 'hog:memory?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
@@ -164,7 +164,7 @@ SELECT COUNT(*) FROM remote.main.numbers;
 
 | Directive | Purpose |
 |-----------|---------|
-| `require posthog` | Load the extension |
+| `require duckhog` | Load the extension |
 | `statement ok` | Statement should succeed |
 | `statement error` | Statement should fail (with optional error message match) |
 | `query I` | Query returning INTEGER column |

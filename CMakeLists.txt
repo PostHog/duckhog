@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 
 # Set extension name here
-set(TARGET_NAME posthog)
+set(TARGET_NAME duckhog)
 
 # DuckDB's extension distribution supports vcpkg. As such, dependencies can be added in ./vcpkg.json and then
 # used in cmake with find_package.
@@ -26,7 +26,7 @@ include_directories(src/include src)
 
 # Extension sources
 set(EXTENSION_SOURCES
-    src/posthog_extension.cpp
+    src/duckhog_extension.cpp
     # Milestone 2: Storage extension with hog: protocol registration
     src/storage/posthog_storage.cpp
     src/storage/posthog_transaction_manager.cpp

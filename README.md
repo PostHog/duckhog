@@ -1,4 +1,4 @@
-# PostHog DuckDB Extension
+# DuckHog DuckDB Extension
 
 A DuckDB extension that enables direct SQL queries against PostHog data warehouse.
 
@@ -18,8 +18,8 @@ This extension allows you to attach a PostHog data source to DuckDB and query it
 
 ```sql
 -- Coming soon: Install from community extensions
-INSTALL posthog FROM community;
-LOAD posthog;
+INSTALL duckhog FROM community;
+LOAD duckhog;
 ```
 
 ### Usage
@@ -71,8 +71,8 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed build instructions.
 
 ```bash
 # Clone with submodules
-git clone --recurse-submodules https://github.com/PostHog/posthog-duckdb-extension.git
-cd posthog-duckdb-extension
+git clone --recurse-submodules https://github.com/PostHog/duckhog.git
+cd duckhog
 
 # Set up vcpkg (one-time setup)
 cd ..
@@ -80,7 +80,7 @@ git clone https://github.com/Microsoft/vcpkg.git
 cd vcpkg && git checkout 23dc124705fcac41cf35c33dd9541f5094a9c19f
 ./bootstrap-vcpkg.sh -disableMetrics
 export VCPKG_TOOLCHAIN_PATH=$(pwd)/scripts/buildsystems/vcpkg.cmake
-cd ../posthog-duckdb-extension
+cd ../duckhog
 
 # Note: this repo pins the vcpkg baseline in vcpkg-configuration.json.
 # If you use a different vcpkg checkout, vcpkg will still resolve to the pinned baseline.
@@ -90,7 +90,7 @@ cd ../posthog-duckdb-extension
 GEN=ninja make release
 
 # Test
-./build/release/duckdb -cmd "LOAD 'build/release/extension/posthog/posthog.duckdb_extension';"
+./build/release/duckdb -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';"
 ```
 
 ## Architecture

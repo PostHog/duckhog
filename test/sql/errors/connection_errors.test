@@ -2,7 +2,7 @@
 # description: Connection errors when Flight SQL server is unavailable
 # group: [errors]
 
-require posthog
+require duckhog
 
 # Attach succeeds even if endpoint is unreachable; queries should fail.
 statement ok

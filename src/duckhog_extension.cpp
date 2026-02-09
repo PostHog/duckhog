@@ -1,6 +1,6 @@
 #define DUCKDB_EXTENSION_MAIN
 
-#include "include/posthog_extension.hpp"
+#include "include/duckhog_extension.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/shared_ptr.hpp"
@@ -15,8 +15,8 @@
 
 namespace duckdb {
 
-inline void PosthogVersionScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
-    result.SetValue(0, Value("PostHog DuckDB Extension v0.1.0"));
+inline void DuckhogVersionScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
+    result.SetValue(0, Value("DuckHog DuckDB Extension v0.1.0"));
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
@@ -27,21 +27,21 @@ static void LoadInternal(ExtensionLoader &loader) {
     StorageExtension::Register(config, "hog", make_shared_ptr<PostHogStorageExtension>());
 
     // Register a simple version function to verify the extension loads
-    auto posthog_version_func = ScalarFunction("posthog_version", {}, LogicalType::VARCHAR, PosthogVersionScalarFun);
-    loader.RegisterFunction(posthog_version_func);
+    auto duckhog_version_func = ScalarFunction("duckhog_version", {}, LogicalType::VARCHAR, DuckhogVersionScalarFun);
+    loader.RegisterFunction(duckhog_version_func);
 }
 
-void PosthogExtension::Load(ExtensionLoader &loader) {
+void DuckhogExtension::Load(ExtensionLoader &loader) {
     LoadInternal(loader);
 }
 
-std::string PosthogExtension::Name() {
-    return "posthog";
+std::string DuckhogExtension::Name() {
+    return "duckhog";
 }
 
-std::string PosthogExtension::Version() const {
-#ifdef EXT_VERSION_POSTHOG
-    return EXT_VERSION_POSTHOG;
+std::string DuckhogExtension::Version() const {
+#ifdef EXT_VERSION_DUCKHOG
+    return EXT_VERSION_DUCKHOG;
 #else
     return "v0.1.0";
 #endif
@@ -51,7 +51,7 @@ std::string PosthogExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_CPP_EXTENSION_ENTRY(posthog, loader) {
+DUCKDB_CPP_EXTENSION_ENTRY(duckhog, loader) {
     duckdb::LoadInternal(loader);
 }
 
