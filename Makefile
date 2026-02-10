@@ -11,6 +11,15 @@ include extension-ci-tools/makefiles/duckdb_extension.Makefile
 test-roadmap:
 	./test/run_sql_roadmap.sh
 
+# Override tidy-check to include vcpkg manifest flags so FlightSQL features
+# from this extension's vcpkg.json are visible during clang-tidy configuration.
+.PHONY: tidy-check
+tidy-check: ${EXTENSION_CONFIG_STEP}
+	mkdir -p ./build/tidy
+	cmake $(GENERATOR) $(BUILD_FLAGS) $(EXT_DEBUG_FLAGS) $(VCPKG_MANIFEST_FLAGS) -DDISABLE_UNITY=1 -DCLANG_TIDY=1 -S $(DUCKDB_SRCDIR) -B build/tidy
+	cp duckdb/.clang-tidy build/tidy/.clang-tidy
+	cd build/tidy && python3 ../../duckdb/scripts/run-clang-tidy.py '$(PROJ_DIR)src/.*/' -header-filter '$(PROJ_DIR)src/.*/' -quiet ${TIDY_THREAD_PARAMETER} ${TIDY_BINARY_PARAMETER} ${TIDY_PERFORM_CHECKS}
+
 # Exclude roadmap SQLLogicTests from normal `make test` targets.
 # The extension-ci-tools recipe invokes:
 #   ./build/<cfg>/test/unittest "$(TESTS_BASE_DIRECTORY)*"

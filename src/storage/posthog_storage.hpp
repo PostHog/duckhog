@@ -13,7 +13,7 @@ namespace duckdb {
 
 class PostHogStorageExtension : public StorageExtension {
 public:
-    PostHogStorageExtension();
+	PostHogStorageExtension();
 };
 
 } // namespace duckdb

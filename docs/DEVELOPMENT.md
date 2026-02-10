@@ -76,7 +76,7 @@ cd vcpkg
 We use a specific vcpkg commit for reproducible builds:
 
 ```bash
-git checkout 23dc124705fcac41cf35c33dd9541f5094a9c19f
+git checkout ce613c41372b23b1f51333815feb3edd87ef8a8b
 ```
 
 This repository also pins the vcpkg baseline in `vcpkg-configuration.json` so that

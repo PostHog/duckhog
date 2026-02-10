@@ -30,7 +30,46 @@ jobs:
       duckdb_version: v1.4.3
       ci_tools_version: v1.4.3
       extension_name: duckhog
-      format_checks: 'format;tidy'
+      format_checks: 'format'
+
+  tidy-check:
+    name: Tidy Check
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc
+      CXX: g++
+      GEN: ninja
+      TIDY_THREADS: 4
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install Tooling
+        run: |
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq ninja-build clang-tidy
+          sudo pip3 install pybind11[global] --break-system-packages
+
+      - name: Setup vcpkg
+        run: |
+          BASELINE="$(python3 - <<'PY'
+          import json
+          with open("vcpkg-configuration.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+          print(data["default-registry"]["baseline"])
+          PY
+          )"
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          cd vcpkg
+          git checkout "$BASELINE"
+          ./bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Tidy Check
+        run: make tidy-check
 
   integration-tests:
     name: Integration Tests (DuckLake Pattern)

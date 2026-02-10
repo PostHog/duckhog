@@ -24,47 +24,47 @@ class PostHogSchemaEntry;
 
 class PostHogTableEntry : public TableCatalogEntry {
 public:
-    PostHogTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info,
-                      PostHogCatalog &posthog_catalog, std::shared_ptr<arrow::Schema> arrow_schema);
-    ~PostHogTableEntry() override;
+	PostHogTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info,
+	                  PostHogCatalog &posthog_catalog, std::shared_ptr<arrow::Schema> arrow_schema);
+	~PostHogTableEntry() override;
 
 public:
-    //===--------------------------------------------------------------------===//
-    // TableCatalogEntry Interface
-    //===--------------------------------------------------------------------===//
+	//===--------------------------------------------------------------------===//
+	// TableCatalogEntry Interface
+	//===--------------------------------------------------------------------===//
 
-    unique_ptr<BaseStatistics> GetStatistics(ClientContext &context, column_t column_id) override;
+	unique_ptr<BaseStatistics> GetStatistics(ClientContext &context, column_t column_id) override;
 
-    TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) override;
+	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) override;
 
-    TableStorageInfo GetStorageInfo(ClientContext &context) override;
+	TableStorageInfo GetStorageInfo(ClientContext &context) override;
 
-    void BindUpdateConstraints(Binder &binder, LogicalGet &get, LogicalProjection &proj, LogicalUpdate &update,
-                               ClientContext &context) override;
+	void BindUpdateConstraints(Binder &binder, LogicalGet &get, LogicalProjection &proj, LogicalUpdate &update,
+	                           ClientContext &context) override;
 
-    //===--------------------------------------------------------------------===//
-    // PostHog-specific methods
-    //===--------------------------------------------------------------------===//
+	//===--------------------------------------------------------------------===//
+	// PostHog-specific methods
+	//===--------------------------------------------------------------------===//
 
-    // Get the schema name for this table
-    const string &GetSchemaName() const {
-        return schema_name_;
-    }
+	// Get the schema name for this table
+	const string &GetSchemaName() const {
+		return schema_name_;
+	}
 
-    // Get the parent PostHog catalog
-    PostHogCatalog &GetPostHogCatalog() {
-        return posthog_catalog_;
-    }
+	// Get the parent PostHog catalog
+	PostHogCatalog &GetPostHogCatalog() {
+		return posthog_catalog_;
+	}
 
-    // Get the cached Arrow schema from catalog creation
-    const std::shared_ptr<arrow::Schema> &GetArrowSchema() const {
-        return arrow_schema_;
-    }
+	// Get the cached Arrow schema from catalog creation
+	const std::shared_ptr<arrow::Schema> &GetArrowSchema() const {
+		return arrow_schema_;
+	}
 
 private:
-    PostHogCatalog &posthog_catalog_;
-    string schema_name_;
-    std::shared_ptr<arrow::Schema> arrow_schema_;
+	PostHogCatalog &posthog_catalog_;
+	string schema_name_;
+	std::shared_ptr<arrow::Schema> arrow_schema_;
 };
 
 } // namespace duckdb
