@@ -50,8 +50,15 @@ venv/
 testext
 test/integration/.control_plane.pid
 test/integration/.duckling_go.pid
+test/integration/.duckgres.pid
 test/integration/.venv/
 test/integration/.gocache/
+test/integration/duckgres.log
+test/integration/duckgres_server
+test/integration/server.crt
+test/integration/server.key
+test/integration/duckgres-data/
+test/integration/duckgres-sockets/
 test/integration/duckling_go.yaml
 test/integration/memory.duckdb*
 test/integration/duckling_go_server

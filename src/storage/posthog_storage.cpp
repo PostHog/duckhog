@@ -12,7 +12,6 @@
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_stub_catalog.hpp"
 #include "utils/connection_string.hpp"
-#include "http/control_plane_client.hpp"
 #include "flight/flight_client.hpp"
 #include "duckdb/main/database_manager.hpp"
 #include "utils/posthog_logger.hpp"
@@ -39,31 +38,17 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
     // Parse the connection string
     auto config = ConnectionString::Parse(info.path);
 
-    // Validate required parameters
-    if (config.token.empty()) {
+    if (config.user.empty()) {
         throw InvalidInputException(
-            "PostHog: Missing authentication token. Use: ATTACH 'hog:database?token=YOUR_TOKEN'");
+            "PostHog: Missing username. Use: ATTACH 'hog:database?user=USERNAME&password=PASSWORD'");
+    }
+    if (config.password.empty()) {
+        throw InvalidInputException(
+            "PostHog: Missing password. Use: ATTACH 'hog:database?user=USERNAME&password=PASSWORD'");
     }
 
-    // Determine connection mode:
-    // 1. If flight_server= is specified, use direct connection (dev/testing bypass)
-    // 2. Otherwise, use control plane (production path)
-    if (!config.UseDirectFlightServer()) {
-        // Production path: use control plane to get flight endpoint
-        if (config.control_plane.empty()) {
-            config.control_plane = PostHogConnectionConfig::DEFAULT_CONTROL_PLANE;
-        }
-
-        // Call control plane API to get flight_endpoint and session_token
-        auto cp_response = posthog::ControlPlaneClient::CreateSession(config.control_plane, config.token, config.database);
-
-        // Update config with the returned flight endpoint
-        config.flight_server = cp_response.flight_endpoint;
-
-        // If control plane returns a session token, use it instead of the original API token
-        if (cp_response.session_token.has_value()) {
-            config.token = cp_response.session_token.value();
-        }
+    if (config.flight_server.empty()) {
+        config.flight_server = PostHogConnectionConfig::DEFAULT_FLIGHT_SERVER;
     }
 
     // Check if this is a secondary catalog attachment (has __remote_catalog parameter)
@@ -85,7 +70,7 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
     // No specific catalog requested: enumerate all remote catalogs and attach them
     std::vector<string> remote_catalogs;
     try {
-        PostHogFlightClient temp_client(config.flight_server, config.token);
+        PostHogFlightClient temp_client(config.flight_server, config.user, config.password);
         temp_client.Authenticate();
         remote_catalogs = EnumerateRemoteCatalogs(temp_client);
     } catch (const std::exception &e) {

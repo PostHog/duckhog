@@ -7,23 +7,23 @@ It is intended for maintainers and contributors.
 
 - `PostHogStorageExtension` (`src/storage/posthog_storage.cpp`)
   - Registers the `hog:` protocol for `ATTACH`.
-  - Parses connection strings and validates required parameters (token).
-  - **Single-catalog attach**: if `hog:<catalog>?token=...` is provided, creates one `PostHogCatalog` for that remote catalog.
-  - **Multi-catalog attach**: if no catalog is provided (`hog:?token=...`), enumerates remote catalogs via Flight SQL metadata and attaches each as a separate DuckDB database using `<alias>_<catalog>` naming. The primary alias (`AS <alias>`) is a stub catalog with no tables - users must use the prefixed versions for queries.
+  - Parses connection strings and validates required parameters (`user`/`password`).
+  - **Single-catalog attach**: if `hog:<catalog>?user=...&password=...` is provided, creates one `PostHogCatalog` for that remote catalog.
+  - **Multi-catalog attach**: if no catalog is provided (`hog:?user=...&password=...`), enumerates remote catalogs via Flight SQL metadata and attaches each as a separate DuckDB database using `<alias>_<catalog>` naming. The primary alias (`AS <alias>`) is a stub catalog with no tables - users must use the prefixed versions for queries.
   - Uses an internal `__remote_catalog=<catalog>` option when attaching secondary catalogs to avoid re-enumeration.
 
 ## Connection String
 
 - `ConnectionString` / `PostHogConnectionConfig` (`src/utils/connection_string.cpp`)
-  - Parses `<catalog>?token=...&control_plane=...&flight_server=...`.
+  - Parses `<catalog>?user=...&password=...&flight_server=...`.
   - URL-decodes values and stores extra options.
-  - Applies default control plane when missing (unless `flight_server` is provided).
+  - Applies default Flight endpoint when missing.
 
 ## Flight SQL Client
 
 - `PostHogFlightClient` (`src/flight/flight_client.cpp`)
   - Wraps Arrow Flight SQL client logic.
-  - Adds bearer token headers and exposes metadata APIs (schemas/tables).
+  - Adds HTTP Basic auth headers and exposes metadata APIs (schemas/tables).
   - Provides both table and streaming query execution.
 
 ## Catalog + Entries

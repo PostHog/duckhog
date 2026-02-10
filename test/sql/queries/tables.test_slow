@@ -11,8 +11,12 @@ require-env FLIGHT_HOST
 
 require-env FLIGHT_PORT
 
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
 statement ok
-ATTACH 'hog:memory?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
 
 # Test 4: Schema listing
 query I
@@ -20,15 +24,14 @@ SELECT schema_name FROM information_schema.schemata WHERE catalog_name = 'remote
 ----
 main
 
-# Test 5: Table listing - verify expected tables exist
+# Test 5: Table listing - verify expected compatibility tables exist
 query I rowsort
 SELECT table_name FROM information_schema.tables
-WHERE table_catalog = 'remote' AND table_schema = 'main';
+WHERE table_catalog = 'remote' AND table_schema = 'main'
+  AND table_name IN ('pg_type', 'pg_namespace', 'pg_database', 'pg_roles', 'pg_class_full');
 ----
-decimal_test
-dictionary_test
-nested_test
-numbers
-run_end_test
-test_data
-types_test
+pg_class_full
+pg_database
+pg_namespace
+pg_roles
+pg_type

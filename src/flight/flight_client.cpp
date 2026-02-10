@@ -22,8 +22,47 @@
 
 namespace duckdb {
 
-PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std::string &token)
-    : endpoint_(endpoint), token_(token) {
+namespace {
+std::string Base64Encode(const std::string &input) {
+    static const char kBase64Alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string output;
+    output.reserve(((input.size() + 2) / 3) * 4);
+
+    size_t i = 0;
+    while (i + 3 <= input.size()) {
+        const unsigned char b0 = static_cast<unsigned char>(input[i++]);
+        const unsigned char b1 = static_cast<unsigned char>(input[i++]);
+        const unsigned char b2 = static_cast<unsigned char>(input[i++]);
+        output.push_back(kBase64Alphabet[(b0 >> 2) & 0x3F]);
+        output.push_back(kBase64Alphabet[((b0 & 0x03) << 4) | ((b1 >> 4) & 0x0F)]);
+        output.push_back(kBase64Alphabet[((b1 & 0x0F) << 2) | ((b2 >> 6) & 0x03)]);
+        output.push_back(kBase64Alphabet[b2 & 0x3F]);
+    }
+
+    const size_t rem = input.size() - i;
+    if (rem == 1) {
+        const unsigned char b0 = static_cast<unsigned char>(input[i]);
+        output.push_back(kBase64Alphabet[(b0 >> 2) & 0x3F]);
+        output.push_back(kBase64Alphabet[(b0 & 0x03) << 4]);
+        output.push_back('=');
+        output.push_back('=');
+    } else if (rem == 2) {
+        const unsigned char b0 = static_cast<unsigned char>(input[i++]);
+        const unsigned char b1 = static_cast<unsigned char>(input[i]);
+        output.push_back(kBase64Alphabet[(b0 >> 2) & 0x3F]);
+        output.push_back(kBase64Alphabet[((b0 & 0x03) << 4) | ((b1 >> 4) & 0x0F)]);
+        output.push_back(kBase64Alphabet[(b1 & 0x0F) << 2]);
+        output.push_back('=');
+    }
+
+    return output;
+}
+} // namespace
+
+PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std::string &user,
+                                         const std::string &password)
+    : endpoint_(endpoint), user_(user), password_(password) {
 
     // Parse endpoint and create location
     auto location_result = arrow::flight::Location::Parse(endpoint);
@@ -36,9 +75,9 @@ PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std:
     // Create Flight client options
     arrow::flight::FlightClientOptions options;
 
-    // For TLS endpoints, we might need to configure certificates
-    // For now, use default options which work for non-TLS connections
-    // TODO: Add TLS configuration support
+    // Duckgres uses TLS with self-signed certs in local/dev workflows.
+    // We require TLS transport but skip certificate verification by default.
+    options.disable_server_verification = true;
 
     // Connect to the Flight server
     auto client_result = arrow::flight::FlightClient::Connect(location, options);
@@ -57,11 +96,9 @@ PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std:
 PostHogFlightClient::~PostHogFlightClient() = default;
 
 void PostHogFlightClient::Authenticate() {
-    // For bearer token authentication, we simply mark as authenticated
-    // The actual token is passed in the headers with each request via GetCallOptions()
-    //
-    // For more complex authentication flows (username/password, OAuth, etc.),
-    // this method would call the Authenticate RPC
+    if (user_.empty() || password_.empty()) {
+        throw std::runtime_error("PostHog: Missing Flight credentials (user/password)");
+    }
     authenticated_ = true;
 }
 
@@ -88,15 +125,22 @@ arrow::Status PostHogFlightClient::Ping() {
         return arrow::Status::OK();
     }
 
-    // Ensure we can open and read at least once from the stream.
+    // Drain the stream so server-side readers are fully released on single-conn
+    // sessions where one open result stream can block subsequent statements.
     auto stream_result = sql_client_->DoGet(call_options, info->endpoints()[0].ticket);
     if (!stream_result.ok()) {
         return stream_result.status();
     }
     auto stream = std::move(*stream_result);
-    auto chunk_result = stream->Next();
-    if (!chunk_result.ok()) {
-        return chunk_result.status();
+    while (true) {
+        auto chunk_result = stream->Next();
+        if (!chunk_result.ok()) {
+            return chunk_result.status();
+        }
+        auto chunk = std::move(*chunk_result);
+        if (!chunk.data) {
+            break;
+        }
     }
 
     return arrow::Status::OK();
@@ -105,9 +149,9 @@ arrow::Status PostHogFlightClient::Ping() {
 arrow::flight::FlightCallOptions PostHogFlightClient::GetCallOptions() const {
     arrow::flight::FlightCallOptions options;
 
-    // Add bearer token as authorization header
-    if (!token_.empty()) {
-        options.headers.push_back({"authorization", "Bearer " + token_});
+    // Add HTTP Basic credentials (username/password) for each request.
+    if (!user_.empty() && !password_.empty()) {
+        options.headers.push_back({"authorization", "Basic " + Base64Encode(user_ + ":" + password_)});
     }
 
     // controls new allocations Arrow performs while decoding
@@ -643,6 +687,20 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetTableSchema(const std::st
     }
     default:
         throw std::runtime_error("PostHog: Unexpected table_schema column type: " + schema_col->type()->ToString());
+    }
+
+    // Drain remaining chunks so this stream is fully consumed before the next
+    // RPC on a single-connection Flight session.
+    while (true) {
+        auto next_chunk_result = stream->Next();
+        if (!next_chunk_result.ok()) {
+            throw std::runtime_error("PostHog: Failed to finish reading table metadata: " +
+                                     next_chunk_result.status().ToString());
+        }
+        auto next_chunk = std::move(*next_chunk_result);
+        if (!next_chunk.data) {
+            break;
+        }
     }
 
     // Deserialize the Arrow schema from IPC format

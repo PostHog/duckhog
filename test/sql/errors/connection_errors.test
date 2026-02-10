@@ -4,11 +4,12 @@
 
 require duckhog
 
-# Attach succeeds even if endpoint is unreachable; queries should fail.
+# Attach succeeds even if endpoint is unreachable; operations that require
+# a live server should fail with a connection error.
 statement ok
-ATTACH 'hog:memory?token=demo&flight_server=grpc://127.0.0.1:1' AS remote;
+ATTACH 'hog:memory?user=postgres&password=postgres&flight_server=grpc+tls://127.0.0.1:1' AS remote;
 
 statement error
-SELECT * FROM remote.main.test_data;
+CREATE SCHEMA remote.main;
 ----
 Not connected to remote server

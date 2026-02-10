@@ -54,7 +54,7 @@ private:
 
 class PostHogFlightClient {
 public:
-    PostHogFlightClient(const std::string &endpoint, const std::string &token);
+    PostHogFlightClient(const std::string &endpoint, const std::string &user, const std::string &password);
     ~PostHogFlightClient();
 
     // Prevent copying (Flight client is not copyable)
@@ -69,7 +69,7 @@ public:
     // Authentication
     //===--------------------------------------------------------------------===//
 
-    // Authenticate with the server using bearer token
+    // Authenticate with the server using username/password over TLS.
     void Authenticate();
 
     // Check if currently authenticated
@@ -137,7 +137,8 @@ public:
 
 private:
     std::string endpoint_;
-    std::string token_;
+    std::string user_;
+    std::string password_;
     bool authenticated_ = false;
 
     // Arrow Flight clients

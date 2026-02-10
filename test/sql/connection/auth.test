@@ -4,13 +4,13 @@
 
 require duckhog
 
-# Missing or empty token should fail
+# Missing user/password should fail
 statement error
-ATTACH 'hog:memory?token=' AS remote;
+ATTACH 'hog:memory?user=' AS remote;
 ----
-Missing authentication token
+Missing username
 
 statement error
-ATTACH 'hog:memory?flight_server=grpc://127.0.0.1:8815' AS remote;
+ATTACH 'hog:memory?user=postgres&flight_server=grpc+tls://127.0.0.1:8815' AS remote;
 ----
-Missing authentication token
+Missing password

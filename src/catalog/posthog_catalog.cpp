@@ -49,11 +49,11 @@ void PostHogCatalog::Initialize(bool load_builtin) {
     // Log attachment attempt
     POSTHOG_LOG_INFO("Attaching catalog '%s' -> remote catalog '%s'", database_name_.c_str(), remote_catalog_.c_str());
     POSTHOG_LOG_INFO("Flight server: %s", config_.flight_server.c_str());
-    POSTHOG_LOG_DEBUG("Token: %s", config_.token.empty() ? "(none)" : "(provided)");
+    POSTHOG_LOG_DEBUG("User: %s", config_.user.empty() ? "(none)" : config_.user.c_str());
 
     // Create the Flight SQL client (Milestone 3)
     try {
-        flight_client_ = make_uniq<PostHogFlightClient>(config_.flight_server, config_.token);
+        flight_client_ = make_uniq<PostHogFlightClient>(config_.flight_server, config_.user, config_.password);
         flight_client_->Authenticate();
         POSTHOG_LOG_INFO("Initialized Flight SQL client");
         auto ping_status = flight_client_->Ping();
@@ -310,11 +310,7 @@ bool PostHogCatalog::InMemory() {
 }
 
 string PostHogCatalog::GetDBPath() {
-    // Return the flight server endpoint or control plane URL
-    if (!config_.flight_server.empty()) {
-        return config_.flight_server;
-    }
-    return config_.control_plane;
+    return config_.flight_server;
 }
 
 void PostHogCatalog::DropSchema(ClientContext &context, DropInfo &info) {

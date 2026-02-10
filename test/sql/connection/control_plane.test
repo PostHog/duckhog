@@ -1,17 +1,15 @@
 # name: test/sql/connection/control_plane.test
-# description: Control plane connection errors and validation
+# description: Credential validation with direct Flight mode
 # group: [connection]
 
 require duckhog
 
-# Error: Control plane endpoint unreachable
 statement error
-ATTACH 'hog:test_db?token=demo&control_plane=http://127.0.0.1:1' AS cp_unreachable;
+ATTACH 'hog:test_db?password=postgres&flight_server=grpc+tls://127.0.0.1:1' AS cp_unreachable;
 ----
-Control plane request failed
+Missing username
 
-# Error: Invalid control plane URL (DNS failure)
 statement error
-ATTACH 'hog:test_db?token=demo&control_plane=http://nonexistent.invalid:8080' AS cp_invalid_host;
+ATTACH 'hog:test_db?user=postgres&flight_server=grpc+tls://127.0.0.1:1' AS cp_invalid_host;
 ----
-Control plane request failed
+Missing password

@@ -21,7 +21,7 @@ jobs:
     with:
       duckdb_version: v1.4.3
       ci_tools_version: v1.4.3
-      extension_name: posthog
+      extension_name: duckhog
 
   code-quality-check:
     name: Code Quality Check
@@ -29,7 +29,7 @@ jobs:
     with:
       duckdb_version: v1.4.3
       ci_tools_version: v1.4.3
-      extension_name: posthog
+      extension_name: duckhog
       format_checks: 'format;tidy'
 
   integration-tests:
@@ -39,17 +39,17 @@ jobs:
     env:
       FLIGHT_HOST: 127.0.0.1
       FLIGHT_PORT: 8815
+      DUCKHOG_USER: postgres
+      DUCKHOG_PASSWORD: postgres
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Checkout duckgres
+        uses: actions/checkout@v4
         with:
-          python-version: '3.11'
-
-      - name: Install Python dependencies
-        run: pip install pyarrow duckdb
+          repository: PostHog/duckgres
+          path: duckgres
 
       - name: Download DuckDB CLI
         run: |
@@ -62,17 +62,17 @@ jobs:
       - name: Download extension artifact
         uses: actions/download-artifact@v4
         with:
-          name: duckdb-stable-linux-amd64-extension-posthog
-          path: build/release/extension/posthog/
+          name: duckdb-stable-linux-amd64-extension-duckhog
+          path: build/release/extension/duckhog/
 
-      - name: Start Flight SQL server
+      - name: Start Duckgres control-plane
         run: |
-          python test/integration/flight_server.py --host $FLIGHT_HOST --port $FLIGHT_PORT &
-          sleep 5
+          DUCKGRES_ROOT=$GITHUB_WORKSPACE/duckgres ./scripts/test-servers.sh start --background --seed
 
       - name: Run SQLLogicTests
         run: |
-          EXT_PATH="build/release/extension/posthog/posthog.duckdb_extension"
+          eval "$(./scripts/test-servers.sh env)"
+          EXT_PATH="build/release/extension/duckhog/duckhog.duckdb_extension"
 
           # Run basic_select tests
           ./build/release/duckdb -unsigned -cmd "LOAD '$EXT_PATH';" < test/sql/queries/basic_select.test_slow
@@ -82,3 +82,7 @@ jobs:
 
           # Run projection tests
           ./build/release/duckdb -unsigned -cmd "LOAD '$EXT_PATH';" < test/sql/queries/projection.test_slow
+
+      - name: Stop Duckgres control-plane
+        if: always()
+        run: ./scripts/test-servers.sh stop

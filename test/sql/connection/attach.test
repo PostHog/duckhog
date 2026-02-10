@@ -4,11 +4,11 @@
 
 require duckhog
 
-# Test: Invalid connection string (missing token) should fail
+# Test: Invalid connection string (missing user) should fail
 statement error
 ATTACH 'hog:memory' AS remote;
 ----
-Missing authentication token
+Missing username
 
 # Note: Invalid endpoints and unreachable servers create catalogs in
 # "disconnected mode" - ATTACH succeeds but queries will fail.
