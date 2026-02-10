@@ -1,0 +1,31 @@
+# name: test/sql/roadmap/rm10_time_travel_remote.test_slow
+# description: Roadmap target RM10 - time travel query on remote catalog
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm10 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm10;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm10.t(i INT);
+
+query I
+SELECT COUNT(*) FROM remote_flight.roadmap_rm10.t AT (VERSION => 1);
+
+----
+0

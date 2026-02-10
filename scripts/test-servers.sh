@@ -383,7 +383,6 @@ start_duckgres() {
             --mode control-plane \
             --host "$PG_HOST" \
             --port "$PG_PORT" \
-            --flight-host "$FLIGHT_HOST" \
             --flight-port "$FLIGHT_PORT" \
             --worker-count "$DUCKGRES_WORKERS" \
             --socket-dir "$DUCKGRES_SOCKET_DIR" \
@@ -403,7 +402,6 @@ start_duckgres() {
         --mode control-plane \
         --host "$PG_HOST" \
         --port "$PG_PORT" \
-        --flight-host "$FLIGHT_HOST" \
         --flight-port "$FLIGHT_PORT" \
         --worker-count "$DUCKGRES_WORKERS" \
         --socket-dir "$DUCKGRES_SOCKET_DIR" \

@@ -1,0 +1,34 @@
+# name: test/sql/roadmap/rm14_nested_types_remote.test_slow
+# description: Roadmap target RM14 - nested type insert and read semantics
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm14 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm14;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm14.t_nested(l INTEGER[], s STRUCT(i INTEGER, j INTEGER));
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm14.t_nested VALUES ([1, 2, 3], {'i': 1, 'j': 2});
+
+query I
+SELECT CASE WHEN COUNT(*) = 1 THEN 1 ELSE 0 END FROM remote_flight.roadmap_rm14.t_nested WHERE list_extract(l, 1) = 1 AND s.i = 1;
+
+----
+1
