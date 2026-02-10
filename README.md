@@ -10,7 +10,7 @@ This extension allows you to attach a PostHog data source to DuckDB and query it
 
 - **Native DuckDB Integration**: Attach PostHog as a remote database using the `hog:` protocol
 - **Arrow Flight SQL**: High-performance data transfer using Apache Arrow's Flight protocol
-- **Secure Authentication**: Bearer token authentication for secure access
+- **Secure Authentication**: Username/password authentication over TLS
 
 ## Quick Start
 
@@ -25,42 +25,39 @@ LOAD duckhog;
 ### Usage
 
 ```sql
--- Production: Attach via control plane (recommended)
-ATTACH 'hog:my_database?token=YOUR_API_TOKEN' AS posthog_db;
-
--- Development: Direct flight server connection (bypasses control plane)
-ATTACH 'hog:my_database?token=YOUR_API_TOKEN&flight_server=grpc://localhost:8815' AS posthog_db;
+-- Direct Flight SQL attach (Duckgres control-plane Flight endpoint)
+ATTACH 'hog:my_database?user=postgres&password=postgres&flight_server=grpc+tls://localhost:8815' AS posthog_db;
 
 -- Multi-catalog: Auto-discover and attach *all* remote catalogs
 -- This creates attachments named: <alias>_<catalog> (e.g. posthog_db_test, posthog_db_alt, ...)
 -- Note: the primary alias (posthog_db) is a stub with no tables - use the prefixed versions for queries
-ATTACH 'hog:?token=YOUR_API_TOKEN' AS posthog_db;
+ATTACH 'hog:?user=postgres&password=postgres&flight_server=grpc+tls://localhost:8815' AS posthog_db;
 
 -- Query your data
 SELECT * FROM posthog_db.events LIMIT 10;
 -- (In multi-catalog mode you may prefer: SELECT * FROM posthog_db_<catalog>.events LIMIT 10;)
+
+-- Local/dev only: skip TLS certificate verification for self-signed certs
+ATTACH 'hog:my_database?user=postgres&password=postgres&flight_server=grpc+tls://localhost:8815&tls_skip_verify=true' AS posthog_dev;
 ```
 
 ### Connection String Format
 
 ```
-hog:[<catalog>]?token=<api_token>[&control_plane=<url>][&flight_server=<url>]
+hog:[<catalog>]?user=<username>&password=<password>[&flight_server=<url>][&tls_skip_verify=<true|false>]
 ```
 
 | Parameter | Description | Required |
 |-----------|-------------|----------|
-| `catalog` | Remote catalog to attach. If omitted (`hog:?token=...`), auto-discovers and attaches all remote catalogs. | No |
-| `token` | API authentication token | Yes |
-| `control_plane` | Control plane URL (default: `http://localhost:8080`) | No |
-| `flight_server` | Direct Flight SQL server endpoint (dev/testing only, bypasses control plane) | No |
-
-**Connection Modes:**
-- **Production (default)**: Uses `control_plane` to obtain a session and Flight endpoint dynamically
-- **Development**: Use `flight_server=` to connect directly to a Flight SQL server, bypassing the control plane
+| `catalog` | Remote catalog to attach. If omitted (`hog:?user=...`), auto-discovers and attaches all remote catalogs. | No |
+| `user` | Flight SQL username | Yes |
+| `password` | Flight SQL password | Yes |
+| `flight_server` | Flight SQL server endpoint (default: `grpc+tls://127.0.0.1:8815`) | No |
+| `tls_skip_verify` | Disable TLS certificate verification (`true`/`false`, default: `false`). Use only for local/dev self-signed certs. | No |
 
 **Catalog Attach Modes:**
-- **Single-catalog attach**: `ATTACH 'hog:<catalog>?token=...' AS remote;` attaches exactly one remote catalog under the local name `remote`.
-- **Multi-catalog attach**: `ATTACH 'hog:?token=...' AS remote;` discovers remote catalogs and attaches each as `remote_<catalog>`. The `remote` alias is a stub catalog with no tables - always use the prefixed versions for queries.
+- **Single-catalog attach**: `ATTACH 'hog:<catalog>?user=...&password=...' AS remote;` attaches exactly one remote catalog under the local name `remote`.
+- **Multi-catalog attach**: `ATTACH 'hog:?user=...&password=...' AS remote;` discovers remote catalogs and attaches each as `remote_<catalog>`. The `remote` alias is a stub catalog with no tables - always use the prefixed versions for queries.
   - Cleanup: you must `DETACH` each discovered `remote_<catalog>` separately if you want to remove them all.
 
 ## Building from Source

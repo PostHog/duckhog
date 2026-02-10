@@ -6,7 +6,3 @@
 	path = extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools
 	branch = main
-[submodule "posthog-duckdb-server"]
-	path = posthog-duckdb-server
-	url = https://github.com/PostHog/posthog-duckdb-server.git
-	branch = main

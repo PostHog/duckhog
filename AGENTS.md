@@ -14,11 +14,12 @@
 ## Tests
 - Full suite: `make test` (integration runs only when the Flight server is running and env vars are set)
 - Unit tests only: `./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"`
-- Integration tests (Duckling / `posthog-duckdb-server` submodule):
+- Integration tests (`duckgres` control-plane Flight):
   - `./scripts/test-servers.sh start --background --seed`
   - `eval "$(./scripts/test-servers.sh env)"`
   - `./build/release/test/unittest "test/sql/queries/*"`
   - `./scripts/test-servers.sh stop`
+- "I identified why the server keeps 'disappearing' here: background processes don't persist across separate tool invocations in this environment. I'm now running start + integration tests + stop in one command so the Duckgres process stays alive for the entire test run."
 
 ## Repo notes
 - Submodules required: `git submodule update --init --recursive`

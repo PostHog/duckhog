@@ -12,7 +12,7 @@ GEN=ninja make release
 # Integration tests will only run if FLIGHT_HOST/FLIGHT_PORT are set and the server is running.
 make test
 
-# Run integration tests (requires Flight SQL server)
+# Run integration tests (requires Duckgres control-plane Flight listener)
 ./scripts/test-servers.sh start --background --seed
 eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
@@ -38,31 +38,15 @@ Unit tests (`.test` files) run without external dependencies:
 
 ### Integration Tests
 
-Integration tests (`.test_slow` files) require a running Flight SQL server:
+Integration tests (`.test_slow` files) require a running Duckgres control-plane process:
 
 ```bash
-# Step 1: Start the Flight SQL server
+# Step 1: Start Duckgres control-plane (PG + Flight listeners)
 ./scripts/test-servers.sh start --seed
 
 # Step 2 (in another terminal): Run integration tests
 eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
-```
-
-### Control Plane Integration Tests
-
-Control plane tests require both the Flight SQL server and the mock control plane server:
-
-```bash
-# Step 1: Start both servers (Flight SQL + mock control plane)
-./scripts/test-servers.sh start --background --control-plane --seed
-
-# Step 2: Run control plane integration tests
-eval "$(./scripts/test-servers.sh env)"
-./build/release/test/unittest "test/sql/queries/control_plane.test_slow"
-
-# Clean up
-./scripts/test-servers.sh stop
 ```
 
 **Background mode** (for CI or single terminal):
@@ -102,22 +86,20 @@ test/
 ├── configs/
 │   └── flight.json              # Test configuration for Flight SQL
 ├── integration/
-│   ├── control_plane_server.py  # Mock control plane HTTP server
-│   └── memory.duckdb            # Seeded DuckDB database (generated)
+│   ├── duckgres.log             # Duckgres runtime logs
+│   └── duckgres_server          # Built duckgres binary used by harness
 └── sql/
     ├── duckhog.test             # Extension loading tests
     ├── connection/
     │   ├── attach.test          # Connection string parsing tests
     │   ├── auth.test            # Authentication parameter validation
-    │   └── control_plane.test   # Control plane error scenarios
     ├── errors/
     │   └── connection_errors.test  # Error message verification
     └── queries/
         ├── basic_select.test_slow   # Basic queries (requires server)
         ├── arrow_types.test_slow    # Arrow type/encoding coverage (requires server)
         ├── tables.test_slow         # Schema/table operations
-        ├── projection.test_slow     # Column projection tests
-        └── control_plane.test_slow  # Control plane integration (requires both servers)
+        └── projection.test_slow     # Column projection tests
 ```
 
 ## Test File Conventions
@@ -152,7 +134,7 @@ The `test/configs/flight.json` file defines environment variables:
 require duckhog
 
 statement ok
-ATTACH 'hog:memory?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote;
 
 query I
 SELECT COUNT(*) FROM remote.main.numbers;
@@ -178,5 +160,5 @@ See [SQLLogicTest documentation](https://duckdb.org/dev/testing) for more detail
 
 Integration tests run automatically in GitHub Actions:
 1. Build extension
-2. Start Flight SQL server (separate step)
+2. Start Duckgres control-plane Flight listener (separate step)
 3. Run SQLLogicTests against the server

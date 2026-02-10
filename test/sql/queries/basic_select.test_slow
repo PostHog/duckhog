@@ -11,9 +11,13 @@ require-env FLIGHT_HOST
 
 require-env FLIGHT_PORT
 
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
 # Connect to the Flight SQL server
 statement ok
-ATTACH 'hog:memory?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote;
 
 # Test 1: Basic SELECT 1
 query I
@@ -21,14 +25,16 @@ SELECT 1;
 ----
 1
 
-# Test 2: Query test_data table (has single column: value)
+# Test 2: Query compatibility table exposed via Flight catalog
 query I
-SELECT value FROM remote.main.test_data;
+SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END FROM remote.main.pg_type;
 ----
 1
 
-# Test 3: Query numbers table with COUNT
+# Test 3: Verify remote main schema is visible in information_schema
 query I
-SELECT COUNT(*) FROM remote.main.numbers;
+SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
+FROM information_schema.tables
+WHERE table_catalog = 'remote' AND table_schema = 'main';
 ----
-10
+1

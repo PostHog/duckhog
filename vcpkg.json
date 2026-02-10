@@ -8,8 +8,6 @@
                         "features": ["flight", "flightsql"]
                 },
                 "grpc",
-                "protobuf",
-                "curl",
-                "nlohmann-json"
+                "protobuf"
         ]
 }

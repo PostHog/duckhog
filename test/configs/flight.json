@@ -13,6 +13,14 @@
     {
       "env_name": "FLIGHT_PORT",
       "env_value": "8815"
+    },
+    {
+      "env_name": "DUCKHOG_USER",
+      "env_value": "postgres"
+    },
+    {
+      "env_name": "DUCKHOG_PASSWORD",
+      "env_value": "postgres"
     }
   ]
 }

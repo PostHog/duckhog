@@ -11,12 +11,15 @@ require-env FLIGHT_HOST
 
 require-env FLIGHT_PORT
 
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
 # When no catalog is specified in the connection string, the extension
 # auto-discovers all remote catalogs from the Flight server.
-# DuckDB typically exposes multiple catalogs (e.g. "memory", "system", "temp").
-# All discovered catalogs use the prefix pattern: <alias>_<catalog_name>
+# Discovered catalogs use the prefix pattern: <alias>_<catalog_name>.
 statement ok
-ATTACH 'hog:?token=demo&flight_server=grpc://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote;
 
 # Verify remote_memory has the 'main' schema
 query I
@@ -24,17 +27,12 @@ SELECT COUNT(*) FROM information_schema.schemata WHERE catalog_name = 'remote_me
 ----
 1
 
-# Verify remote_system has the 'main' schema
+# Ensure the primary data catalog has working table access
+
 query I
-SELECT COUNT(*) FROM information_schema.schemata WHERE catalog_name = 'remote_system' AND schema_name = 'main';
+SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END FROM remote_memory.main.pg_type;
 ----
 1
-
-# Ensure the primary data catalog has working table access
-query I
-SELECT COUNT(*) FROM remote_memory.main.numbers;
-----
-10
 
 # The primary alias 'remote' is a stub catalog with no tables.
 # Verify it has no schemas in information_schema
@@ -52,19 +50,13 @@ SELECT COUNT(*) FROM duckdb_databases() WHERE database_name = 'remote';
 
 # Attempting to query the stub catalog should fail with a helpful error message
 statement error
-SELECT * FROM remote.main.numbers;
+SELECT * FROM remote.main.pg_type;
 ----
 PostHog: 'remote' is a stub catalog with no tables. Use 'remote_<catalog>' instead
 
-# Cleanup: detach all catalogs
+# Cleanup: detach known catalogs
 statement ok
 DETACH remote_memory;
-
-statement ok
-DETACH remote_system;
-
-statement ok
-DETACH remote_temp;
 
 statement ok
 DETACH remote;

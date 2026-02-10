@@ -11,7 +11,7 @@
 
 namespace duckdb {
 
-std::string ConnectionString::UrlDecode(const std::string &str) {
+std::string ConnectionString::UrlDecode(const std::string &str, bool plus_as_space) {
     std::string result;
     result.reserve(str.size());
 
@@ -26,7 +26,7 @@ std::string ConnectionString::UrlDecode(const std::string &str) {
                 i += 2;
                 continue;
             }
-        } else if (str[i] == '+') {
+        } else if (plus_as_space && str[i] == '+') {
             result += ' ';
             continue;
         }
@@ -65,14 +65,18 @@ PostHogConnectionConfig ConnectionString::Parse(const std::string &connection_st
             auto eq_pos = param.find('=');
             if (eq_pos != std::string::npos) {
                 std::string key = param.substr(0, eq_pos);
-                std::string value = UrlDecode(param.substr(eq_pos + 1));
+                std::string raw_value = param.substr(eq_pos + 1);
+                bool plus_as_space = !(key == "flight_server" || key == "endpoint");
+                std::string value = UrlDecode(raw_value, plus_as_space);
 
-                if (key == "token") {
-                    config.token = value;
-                } else if (key == "control_plane") {
-                    config.control_plane = value;
+                if (key == "user") {
+                    config.user = value;
+                } else if (key == "password") {
+                    config.password = value;
                 } else if (key == "flight_server") {
-                    // Direct Flight SQL server (dev/testing bypass)
+                    config.flight_server = value;
+                } else if (key == "endpoint") {
+                    // Backward-compatible alias.
                     config.flight_server = value;
                 } else {
                     config.options[key] = value;
