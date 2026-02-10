@@ -61,7 +61,7 @@ std::string Base64Encode(const std::string &input) {
 } // namespace
 
 PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std::string &user,
-                                         const std::string &password)
+                                         const std::string &password, bool tls_skip_verify)
     : endpoint_(endpoint), user_(user), password_(password) {
 
     // Parse endpoint and create location
@@ -75,9 +75,8 @@ PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std:
     // Create Flight client options
     arrow::flight::FlightClientOptions options;
 
-    // Duckgres uses TLS with self-signed certs in local/dev workflows.
-    // We require TLS transport but skip certificate verification by default.
-    options.disable_server_verification = true;
+    // Secure by default: verify server certificates unless explicitly overridden.
+    options.disable_server_verification = tls_skip_verify;
 
     // Connect to the Flight server
     auto client_result = arrow::flight::FlightClient::Connect(location, options);

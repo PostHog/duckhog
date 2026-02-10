@@ -134,7 +134,7 @@ The `test/configs/flight.json` file defines environment variables:
 require duckhog
 
 statement ok
-ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote;
 
 query I
 SELECT COUNT(*) FROM remote.main.numbers;

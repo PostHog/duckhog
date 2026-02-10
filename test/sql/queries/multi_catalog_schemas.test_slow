@@ -19,7 +19,7 @@ require-env DUCKHOG_PASSWORD
 # auto-discovers all remote catalogs from the Flight server.
 # Discovered catalogs use the prefix pattern: <alias>_<catalog_name>.
 statement ok
-ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}' AS remote;
+ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote;
 
 # Verify remote_memory has the 'main' schema
 query I

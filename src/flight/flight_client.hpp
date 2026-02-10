@@ -54,7 +54,8 @@ private:
 
 class PostHogFlightClient {
 public:
-    PostHogFlightClient(const std::string &endpoint, const std::string &user, const std::string &password);
+    PostHogFlightClient(const std::string &endpoint, const std::string &user, const std::string &password,
+                        bool tls_skip_verify);
     ~PostHogFlightClient();
 
     // Prevent copying (Flight client is not copyable)

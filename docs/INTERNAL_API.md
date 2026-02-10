@@ -18,6 +18,7 @@ It is intended for maintainers and contributors.
   - Parses `<catalog>?user=...&password=...&flight_server=...`.
   - URL-decodes values and stores extra options.
   - Applies default Flight endpoint when missing.
+  - Validates `tls_skip_verify` (`true`/`false`) and defaults to secure TLS certificate verification.
 
 ## Flight SQL Client
 

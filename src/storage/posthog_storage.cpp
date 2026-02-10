@@ -14,11 +14,36 @@
 #include "utils/connection_string.hpp"
 #include "flight/flight_client.hpp"
 #include "duckdb/main/database_manager.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "utils/posthog_logger.hpp"
 
 #include <set>
 
 namespace duckdb {
+
+namespace {
+
+bool ParseBoolOptionValue(const string &key, const string &value) {
+    auto lower = StringUtil::Lower(value);
+    if (lower == "true") {
+        return true;
+    }
+    if (lower == "false") {
+        return false;
+    }
+    throw InvalidInputException("PostHog: Invalid value for %s: '%s' (expected true or false).", key, value);
+}
+
+void ResolveSecurityOptions(PostHogConnectionConfig &config) {
+    auto it = config.options.find("tls_skip_verify");
+    if (it == config.options.end()) {
+        return;
+    }
+    config.tls_skip_verify = ParseBoolOptionValue("tls_skip_verify", it->second);
+    config.options.erase(it);
+}
+
+} // namespace
 
 // Helper to enumerate all distinct catalog names from the remote Flight server
 static std::vector<string> EnumerateRemoteCatalogs(PostHogFlightClient &client) {
@@ -50,6 +75,7 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
     if (config.flight_server.empty()) {
         config.flight_server = PostHogConnectionConfig::DEFAULT_FLIGHT_SERVER;
     }
+    ResolveSecurityOptions(config);
 
     // Check if this is a secondary catalog attachment (has __remote_catalog parameter)
     // If so, skip enumeration and just attach this specific catalog
@@ -70,7 +96,7 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
     // No specific catalog requested: enumerate all remote catalogs and attach them
     std::vector<string> remote_catalogs;
     try {
-        PostHogFlightClient temp_client(config.flight_server, config.user, config.password);
+        PostHogFlightClient temp_client(config.flight_server, config.user, config.password, config.tls_skip_verify);
         temp_client.Authenticate();
         remote_catalogs = EnumerateRemoteCatalogs(temp_client);
     } catch (const std::exception &e) {

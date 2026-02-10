@@ -36,12 +36,15 @@ ATTACH 'hog:?user=postgres&password=postgres&flight_server=grpc+tls://localhost:
 -- Query your data
 SELECT * FROM posthog_db.events LIMIT 10;
 -- (In multi-catalog mode you may prefer: SELECT * FROM posthog_db_<catalog>.events LIMIT 10;)
+
+-- Local/dev only: skip TLS certificate verification for self-signed certs
+ATTACH 'hog:my_database?user=postgres&password=postgres&flight_server=grpc+tls://localhost:8815&tls_skip_verify=true' AS posthog_dev;
 ```
 
 ### Connection String Format
 
 ```
-hog:[<catalog>]?user=<username>&password=<password>[&flight_server=<url>]
+hog:[<catalog>]?user=<username>&password=<password>[&flight_server=<url>][&tls_skip_verify=<true|false>]
 ```
 
 | Parameter | Description | Required |
@@ -50,6 +53,7 @@ hog:[<catalog>]?user=<username>&password=<password>[&flight_server=<url>]
 | `user` | Flight SQL username | Yes |
 | `password` | Flight SQL password | Yes |
 | `flight_server` | Flight SQL server endpoint (default: `grpc+tls://127.0.0.1:8815`) | No |
+| `tls_skip_verify` | Disable TLS certificate verification (`true`/`false`, default: `false`). Use only for local/dev self-signed certs. | No |
 
 **Catalog Attach Modes:**
 - **Single-catalog attach**: `ATTACH 'hog:<catalog>?user=...&password=...' AS remote;` attaches exactly one remote catalog under the local name `remote`.

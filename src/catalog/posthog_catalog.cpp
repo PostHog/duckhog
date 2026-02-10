@@ -50,10 +50,14 @@ void PostHogCatalog::Initialize(bool load_builtin) {
     POSTHOG_LOG_INFO("Attaching catalog '%s' -> remote catalog '%s'", database_name_.c_str(), remote_catalog_.c_str());
     POSTHOG_LOG_INFO("Flight server: %s", config_.flight_server.c_str());
     POSTHOG_LOG_DEBUG("User: %s", config_.user.empty() ? "(none)" : config_.user.c_str());
+    if (config_.tls_skip_verify) {
+        POSTHOG_LOG_WARN("TLS certificate verification disabled via tls_skip_verify=true");
+    }
 
     // Create the Flight SQL client (Milestone 3)
     try {
-        flight_client_ = make_uniq<PostHogFlightClient>(config_.flight_server, config_.user, config_.password);
+        flight_client_ = make_uniq<PostHogFlightClient>(config_.flight_server, config_.user, config_.password,
+                                                        config_.tls_skip_verify);
         flight_client_->Authenticate();
         POSTHOG_LOG_INFO("Initialized Flight SQL client");
         auto ping_status = flight_client_->Ping();

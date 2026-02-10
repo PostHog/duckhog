@@ -18,6 +18,8 @@ struct PostHogConnectionConfig {
     std::string password;
     // Direct Flight SQL server endpoint.
     std::string flight_server;
+    // If true, skip TLS certificate verification (for local/dev only).
+    bool tls_skip_verify = false;
     std::unordered_map<std::string, std::string> options;
 
     static constexpr const char *DEFAULT_FLIGHT_SERVER = "grpc+tls://127.0.0.1:8815";
@@ -26,7 +28,7 @@ struct PostHogConnectionConfig {
 class ConnectionString {
 public:
     // Parse connection string format:
-    // "database_name?user=postgres&password=postgres&flight_server=grpc+tls://host:port"
+    // "database_name?user=postgres&password=postgres&flight_server=grpc+tls://host:port&tls_skip_verify=true"
     // The "hog:" prefix is stripped by DuckDB before this is called
     static PostHogConnectionConfig Parse(const std::string &connection_string);
 
