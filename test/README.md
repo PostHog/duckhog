@@ -93,15 +93,13 @@ test/
     ├── connection/
     │   ├── attach.test          # Connection string parsing tests
     │   ├── auth.test            # Authentication parameter validation
-    │   └── control_plane.test   # Legacy filename; direct-flight credential validation
     ├── errors/
     │   └── connection_errors.test  # Error message verification
     └── queries/
         ├── basic_select.test_slow   # Basic queries (requires server)
         ├── arrow_types.test_slow    # Arrow type/encoding coverage (requires server)
         ├── tables.test_slow         # Schema/table operations
-        ├── projection.test_slow     # Column projection tests
-        └── control_plane.test_slow  # Legacy filename; direct-flight auth integration
+        └── projection.test_slow     # Column projection tests
 ```
 
 ## Test File Conventions

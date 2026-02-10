@@ -14,3 +14,14 @@ statement error
 ATTACH 'hog:memory?user=postgres&flight_server=grpc+tls://127.0.0.1:8815' AS remote;
 ----
 Missing password
+
+# Missing username/password with explicit database name should also fail
+statement error
+ATTACH 'hog:test_db?password=postgres&flight_server=grpc+tls://127.0.0.1:1' AS remote;
+----
+Missing username
+
+statement error
+ATTACH 'hog:test_db?user=postgres&flight_server=grpc+tls://127.0.0.1:1' AS remote;
+----
+Missing password
