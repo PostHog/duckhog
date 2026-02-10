@@ -1,0 +1,31 @@
+# name: test/sql/roadmap/rm08_partition_insert_remote.test_slow
+# description: Roadmap target RM08 - INSERT into partitioned remote table
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm08 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm08;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm08.t_part(part_key INT, v VARCHAR);
+
+statement ok
+ALTER TABLE remote_flight.roadmap_rm08.t_part SET PARTITIONED BY (part_key);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm08.t_part VALUES (1, 'a'), (2, 'b'), (1, 'c');

@@ -1,0 +1,22 @@
+# name: test/sql/roadmap/rm13_table_info_remote.test_slow
+# description: Roadmap target RM13 - table_info() table function through remote catalog
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+query I
+SELECT CASE WHEN COUNT(*) >= 0 THEN 1 ELSE 0 END FROM remote_flight.table_info();
+
+----
+1

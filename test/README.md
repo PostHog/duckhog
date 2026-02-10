@@ -17,6 +17,9 @@ make test
 eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
 ./scripts/test-servers.sh stop
+
+# Run roadmap suite (non-gating, intentionally separate from make test/CI)
+./test/run_sql_roadmap.sh
 ```
 
 ## Running Tests
@@ -69,6 +72,27 @@ eval "$(./scripts/test-servers.sh env)"
 DUCKDB_TEST_CONFIG=test/configs/flight.json make test
 ```
 
+### Roadmap Suite (Non-Gating)
+
+Roadmap tests are SQLLogicTests under `test/sql/roadmap/` and are intentionally
+excluded from normal test runs and CI gating.
+
+```bash
+# Default non-gating run (always exits 0, writes TODO artifacts)
+./test/run_sql_roadmap.sh
+
+# Strict mode (exits non-zero if roadmap targets are still failing)
+./test/run_sql_roadmap.sh --strict
+
+# Make target wrapper
+make test-roadmap
+```
+
+Artifacts are written to `test/integration/roadmap/<timestamp>/`:
+- `roadmap_summary.txt`
+- `roadmap_failing_tests.txt`
+- `roadmap_unittest_output.txt`
+
 ### Running Individual Test Files
 
 ```bash
@@ -95,11 +119,13 @@ test/
     │   ├── auth.test            # Authentication parameter validation
     ├── errors/
     │   └── connection_errors.test  # Error message verification
-    └── queries/
+    ├── queries/
         ├── basic_select.test_slow   # Basic queries (requires server)
         ├── arrow_types.test_slow    # Arrow type/encoding coverage (requires server)
         ├── tables.test_slow         # Schema/table operations
         └── projection.test_slow     # Column projection tests
+    └── roadmap/
+        └── rm*.test_slow            # Non-gating DuckLake-aligned roadmap targets
 ```
 
 ## Test File Conventions
@@ -162,3 +188,5 @@ Integration tests run automatically in GitHub Actions:
 1. Build extension
 2. Start Duckgres control-plane Flight listener (separate step)
 3. Run SQLLogicTests against the server
+
+Roadmap suite is not part of CI pass/fail gating by design.

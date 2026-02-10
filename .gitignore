@@ -51,6 +51,7 @@ testext
 test/integration/.control_plane.pid
 test/integration/.duckling_go.pid
 test/integration/.duckgres.pid
+test/integration/roadmap/
 test/integration/.venv/
 test/integration/.gocache/
 test/integration/duckgres.log

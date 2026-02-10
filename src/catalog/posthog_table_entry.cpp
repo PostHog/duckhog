@@ -22,8 +22,7 @@
 namespace duckdb {
 
 PostHogTableEntry::PostHogTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info,
-                                     PostHogCatalog &posthog_catalog,
-                                     std::shared_ptr<arrow::Schema> arrow_schema)
+                                     PostHogCatalog &posthog_catalog, std::shared_ptr<arrow::Schema> arrow_schema)
     : TableCatalogEntry(catalog, schema, info), posthog_catalog_(posthog_catalog), schema_name_(schema.name),
       arrow_schema_(std::move(arrow_schema)) {
 }
@@ -31,36 +30,36 @@ PostHogTableEntry::PostHogTableEntry(Catalog &catalog, SchemaCatalogEntry &schem
 PostHogTableEntry::~PostHogTableEntry() = default;
 
 unique_ptr<BaseStatistics> PostHogTableEntry::GetStatistics(ClientContext &context, column_t column_id) {
-    // No statistics available for remote tables
-    return nullptr;
+	// No statistics available for remote tables
+	return nullptr;
 }
 
 TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) {
-    // Create bind data for the remote scan
-    vector<string> column_names;
-    vector<LogicalType> column_types;
+	// Create bind data for the remote scan
+	vector<string> column_names;
+	vector<LogicalType> column_types;
 
-    for (auto &col : columns.Logical()) {
-        column_names.push_back(col.Name());
-        column_types.push_back(col.Type());
-    }
+	for (auto &col : columns.Logical()) {
+		column_names.push_back(col.Name());
+		column_types.push_back(col.Type());
+	}
 
-    bind_data = PostHogRemoteScan::CreateBindData(posthog_catalog_, schema_name_, name, column_names, column_types,
-                                                   arrow_schema_);
+	bind_data = PostHogRemoteScan::CreateBindData(posthog_catalog_, schema_name_, name, column_names, column_types,
+	                                              arrow_schema_);
 
-    return PostHogRemoteScan::GetFunction();
+	return PostHogRemoteScan::GetFunction();
 }
 
 TableStorageInfo PostHogTableEntry::GetStorageInfo(ClientContext &context) {
-    TableStorageInfo info;
-    // Remote tables - we don't have local storage info
-    info.cardinality = 0; // Unknown
-    return info;
+	TableStorageInfo info;
+	// Remote tables - we don't have local storage info
+	info.cardinality = 0; // Unknown
+	return info;
 }
 
 void PostHogTableEntry::BindUpdateConstraints(Binder &binder, LogicalGet &get, LogicalProjection &proj,
-                                               LogicalUpdate &update, ClientContext &context) {
-    throw NotImplementedException("PostHog: UPDATE operations are not supported on remote tables");
+                                              LogicalUpdate &update, ClientContext &context) {
+	throw NotImplementedException("PostHog: UPDATE operations are not supported on remote tables");
 }
 
 } // namespace duckdb

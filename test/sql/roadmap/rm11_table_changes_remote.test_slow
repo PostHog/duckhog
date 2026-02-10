@@ -1,0 +1,31 @@
+# name: test/sql/roadmap/rm11_table_changes_remote.test_slow
+# description: Roadmap target RM11 - table_changes table function through remote catalog
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm11 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm11;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm11.t(i INT);
+
+query I
+SELECT COUNT(*) FROM remote_flight.table_changes('roadmap_rm11.t', 1, 999999);
+
+----
+0

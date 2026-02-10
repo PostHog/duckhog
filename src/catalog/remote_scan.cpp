@@ -24,7 +24,7 @@
 namespace duckdb {
 
 struct PostHogRemoteScanGlobalState : public ArrowScanGlobalState {
-    std::unique_ptr<PostHogRemoteScanStreamFactory> stream_factory;
+	std::unique_ptr<PostHogRemoteScanStreamFactory> stream_factory;
 };
 
 //===----------------------------------------------------------------------===//
@@ -33,18 +33,18 @@ struct PostHogRemoteScanGlobalState : public ArrowScanGlobalState {
 
 PostHogRemoteScanBindData::PostHogRemoteScanBindData(PostHogCatalog &catalog_p, const string &schema_name_p,
                                                      const string &table_name_p)
-    : ArrowScanFunctionData(&PostHogArrowStream::Produce, reinterpret_cast<uintptr_t>(this)),
-      catalog(catalog_p), schema_name(schema_name_p), table_name(table_name_p) {
+    : ArrowScanFunctionData(&PostHogArrowStream::Produce, reinterpret_cast<uintptr_t>(this)), catalog(catalog_p),
+      schema_name(schema_name_p), table_name(table_name_p) {
 }
 
 PostHogRemoteScanBindData::~PostHogRemoteScanBindData() {
-    // Restore the original name pointers so that ArrowSchemaWrapper's destructor
-    // (which runs after this one) sees the pointers Arrow's release callback
-    // expects.  Then free our strdup'd replacements.
-    for (auto &entry : patched_schema_names) {
-        entry.child->name = entry.original;
-        free(entry.patched);
-    }
+	// Restore the original name pointers so that ArrowSchemaWrapper's destructor
+	// (which runs after this one) sees the pointers Arrow's release callback
+	// expects.  Then free our strdup'd replacements.
+	for (auto &entry : patched_schema_names) {
+		entry.child->name = entry.original;
+		free(entry.patched);
+	}
 }
 
 //===----------------------------------------------------------------------===//
@@ -53,55 +53,54 @@ PostHogRemoteScanBindData::~PostHogRemoteScanBindData() {
 
 unique_ptr<FunctionData> PostHogRemoteScan::Bind(ClientContext &context, TableFunctionBindInput &input,
                                                  vector<LogicalType> &return_types, vector<string> &names) {
-    // This bind function is used for direct table function calls
-    // For table scans, we use CreateBindData instead
-    throw NotImplementedException("PostHog remote_scan should not be called directly");
+	// This bind function is used for direct table function calls
+	// For table scans, we use CreateBindData instead
+	throw NotImplementedException("PostHog remote_scan should not be called directly");
 }
 
 unique_ptr<FunctionData> PostHogRemoteScan::CreateBindData(PostHogCatalog &catalog, const string &schema_name,
-                                                           const string &table_name,
-                                                           const vector<string> &column_names,
+                                                           const string &table_name, const vector<string> &column_names,
                                                            const vector<LogicalType> &column_types,
                                                            const std::shared_ptr<arrow::Schema> &arrow_schema) {
-    auto bind_data = make_uniq<PostHogRemoteScanBindData>(catalog, schema_name, table_name);
+	auto bind_data = make_uniq<PostHogRemoteScanBindData>(catalog, schema_name, table_name);
 
-    bind_data->column_names = column_names;
-    bind_data->column_types = column_types;
+	bind_data->column_names = column_names;
+	bind_data->column_types = column_types;
 
-    // Export the cached Arrow schema to C ArrowSchema (no Flight RPC).
-    auto status = arrow::ExportSchema(*arrow_schema, &bind_data->schema_root.arrow_schema);
-    if (!status.ok()) {
-        throw IOException("PostHog: Failed to export cached Arrow schema: " + status.ToString());
-    }
+	// Export the cached Arrow schema to C ArrowSchema (no Flight RPC).
+	auto status = arrow::ExportSchema(*arrow_schema, &bind_data->schema_root.arrow_schema);
+	if (!status.ok()) {
+		throw IOException("PostHog: Failed to export cached Arrow schema: " + status.ToString());
+	}
 
-    // Patch each child's name with the deduplicated catalog column name.
-    // DuckDB's PopulateArrowTableSchema deduplicates names (case-insensitive, appending _1, _2, ...),
-    // and the planner assigns column IDs from those deduplicated names.  ProduceArrowScan reads
-    // children[col_idx]->name to build the projected SQL, so the C ArrowSchema must carry the
-    // deduplicated names, not the raw Arrow field names (which may contain duplicates).
-    auto &schema_c = bind_data->schema_root.arrow_schema;
-    if (static_cast<idx_t>(schema_c.n_children) != column_names.size()) {
-        throw InternalException("PostHog: cached Arrow schema has %lld fields but catalog has %llu columns",
-                                schema_c.n_children, column_names.size());
-    }
-    for (idx_t i = 0; i < column_names.size(); i++) {
-        auto *child = schema_c.children[i];
-        const char *original = child->name;
-        char *patched = strdup(column_names[i].c_str());
-        child->name = patched;
-        PostHogRemoteScanBindData::PatchedName entry;
-        entry.child = child;
-        entry.original = original;
-        entry.patched = patched;
-        bind_data->patched_schema_names.push_back(entry);
-    }
+	// Patch each child's name with the deduplicated catalog column name.
+	// DuckDB's PopulateArrowTableSchema deduplicates names (case-insensitive, appending _1, _2, ...),
+	// and the planner assigns column IDs from those deduplicated names.  ProduceArrowScan reads
+	// children[col_idx]->name to build the projected SQL, so the C ArrowSchema must carry the
+	// deduplicated names, not the raw Arrow field names (which may contain duplicates).
+	auto &schema_c = bind_data->schema_root.arrow_schema;
+	if (static_cast<idx_t>(schema_c.n_children) != column_names.size()) {
+		throw InternalException("PostHog: cached Arrow schema has %lld fields but catalog has %llu columns",
+		                        schema_c.n_children, column_names.size());
+	}
+	for (idx_t i = 0; i < column_names.size(); i++) {
+		auto *child = schema_c.children[i];
+		const char *original = child->name;
+		char *patched = strdup(column_names[i].c_str());
+		child->name = patched;
+		PostHogRemoteScanBindData::PatchedName entry;
+		entry.child = child;
+		entry.original = original;
+		entry.patched = patched;
+		bind_data->patched_schema_names.push_back(entry);
+	}
 
-    // Populate arrow_table (keyed {0, 1, ..., N-1}) and all_types from the full schema.
-    ArrowTableFunction::PopulateArrowTableSchema(DBConfig::GetConfig(catalog.GetDatabase()), bind_data->arrow_table,
-                                                 bind_data->schema_root.arrow_schema);
-    bind_data->all_types = bind_data->arrow_table.GetTypes();
+	// Populate arrow_table (keyed {0, 1, ..., N-1}) and all_types from the full schema.
+	ArrowTableFunction::PopulateArrowTableSchema(DBConfig::GetConfig(catalog.GetDatabase()), bind_data->arrow_table,
+	                                             bind_data->schema_root.arrow_schema);
+	bind_data->all_types = bind_data->arrow_table.GetTypes();
 
-    return bind_data;
+	return bind_data;
 }
 
 //===----------------------------------------------------------------------===//
@@ -109,55 +108,55 @@ unique_ptr<FunctionData> PostHogRemoteScan::CreateBindData(PostHogCatalog &catal
 //===----------------------------------------------------------------------===//
 
 unique_ptr<GlobalTableFunctionState> PostHogRemoteScan::InitGlobal(ClientContext &context,
-                                                                    TableFunctionInitInput &input) {
-    auto &bind_data = input.bind_data->Cast<PostHogRemoteScanBindData>();
+                                                                   TableFunctionInitInput &input) {
+	auto &bind_data = input.bind_data->Cast<PostHogRemoteScanBindData>();
 
-    std::optional<TransactionId> remote_txn_id;
-    try {
-        remote_txn_id = PostHogTransaction::Get(context, bind_data.catalog).remote_txn_id;
-    } catch (const std::exception &) {
-        remote_txn_id = std::nullopt;
-    }
+	std::optional<TransactionId> remote_txn_id;
+	try {
+		remote_txn_id = PostHogTransaction::Get(context, bind_data.catalog).remote_txn_id;
+	} catch (const std::exception &) {
+		remote_txn_id = std::nullopt;
+	}
 
-    ArrowStreamParameters parameters;
-    D_ASSERT(!input.column_ids.empty());
-    auto &arrow_types = bind_data.arrow_table.GetColumns();
-    for (idx_t idx = 0; idx < input.column_ids.size(); idx++) {
-        auto col_idx = input.column_ids[idx];
-        if (col_idx != COLUMN_IDENTIFIER_ROW_ID) {
-            auto &schema_c = *bind_data.schema_root.arrow_schema.children[col_idx];
-            arrow_types.at(col_idx)->ThrowIfInvalid();
-            parameters.projected_columns.projection_map[idx] = schema_c.name;
-            parameters.projected_columns.columns.emplace_back(schema_c.name);
-            parameters.projected_columns.filter_to_col[idx] = col_idx;
-        }
-    }
-    parameters.filters = input.filters.get();
+	ArrowStreamParameters parameters;
+	D_ASSERT(!input.column_ids.empty());
+	auto &arrow_types = bind_data.arrow_table.GetColumns();
+	for (idx_t idx = 0; idx < input.column_ids.size(); idx++) {
+		auto col_idx = input.column_ids[idx];
+		if (col_idx != COLUMN_IDENTIFIER_ROW_ID) {
+			auto &schema_c = *bind_data.schema_root.arrow_schema.children[col_idx];
+			arrow_types.at(col_idx)->ThrowIfInvalid();
+			parameters.projected_columns.projection_map[idx] = schema_c.name;
+			parameters.projected_columns.columns.emplace_back(schema_c.name);
+			parameters.projected_columns.filter_to_col[idx] = col_idx;
+		}
+	}
+	parameters.filters = input.filters.get();
 
-    auto result = make_uniq<PostHogRemoteScanGlobalState>();
-    result->stream_factory = make_uniq<PostHogRemoteScanStreamFactory>();
-    result->stream_factory->bind_data = &bind_data;
-    result->stream_factory->txn_id = std::move(remote_txn_id);
-    result->stream = bind_data.scanner_producer(reinterpret_cast<uintptr_t>(result->stream_factory.get()), parameters);
+	auto result = make_uniq<PostHogRemoteScanGlobalState>();
+	result->stream_factory = make_uniq<PostHogRemoteScanStreamFactory>();
+	result->stream_factory->bind_data = &bind_data;
+	result->stream_factory->txn_id = std::move(remote_txn_id);
+	result->stream = bind_data.scanner_producer(reinterpret_cast<uintptr_t>(result->stream_factory.get()), parameters);
 
-    result->max_threads = context.db->NumberOfThreads();
-    if (!input.projection_ids.empty()) {
-        result->projection_ids = input.projection_ids;
-        for (const auto &col_idx : input.column_ids) {
-            if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
-                result->scanned_types.emplace_back(LogicalType::ROW_TYPE);
-            } else {
-                result->scanned_types.push_back(bind_data.all_types[col_idx]);
-            }
-        }
-    }
-    return std::move(result);
+	result->max_threads = context.db->NumberOfThreads();
+	if (!input.projection_ids.empty()) {
+		result->projection_ids = input.projection_ids;
+		for (const auto &col_idx : input.column_ids) {
+			if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
+				result->scanned_types.emplace_back(LogicalType::ROW_TYPE);
+			} else {
+				result->scanned_types.push_back(bind_data.all_types[col_idx]);
+			}
+		}
+	}
+	return std::move(result);
 }
 
 unique_ptr<LocalTableFunctionState> PostHogRemoteScan::InitLocal(ExecutionContext &context,
-                                                                  TableFunctionInitInput &input,
-                                                                  GlobalTableFunctionState *global_state) {
-    return ArrowTableFunction::ArrowScanInitLocal(context, input, global_state);
+                                                                 TableFunctionInitInput &input,
+                                                                 GlobalTableFunctionState *global_state) {
+	return ArrowTableFunction::ArrowScanInitLocal(context, input, global_state);
 }
 
 //===----------------------------------------------------------------------===//
@@ -165,7 +164,7 @@ unique_ptr<LocalTableFunctionState> PostHogRemoteScan::InitLocal(ExecutionContex
 //===----------------------------------------------------------------------===//
 
 void PostHogRemoteScan::Execute(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
-    ArrowTableFunction::ArrowScanFunction(context, data, output);
+	ArrowTableFunction::ArrowScanFunction(context, data, output);
 }
 
 //===----------------------------------------------------------------------===//
@@ -173,11 +172,11 @@ void PostHogRemoteScan::Execute(ClientContext &context, TableFunctionInput &data
 //===----------------------------------------------------------------------===//
 
 double PostHogRemoteScan::Progress(ClientContext &context, const FunctionData *bind_data,
-                                    const GlobalTableFunctionState *global_state) {
-    (void)context;
-    (void)bind_data;
-    (void)global_state;
-    return 0.0;
+                                   const GlobalTableFunctionState *global_state) {
+	(void)context;
+	(void)bind_data;
+	(void)global_state;
+	return 0.0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -185,11 +184,11 @@ double PostHogRemoteScan::Progress(ClientContext &context, const FunctionData *b
 //===----------------------------------------------------------------------===//
 
 TableFunction PostHogRemoteScan::GetFunction() {
-    TableFunction func("posthog_remote_scan", {}, Execute, Bind, InitGlobal, InitLocal);
-    func.projection_pushdown = true;
-    func.filter_pushdown = false;     // TODO: Implement filter pushdown
-    func.table_scan_progress = Progress;
-    return func;
+	TableFunction func("posthog_remote_scan", {}, Execute, Bind, InitGlobal, InitLocal);
+	func.projection_pushdown = true;
+	func.filter_pushdown = false; // TODO: Implement filter pushdown
+	func.table_scan_progress = Progress;
+	return func;
 }
 
 } // namespace duckdb
