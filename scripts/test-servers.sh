@@ -12,6 +12,7 @@
 #
 # Notes:
 # - Starts Duckgres in control-plane mode with both PGwire and Flight listeners.
+# - Uses Duckgres integration Docker Compose stack for DuckLake infra lifecycle.
 # - `--seed` is accepted for compatibility and currently a no-op because tests
 #   create their own fixtures.
 # - `env` prints export commands; use: eval "$(./scripts/test-servers.sh env)"
@@ -36,12 +37,19 @@ FLIGHT_ENDPOINT="${FLIGHT_ENDPOINT:-grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}}"
 
 DUCKGRES_ROOT_DEFAULT="${PROJECT_ROOT}/../duckgres"
 DUCKGRES_ROOT="${DUCKGRES_ROOT:-${DUCKGRES_ROOT_DEFAULT}}"
+DUCKGRES_INTEGRATION_DIR="${DUCKGRES_ROOT}/tests/integration"
+DUCKGRES_COMPOSE_FILE="${DUCKGRES_INTEGRATION_DIR}/docker-compose.yml"
 DUCKGRES_BIN="${DUCKGRES_BIN:-${TEST_DIR}/duckgres_server}"
 DUCKGRES_DATA_DIR="${DUCKGRES_DATA_DIR:-${TEST_DIR}/duckgres-data}"
 DUCKGRES_SOCKET_DIR="${DUCKGRES_SOCKET_DIR:-${TEST_DIR}/duckgres-sockets}"
 DUCKGRES_CERT="${DUCKGRES_CERT:-${TEST_DIR}/server.crt}"
 DUCKGRES_KEY="${DUCKGRES_KEY:-${TEST_DIR}/server.key}"
 DUCKGRES_WORKERS="${DUCKGRES_WORKERS:-4}"
+DUCKLAKE_POSTGRES_PORT="${DUCKLAKE_POSTGRES_PORT:-35432}"
+DUCKLAKE_METADATA_PORT="${DUCKLAKE_METADATA_PORT:-35433}"
+DUCKLAKE_MINIO_PORT="${DUCKLAKE_MINIO_PORT:-39000}"
+DUCKLAKE_INFRA_TIMEOUT="${DUCKLAKE_INFRA_TIMEOUT:-30s}"
+DUCKHOG_KEEP_DUCKLAKE_INFRA="${DUCKHOG_KEEP_DUCKLAKE_INFRA:-0}"
 
 log_info() {
     echo "[INFO] $1"
@@ -67,6 +75,99 @@ require_python() {
         log_error "Python 3 not found. Please install Python 3."
         exit 1
     fi
+}
+
+ensure_duckgres_root() {
+    if [ ! -d "$DUCKGRES_ROOT" ]; then
+        log_error "Duckgres repo not found: $DUCKGRES_ROOT"
+        log_error "Set DUCKGRES_ROOT to your duckgres checkout path"
+        exit 1
+    fi
+}
+
+ensure_compose_file() {
+    ensure_duckgres_root
+    if [ ! -f "$DUCKGRES_COMPOSE_FILE" ]; then
+        log_error "Duckgres integration compose file not found: $DUCKGRES_COMPOSE_FILE"
+        exit 1
+    fi
+}
+
+run_ducklake_compose() {
+    ensure_compose_file
+
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+        (
+            cd "$DUCKGRES_INTEGRATION_DIR"
+            docker compose -f "$DUCKGRES_COMPOSE_FILE" "$@"
+        )
+        return
+    fi
+
+    if command -v docker-compose >/dev/null 2>&1; then
+        (
+            cd "$DUCKGRES_INTEGRATION_DIR"
+            docker-compose -f "$DUCKGRES_COMPOSE_FILE" "$@"
+        )
+        return
+    fi
+
+    log_error "Docker Compose not found. Install 'docker compose' or 'docker-compose'."
+    exit 1
+}
+
+duration_to_seconds() {
+    local duration="$1"
+    case "$duration" in
+        *s) echo "${duration%s}" ;;
+        *m) echo "$(( ${duration%m} * 60 ))" ;;
+        *h) echo "$(( ${duration%h} * 3600 ))" ;;
+        *) echo "$duration" ;;
+    esac
+}
+
+is_port_open() {
+    local host="$1"
+    local port="$2"
+
+    require_python
+    python3 - <<PY >/dev/null 2>&1
+import socket, sys
+s = socket.socket()
+s.settimeout(0.2)
+try:
+    s.connect(("${host}", int("${port}")))
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+sys.exit(0)
+PY
+}
+
+ducklake_infra_running() {
+    is_port_open "127.0.0.1" "$DUCKLAKE_POSTGRES_PORT" &&
+        is_port_open "127.0.0.1" "$DUCKLAKE_METADATA_PORT" &&
+        is_port_open "127.0.0.1" "$DUCKLAKE_MINIO_PORT"
+}
+
+wait_for_ducklake_infra() {
+    local timeout_seconds
+    timeout_seconds="$(duration_to_seconds "$DUCKLAKE_INFRA_TIMEOUT")"
+    local max_attempts=$(( (timeout_seconds * 10) + 1 ))
+    local attempt=0
+
+    while [ "$attempt" -lt "$max_attempts" ]; do
+        if ducklake_infra_running; then
+            log_info "DuckLake infra ready (postgres:${DUCKLAKE_POSTGRES_PORT}, metadata:${DUCKLAKE_METADATA_PORT}, minio:${DUCKLAKE_MINIO_PORT})"
+            return 0
+        fi
+        sleep 0.1
+        attempt=$((attempt + 1))
+    done
+
+    log_error "Timed out waiting for DuckLake infra (postgres:${DUCKLAKE_POSTGRES_PORT}, metadata:${DUCKLAKE_METADATA_PORT}, minio:${DUCKLAKE_MINIO_PORT})"
+    return 1
 }
 
 pid_is_running_pid() {
@@ -214,14 +315,27 @@ PY
     return 1
 }
 
+ensure_ducklake_infra() {
+    log_info "Ensuring DuckLake infra via Docker Compose..."
+    run_ducklake_compose up -d
+    wait_for_ducklake_infra
+}
+
+stop_ducklake_infra() {
+    if [ "$DUCKHOG_KEEP_DUCKLAKE_INFRA" = "1" ]; then
+        log_info "Keeping DuckLake infra running (DUCKHOG_KEEP_DUCKLAKE_INFRA=1)"
+        return 0
+    fi
+
+    log_info "Stopping DuckLake infra via Docker Compose..."
+    if ! run_ducklake_compose down -v >/dev/null 2>&1; then
+        log_warn "DuckLake infra stop failed (may already be down)"
+    fi
+}
+
 build_duckgres() {
     require_go
-
-    if [ ! -d "$DUCKGRES_ROOT" ]; then
-        log_error "Duckgres repo not found: $DUCKGRES_ROOT"
-        log_error "Set DUCKGRES_ROOT to your duckgres checkout path"
-        exit 1
-    fi
+    ensure_duckgres_root
 
     mkdir -p "$(dirname "$DUCKGRES_BIN")"
     log_info "Building Duckgres from ${DUCKGRES_ROOT} ..."
@@ -233,6 +347,22 @@ build_duckgres() {
 
 start_duckgres() {
     local mode="$1"
+    local metadata_store
+    local s3_endpoint
+    local -a ducklake_env
+
+    metadata_store="postgres:host=127.0.0.1 port=${DUCKLAKE_METADATA_PORT} user=ducklake password=ducklake dbname=ducklake"
+    s3_endpoint="127.0.0.1:${DUCKLAKE_MINIO_PORT}"
+    ducklake_env=(
+        "DUCKGRES_DUCKLAKE_METADATA_STORE=${metadata_store}"
+        "DUCKGRES_DUCKLAKE_OBJECT_STORE=s3://ducklake/data/"
+        "DUCKGRES_DUCKLAKE_S3_PROVIDER=config"
+        "DUCKGRES_DUCKLAKE_S3_ENDPOINT=${s3_endpoint}"
+        "DUCKGRES_DUCKLAKE_S3_ACCESS_KEY=minioadmin"
+        "DUCKGRES_DUCKLAKE_S3_SECRET_KEY=minioadmin"
+        "DUCKGRES_DUCKLAKE_S3_REGION=us-east-1"
+        "DUCKGRES_DUCKLAKE_S3_URL_STYLE=path"
+    )
 
     if pid_is_running "$PID_DUCKGRES_FILE"; then
         log_info "Duckgres already running (PID: $(cat "$PID_DUCKGRES_FILE"))"
@@ -246,9 +376,10 @@ start_duckgres() {
 
     log_info "Starting Duckgres control-plane..."
     log_info "PG: ${PG_HOST}:${PG_PORT}, Flight: ${FLIGHT_HOST}:${FLIGHT_PORT}"
+    log_info "DuckLake metadata: 127.0.0.1:${DUCKLAKE_METADATA_PORT}, object store: ${s3_endpoint}"
 
     if [ "$mode" = "background" ]; then
-        nohup "$DUCKGRES_BIN" \
+        nohup env "${ducklake_env[@]}" "$DUCKGRES_BIN" \
             --mode control-plane \
             --host "$PG_HOST" \
             --port "$PG_PORT" \
@@ -268,7 +399,7 @@ start_duckgres() {
         return 0
     fi
 
-    exec "$DUCKGRES_BIN" \
+    exec env "${ducklake_env[@]}" "$DUCKGRES_BIN" \
         --mode control-plane \
         --host "$PG_HOST" \
         --port "$PG_PORT" \
@@ -285,6 +416,7 @@ start_servers() {
     local mode="$1"
     local seed_mode="$2"
 
+    ensure_ducklake_infra
     build_duckgres
     start_duckgres "$mode"
 
@@ -301,6 +433,7 @@ start_servers() {
 
 stop_servers() {
     stop_pid_file "Duckgres" "$PID_DUCKGRES_FILE"
+    stop_ducklake_infra
 }
 
 status_servers() {
@@ -308,6 +441,12 @@ status_servers() {
         echo "Duckgres: running (PID: $(cat "$PID_DUCKGRES_FILE"))"
     else
         echo "Duckgres: stopped"
+    fi
+
+    if ducklake_infra_running; then
+        echo "DuckLake infra: running"
+    else
+        echo "DuckLake infra: stopped"
     fi
 }
 
