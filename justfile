@@ -60,6 +60,16 @@ test-roadmap:
 test-roadmap-strict:
     ./test/run_sql_roadmap.sh --strict
 
+# Auto-format source files
+[group('dev')]
+format:
+    PATH="$HOME/.local/bin:$PATH" python3 duckdb/scripts/format.py --all --fix --noconfirm --directories src test
+
+# Check formatting without modifying files
+[group('test')]
+format-check:
+    PATH="$HOME/.local/bin:$PATH" python3 duckdb/scripts/format.py --all --check --directories src test
+
 # Run clang-tidy static analysis
 [group('test')]
 tidy-check:
@@ -103,7 +113,7 @@ verify: build
 
 # One-time setup: install deps, vcpkg, and submodules
 [group('setup')]
-setup: setup-brew-deps install-vcpkg submodules
+setup: setup-brew-deps setup-format-tools install-vcpkg submodules
     @echo ""
     @echo "Setup complete. Next steps:"
     @echo "  1. Add the VCPKG_TOOLCHAIN_PATH export shown above to ~/.zshenv"
@@ -117,6 +127,13 @@ setup-brew-deps:
     @echo ""
     @echo "NOTE: If you hit bison errors during build, ensure Homebrew bison is first in PATH:"
     @echo "  export PATH=\"/opt/homebrew/opt/bison/bin:\$PATH\""
+
+# Install formatting tools (black, clang-format, cmake-format) via uv
+[group('setup')]
+setup-format-tools:
+    uv tool install "black>=24"
+    uv tool install "clang-format==11.0.1"
+    uv tool install cmakelang
 
 # Install vcpkg and set VCPKG_TOOLCHAIN_PATH
 [group('setup')]
