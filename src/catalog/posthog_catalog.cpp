@@ -7,6 +7,8 @@
 
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_schema_entry.hpp"
+#include "catalog/posthog_table_entry.hpp"
+#include "execution/posthog_insert.hpp"
 #include "storage/posthog_transaction.hpp"
 #include "utils/posthog_logger.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
@@ -279,7 +281,33 @@ optional_ptr<SchemaCatalogEntry> PostHogCatalog::LookupSchema(CatalogTransaction
 
 PhysicalOperator &PostHogCatalog::PlanInsert(ClientContext &context, PhysicalPlanGenerator &planner, LogicalInsert &op,
                                              optional_ptr<PhysicalOperator> plan) {
-	throw NotImplementedException("PostHog: INSERT not yet implemented");
+	if (!IsConnected()) {
+		throw CatalogException("PostHog: Not connected to remote server.");
+	}
+	if (op.return_chunk) {
+		throw NotImplementedException("PostHog: INSERT ... RETURNING is not yet implemented");
+	}
+	if (op.on_conflict_info.action_type != OnConflictAction::THROW) {
+		throw NotImplementedException("PostHog: INSERT ... ON CONFLICT is not yet implemented");
+	}
+	if (!plan) {
+		throw NotImplementedException("PostHog: INSERT without an input source is not yet implemented");
+	}
+
+	if (!op.column_index_map.empty()) {
+		plan = planner.ResolveDefaultsProjection(op, *plan);
+	}
+
+	auto &table = op.table.Cast<PostHogTableEntry>();
+	vector<string> column_names;
+	for (auto &column : op.table.GetColumns().Physical()) {
+		column_names.push_back(column.Name());
+	}
+
+	auto &insert = planner.Make<PhysicalPostHogInsert>(op.types, *this, table.GetSchemaName(), table.name,
+	                                                   std::move(column_names), op.estimated_cardinality);
+	insert.children.push_back(*plan);
+	return insert;
 }
 
 PhysicalOperator &PostHogCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
