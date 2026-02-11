@@ -28,7 +28,7 @@ jobs:
       ci_tools_version: v1.4.3
       extension_name: duckhog
       extra_toolchains: parser_tools
-      matrix_parse_script: ./.github/scripts/modify_distribution_matrix_with_depot_runners.py
+      matrix_parse_script: .github/scripts/modify_distribution_matrix_with_depot_runners.py
       vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
       vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,readwrite;http,https://vcpkg-cache.duckdb.org,read
     secrets:
@@ -48,7 +48,7 @@ jobs:
       ci_tools_version: v1.4.3
       extension_name: duckhog
       extra_toolchains: parser_tools
-      matrix_parse_script: ./.github/scripts/modify_distribution_matrix_with_depot_runners.py
+      matrix_parse_script: .github/scripts/modify_distribution_matrix_with_depot_runners.py
       vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
       vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read
     secrets:
