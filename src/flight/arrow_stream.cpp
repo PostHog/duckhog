@@ -155,7 +155,7 @@ int PostHogArrowStream::ExportNext(PostHogArrowStreamState &state, ArrowArray *o
 		state.last_error = chunk_result.status().ToString();
 		return -1;
 	}
-	auto chunk = std::move(*chunk_result);
+	const auto &chunk = *chunk_result;
 	if (!chunk.data) {
 		out->release = nullptr;
 		return 0;
