@@ -10,16 +10,17 @@
 - Keep configs and flags explicit; document defaults in README.
 - Provide runbooks for local dev and failure recovery.
 - When asked to work on/implement a task in a document, mark the task upon completion
+- When creating new branch from origin/main, do not track origin/main. 
 
 ## Tests
-- Full suite: `make test` (integration runs only when the Flight server is running and env vars are set)
 - Unit tests only: `./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"`
 - Integration tests (`duckgres` control-plane Flight):
   - `./scripts/test-servers.sh start --background --seed`
   - `eval "$(./scripts/test-servers.sh env)"`
   - `./build/release/test/unittest "test/sql/queries/*"`
   - `./scripts/test-servers.sh stop`
-- "I identified why the server keeps 'disappearing' here: background processes don't persist across separate tool invocations in this environment. I'm now running start + integration tests + stop in one command so the Duckgres process stays alive for the entire test run."
+- Full suite: `make test` (always do integration test setup using test-servers.sh)
+- Run start + integration tests + stop in one command so the Duckgres process stays alive for the entire test run.
 
 ## Repo notes
 - Submodules required: `git submodule update --init --recursive`
