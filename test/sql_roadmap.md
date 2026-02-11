@@ -50,7 +50,6 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- `rm01_insert_remote.test_slow`
 - `rm02_update_remote.test_slow`
 - `rm03_delete_remote.test_slow`
 - `rm04_truncate_remote.test_slow`
@@ -64,6 +63,9 @@ Current targets:
 - `rm12_snapshots_remote.test_slow`
 - `rm13_table_info_remote.test_slow`
 - `rm14_nested_types_remote.test_slow`
+
+Graduated targets (now part of normal integration suite):
+- `test/sql/queries/insert_remote.test_slow` (RM01)
 
 ## Design Rules
 
