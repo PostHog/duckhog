@@ -28,6 +28,7 @@ jobs:
       ci_tools_version: v1.4.3
       extension_name: duckhog
       extra_toolchains: parser_tools
+      vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
       vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,readwrite;http,https://vcpkg-cache.duckdb.org,read
     secrets:
       VCPKG_CACHING_AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_RW_AWS_ACCESS_KEY_ID }}
@@ -46,6 +47,7 @@ jobs:
       ci_tools_version: v1.4.3
       extension_name: duckhog
       extra_toolchains: parser_tools
+      vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
       vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read
     secrets:
       VCPKG_CACHING_AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_RO_AWS_ACCESS_KEY_ID }}
