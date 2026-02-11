@@ -154,6 +154,9 @@ arrow::flight::FlightCallOptions PostHogFlightClient::GetCallOptions() const {
 	// Control new allocations Arrow performs while decoding.
 	options.memory_manager = arrow::default_cpu_memory_manager();
 	options.read_options = arrow::ipc::IpcReadOptions::Defaults();
+	// Ensure Flight buffers are aligned even when gRPC buffers are misaligned.
+	options.read_options.ensure_alignment = arrow::ipc::Alignment::kDataTypeSpecificAlignment;
+
 
 	return options;
 }
