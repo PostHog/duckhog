@@ -64,7 +64,9 @@ jobs:
 
   tidy-check:
     name: Tidy Check
-    runs-on: ubuntu-24.04
+    runs-on:
+      - self-hosted
+      - depot-ubuntu-24.04-64
     env:
       CC: gcc
       CXX: g++
