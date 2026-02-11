@@ -14,6 +14,7 @@
 #include "utils/connection_string.hpp"
 #include "flight/flight_client.hpp"
 #include "duckdb/main/database_manager.hpp"
+#include "duckdb/main/attached_database.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "utils/posthog_logger.hpp"
 
@@ -142,7 +143,16 @@ static unique_ptr<Catalog> PostHogAttach(optional_ptr<StorageExtensionInfo> stor
 		AttachOptions additional_options(opts, attach_options.access_mode);
 
 		try {
-			db_manager.AttachDatabase(context, additional_info, additional_options);
+			auto attached_db = db_manager.AttachDatabase(context, additional_info, additional_options);
+			if (!attached_db) {
+				continue;
+			}
+
+			// DuckDB 1.4.x requires explicit initialize/finalize/finalize-attach when
+			// using DatabaseManager::AttachDatabase directly.
+			attached_db->Initialize(context);
+			attached_db->FinalizeLoad(context);
+			db_manager.FinalizeAttach(context, additional_info, std::move(attached_db));
 		} catch (const std::exception &e) {
 			POSTHOG_LOG_ERROR("Failed to attach catalog '%s': %s", remote_catalog.c_str(), e.what());
 		}
