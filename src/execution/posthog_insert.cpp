@@ -18,10 +18,18 @@ namespace duckdb {
 namespace {
 
 struct PostHogInsertGlobalState : public GlobalSinkState {
+	PostHogInsertGlobalState(ClientContext &context, const vector<LogicalType> &types, bool return_chunk_p)
+	    : return_collection(context, types), return_chunk(return_chunk_p) {
+	}
+
 	idx_t insert_count = 0;
+	ColumnDataCollection return_collection;
+	bool return_chunk;
 };
 
 struct PostHogInsertSourceState : public GlobalSourceState {
+	ColumnDataScanState scan_state;
+	bool initialized = false;
 	bool finished = false;
 };
 
@@ -33,10 +41,13 @@ string QuoteIdent(const string &ident) {
 
 PhysicalPostHogInsert::PhysicalPostHogInsert(PhysicalPlan &physical_plan, vector<LogicalType> types,
                                              PostHogCatalog &catalog, string remote_schema, string remote_table,
-                                             vector<string> column_names, idx_t estimated_cardinality)
+                                             vector<string> column_names, bool return_chunk,
+                                             bool on_conflict_do_nothing, string on_conflict_clause,
+                                             idx_t estimated_cardinality)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       catalog_(catalog), remote_schema_(std::move(remote_schema)), remote_table_(std::move(remote_table)),
-      column_names_(std::move(column_names)) {
+      column_names_(std::move(column_names)), return_chunk_(return_chunk),
+      on_conflict_do_nothing_(on_conflict_do_nothing), on_conflict_clause_(std::move(on_conflict_clause)) {
 }
 
 string PhysicalPostHogInsert::GetName() const {
@@ -44,8 +55,7 @@ string PhysicalPostHogInsert::GetName() const {
 }
 
 unique_ptr<GlobalSinkState> PhysicalPostHogInsert::GetGlobalSinkState(ClientContext &context) const {
-	(void)context;
-	return make_uniq<PostHogInsertGlobalState>();
+	return make_uniq<PostHogInsertGlobalState>(context, GetTypes(), return_chunk_);
 }
 
 SinkResultType PhysicalPostHogInsert::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
@@ -55,13 +65,26 @@ SinkResultType PhysicalPostHogInsert::Sink(ExecutionContext &context, DataChunk 
 
 	auto sql = BuildInsertSQL(chunk);
 	auto remote_txn_id = PostHogTransaction::Get(context.client, catalog_).remote_txn_id;
-	auto affected = catalog_.GetFlightClient().ExecuteUpdate(sql, remote_txn_id);
+	int64_t affected = 0;
+	try {
+		affected = catalog_.GetFlightClient().ExecuteUpdate(sql, remote_txn_id);
+	} catch (const std::exception &ex) {
+		throw IOException("PostHog: INSERT into %s failed for chunk with %llu row(s): %s", QualifyTableName(),
+		                  chunk.size(), ex.what());
+	}
 
 	auto &sink_state = input.global_state.Cast<PostHogInsertGlobalState>();
 	if (affected < 0) {
+		if (on_conflict_do_nothing_) {
+			throw NotImplementedException(
+			    "PostHog: INSERT ... ON CONFLICT DO NOTHING requires an affected-row count from remote server");
+		}
 		sink_state.insert_count += chunk.size();
 	} else {
 		sink_state.insert_count += NumericCast<idx_t>(affected);
+	}
+	if (sink_state.return_chunk) {
+		sink_state.return_collection.Append(chunk);
 	}
 	return SinkResultType::NEED_MORE_INPUT;
 }
@@ -84,15 +107,23 @@ SourceResultType PhysicalPostHogInsert::GetDataInternal(ExecutionContext &contex
                                                         OperatorSourceInput &input) const {
 	(void)context;
 	auto &source_state = input.global_state.Cast<PostHogInsertSourceState>();
-	if (source_state.finished) {
+	auto &global_sink = this->sink_state->Cast<PostHogInsertGlobalState>();
+	if (!global_sink.return_chunk) {
+		if (source_state.finished) {
+			return SourceResultType::FINISHED;
+		}
+		source_state.finished = true;
+		chunk.SetCardinality(1);
+		chunk.SetValue(0, 0, Value::BIGINT(NumericCast<int64_t>(global_sink.insert_count)));
 		return SourceResultType::FINISHED;
 	}
-	source_state.finished = true;
 
-	auto &global_sink = this->sink_state->Cast<PostHogInsertGlobalState>();
-	chunk.SetCardinality(1);
-	chunk.SetValue(0, 0, Value::BIGINT(NumericCast<int64_t>(global_sink.insert_count)));
-	return SourceResultType::FINISHED;
+	if (!source_state.initialized) {
+		global_sink.return_collection.InitializeScan(source_state.scan_state);
+		source_state.initialized = true;
+	}
+	global_sink.return_collection.Scan(source_state.scan_state, chunk);
+	return chunk.size() == 0 ? SourceResultType::FINISHED : SourceResultType::HAVE_MORE_OUTPUT;
 }
 
 string PhysicalPostHogInsert::QualifyTableName() const {
@@ -100,12 +131,22 @@ string PhysicalPostHogInsert::QualifyTableName() const {
 }
 
 string PhysicalPostHogInsert::BuildInsertSQL(const DataChunk &chunk) const {
+	string sql = "INSERT INTO " + QualifyTableName();
+	if (column_names_.empty()) {
+		if (chunk.size() != 1) {
+			throw NotImplementedException("PostHog: multi-row INSERT DEFAULT VALUES is not yet implemented");
+		}
+		sql += " DEFAULT VALUES";
+		sql += on_conflict_clause_;
+		sql += ";";
+		return sql;
+	}
 	if (chunk.ColumnCount() != column_names_.size()) {
 		throw InternalException("PostHog: insert chunk has %llu columns but table has %llu insert columns",
 		                        chunk.ColumnCount(), column_names_.size());
 	}
 
-	string sql = "INSERT INTO " + QualifyTableName() + " (";
+	sql += " (";
 	for (idx_t col_idx = 0; col_idx < column_names_.size(); col_idx++) {
 		if (col_idx > 0) {
 			sql += ", ";
@@ -127,6 +168,8 @@ string PhysicalPostHogInsert::BuildInsertSQL(const DataChunk &chunk) const {
 		}
 		sql += ")";
 	}
+
+	sql += on_conflict_clause_;
 
 	sql += ";";
 	return sql;

@@ -1,0 +1,36 @@
+# name: test/sql/roadmap/rm17_on_conflict_do_update_remote.test_slow
+# description: Roadmap target RM17 - INSERT ... ON CONFLICT DO UPDATE on remote DuckLake table
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm17 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm17;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm17.t(i INT PRIMARY KEY, v INT);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm17.t VALUES (1, 10);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm17.t VALUES (1, 20) ON CONFLICT(i) DO UPDATE SET v = EXCLUDED.v;
+
+query I
+SELECT v FROM remote_flight.roadmap_rm17.t WHERE i = 1;
+----
+20

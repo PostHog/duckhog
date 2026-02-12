@@ -1,0 +1,38 @@
+# name: test/sql/queries/insert_on_conflict_remote.test_slow
+# description: INSERT ... ON CONFLICT DO NOTHING on remote DuckLake table
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm16 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm16;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm16.t(i INT, v INT);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm16.t VALUES (1, 10);
+
+statement error
+INSERT INTO remote_flight.roadmap_rm16.t VALUES (1, 20) ON CONFLICT DO NOTHING;
+----
+UNIQUE/PRIMARY KEY constraints
+
+query I
+SELECT COUNT(*) FROM remote_flight.roadmap_rm16.t;
+----
+1

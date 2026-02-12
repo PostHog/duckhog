@@ -1,0 +1,30 @@
+# name: test/sql/roadmap/rm20_insert_returning_omitted_columns_remote.test_slow
+# description: Roadmap target RM20 - INSERT DEFAULT VALUES RETURNING on remote DuckLake table
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm20 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm20;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm20.t(i INT DEFAULT 42, j INT DEFAULT 7);
+
+query II
+INSERT INTO remote_flight.roadmap_rm20.t DEFAULT VALUES RETURNING i, j;
+----
+42	7

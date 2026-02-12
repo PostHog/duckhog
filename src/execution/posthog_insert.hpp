@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/execution/physical_operator.hpp"
 
 namespace duckdb {
@@ -19,8 +20,8 @@ public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::EXTENSION;
 
 	PhysicalPostHogInsert(PhysicalPlan &physical_plan, vector<LogicalType> types, PostHogCatalog &catalog,
-	                      string remote_schema, string remote_table, vector<string> column_names,
-	                      idx_t estimated_cardinality);
+	                      string remote_schema, string remote_table, vector<string> column_names, bool return_chunk,
+	                      bool on_conflict_do_nothing, string on_conflict_clause, idx_t estimated_cardinality);
 
 	string GetName() const override;
 
@@ -58,6 +59,9 @@ private:
 	string remote_schema_;
 	string remote_table_;
 	vector<string> column_names_;
+	bool return_chunk_ = false;
+	bool on_conflict_do_nothing_ = false;
+	string on_conflict_clause_;
 };
 
 } // namespace duckdb

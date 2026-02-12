@@ -1,0 +1,30 @@
+# name: test/sql/roadmap/rm19_on_conflict_do_nothing_returning_remote.test_slow
+# description: Roadmap target RM19 - INSERT ... ON CONFLICT DO NOTHING RETURNING on remote DuckLake table
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm19 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm19;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm19.t(i INT PRIMARY KEY, v INT);
+
+query I
+INSERT INTO remote_flight.roadmap_rm19.t VALUES (1, 10) ON CONFLICT(i) DO NOTHING RETURNING i;
+----
+1
