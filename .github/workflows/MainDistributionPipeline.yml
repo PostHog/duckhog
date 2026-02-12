@@ -61,6 +61,8 @@ jobs:
           sudo apt-get install -y -qq ninja-build clang-tidy flex bison
           sudo pip3 install pybind11[global] --break-system-packages
 
+      # GitHub evicts caches not accessed for 7 days. If tidy-check is
+      # suddenly slow again, a cache miss after a quiet week is likely the cause.
       - name: Restore vcpkg binary cache
         uses: actions/cache@v4
         with:
