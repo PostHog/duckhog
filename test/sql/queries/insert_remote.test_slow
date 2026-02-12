@@ -1,6 +1,6 @@
-# name: test/sql/roadmap/rm01_insert_remote.test_slow
-# description: Roadmap target RM01 - INSERT into remote DuckLake table
-# group: [roadmap]
+# name: test/sql/queries/insert_remote.test_slow
+# description: INSERT into remote DuckLake table
+# group: [queries]
 
 require duckhog
 
