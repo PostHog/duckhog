@@ -90,8 +90,6 @@ PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std:
 	sql_client_ = std::make_unique<arrow::flight::sql::FlightSqlClient>(std::move(flight_client));
 }
 
-PostHogFlightClient::~PostHogFlightClient() = default;
-
 void PostHogFlightClient::Authenticate() {
 	if (user_.empty() || password_.empty()) {
 		throw std::runtime_error("PostHog: Missing Flight credentials (user/password)");
@@ -158,7 +156,6 @@ arrow::flight::FlightCallOptions PostHogFlightClient::GetCallOptions() const {
 	// Ensure Flight buffers are aligned even when gRPC buffers are misaligned.
 	options.read_options.ensure_alignment = arrow::ipc::Alignment::kDataTypeSpecificAlignment;
 #endif
-
 
 	return options;
 }
