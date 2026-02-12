@@ -361,17 +361,17 @@ void PostHogSchemaEntry::LoadTablesIfNeeded() {
 			return; // Cache is still valid
 		}
 		// Cache expired, need to refresh
-		std::cerr << "[PostHog] Table cache expired for schema " << name << ", refreshing..." << std::endl;
+		std::cerr << "[PostHog] Table cache expired for schema " << name << ", refreshing..." << '\n';
 	}
 
 	if (!posthog_catalog_.IsConnected()) {
-		std::cerr << "[PostHog] Cannot load tables: not connected" << std::endl;
+		std::cerr << "[PostHog] Cannot load tables: not connected" << '\n';
 		return;
 	}
 
 	try {
 		const auto &remote_catalog = posthog_catalog_.GetRemoteCatalog();
-		std::cerr << "[PostHog] Loading tables for catalog." << remote_catalog << ".schema." << name << std::endl;
+		std::cerr << "[PostHog] Loading tables for catalog." << remote_catalog << ".schema." << name << '\n';
 		auto &client = posthog_catalog_.GetFlightClient();
 		auto table_names = client.ListTables(remote_catalog, name);
 
@@ -399,10 +399,10 @@ void PostHogSchemaEntry::LoadTablesIfNeeded() {
 
 		tables_loaded_ = true;
 		tables_loaded_at_ = std::chrono::steady_clock::now();
-		std::cerr << "[PostHog] Loaded " << table_names.size() << " tables for schema " << name << std::endl;
+		std::cerr << "[PostHog] Loaded " << table_names.size() << " tables for schema " << name << '\n';
 
 	} catch (const std::exception &e) {
-		std::cerr << "[PostHog] Failed to load tables for schema " << name << ": " << e.what() << std::endl;
+		std::cerr << "[PostHog] Failed to load tables for schema " << name << ": " << e.what() << '\n';
 		if (IsConnectionFailureMessage(e.what())) {
 			throw CatalogException("PostHog: Not connected to remote server.");
 		}

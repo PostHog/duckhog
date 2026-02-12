@@ -3,6 +3,8 @@ PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 # Configuration of extension
 EXT_NAME=duckhog
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
+# Use release-branch versioning so v1.4.x tags report as v1.4.x at runtime.
+EXT_FLAGS += -DMAIN_BRANCH_VERSIONING=0
 
 # Include the Makefile from extension-ci-tools
 include extension-ci-tools/makefiles/duckdb_extension.Makefile

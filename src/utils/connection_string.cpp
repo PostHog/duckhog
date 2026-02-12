@@ -7,6 +7,7 @@
 
 #include "utils/connection_string.hpp"
 #include <cstdint>
+#include <cstdlib>
 #include <stdexcept>
 #include <sstream>
 
@@ -21,7 +22,7 @@ std::string ConnectionString::UrlDecode(const std::string &str, bool plus_as_spa
 			// Parse hex digits
 			char hex[3] = {str[i + 1], str[i + 2], '\0'};
 			char *end;
-			int64_t value = strtol(hex, &end, 16);
+			int64_t value = std::strtoll(hex, &end, 16);
 			if (end == hex + 2) {
 				result += static_cast<char>(value);
 				i += 2;
@@ -40,7 +41,7 @@ std::string ConnectionString::UrlDecode(const std::string &str, bool plus_as_spa
 PostHogConnectionConfig ConnectionString::Parse(const std::string &connection_string) {
 	PostHogConnectionConfig config;
 
-	const std::string &uri = connection_string;
+	const auto &uri = connection_string;
 
 	// Split database name and query parameters at '?'
 	auto query_pos = uri.find('?');

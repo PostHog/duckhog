@@ -68,7 +68,7 @@ PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std:
 		throw std::runtime_error("PostHog: Invalid Flight endpoint '" + endpoint +
 		                         "': " + location_result.status().ToString());
 	}
-	auto location = *location_result;
+	const auto &location = *location_result;
 
 	// Create Flight client options
 	arrow::flight::FlightClientOptions options;
@@ -89,8 +89,6 @@ PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std:
 	// Wrap in SQL client for Flight SQL protocol support
 	sql_client_ = std::make_unique<arrow::flight::sql::FlightSqlClient>(std::move(flight_client));
 }
-
-PostHogFlightClient::~PostHogFlightClient() = default;
 
 void PostHogFlightClient::Authenticate() {
 	if (user_.empty() || password_.empty()) {
@@ -134,7 +132,7 @@ arrow::Status PostHogFlightClient::Ping() {
 		if (!chunk_result.ok()) {
 			return chunk_result.status();
 		}
-		auto chunk = *chunk_result;
+		const auto &chunk = *chunk_result;
 		if (!chunk.data) {
 			break;
 		}
@@ -151,7 +149,7 @@ arrow::flight::FlightCallOptions PostHogFlightClient::GetCallOptions() const {
 		options.headers.emplace_back("authorization", "Basic " + Base64Encode(user_ + ":" + password_));
 	}
 
-	// controls new allocations Arrow performs while decoding
+	// Control new allocations Arrow performs while decoding.
 	options.memory_manager = arrow::default_cpu_memory_manager();
 	options.read_options = arrow::ipc::IpcReadOptions::Defaults();
 #if ARROW_VERSION_MAJOR >= 21
@@ -199,7 +197,7 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
 				throw std::runtime_error("PostHog: Failed to read result batch: " + chunk_result.status().ToString());
 			}
 
-			auto chunk = *chunk_result;
+			const auto &chunk = *chunk_result;
 			if (!chunk.data) {
 				break; // End of stream
 			}
@@ -403,7 +401,7 @@ std::vector<PostHogDbSchemaInfo> PostHogFlightClient::ListDbSchemas(const std::s
 			throw std::runtime_error("PostHog: Failed to read schema list: " + chunk_result.status().ToString());
 		}
 
-		auto chunk = *chunk_result;
+		const auto &chunk = *chunk_result;
 		if (!chunk.data) {
 			break;
 		}
@@ -494,7 +492,7 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 			throw std::runtime_error("PostHog: Failed to read table list: " + chunk_result.status().ToString());
 		}
 
-		auto chunk = *chunk_result;
+		const auto &chunk = *chunk_result;
 		if (!chunk.data) {
 			break;
 		}
@@ -529,7 +527,7 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 					if (!row_matches_catalog(i) || table_array->IsNull(i)) {
 						continue;
 					}
-					{ tables.emplace_back(table_array->GetView(i)); }
+					tables.emplace_back(table_array->GetView(i));
 				}
 				break;
 			}
@@ -540,7 +538,7 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 					if (!row_matches_catalog(i) || table_array->IsNull(i)) {
 						continue;
 					}
-					{ tables.emplace_back(table_array->GetView(i)); }
+					tables.emplace_back(table_array->GetView(i));
 				}
 				break;
 			}
@@ -589,7 +587,7 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 		throw std::runtime_error("PostHog: Failed to read table metadata: " + chunk_result.status().ToString());
 	}
 
-	auto chunk = *chunk_result;
+	const auto &chunk = *chunk_result;
 	if (!chunk.data || chunk.data->num_rows() == 0) {
 		throw std::runtime_error("PostHog: Table not found(no data): " + schema + "." + table);
 	}
@@ -691,7 +689,7 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 			throw std::runtime_error("PostHog: Failed to finish reading table metadata: " +
 			                         next_chunk_result.status().ToString());
 		}
-		auto next_chunk = *next_chunk_result;
+		const auto &next_chunk = *next_chunk_result;
 		if (!next_chunk.data) {
 			break;
 		}
