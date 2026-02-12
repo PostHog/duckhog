@@ -1,0 +1,33 @@
+# name: test/sql/roadmap/rm22_insert_values_default_literals_remote.test_slow
+# description: Roadmap target RM22 - INSERT ... VALUES (DEFAULT, DEFAULT) uses remote defaults
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm22_defaults CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm22_defaults;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm22_defaults.t(i INT DEFAULT 42, j INT DEFAULT 7);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm22_defaults.t(i, j) VALUES (DEFAULT, DEFAULT);
+
+query II
+SELECT i, j FROM remote_flight.roadmap_rm22_defaults.t;
+----
+42	7

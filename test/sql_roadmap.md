@@ -67,6 +67,7 @@ Current targets:
 - `rm19_on_conflict_do_nothing_returning_remote.test_slow`
 - `rm20_insert_returning_omitted_columns_remote.test_slow`
 - `rm21_insert_partial_returning_remote.test_slow`
+- `rm22_insert_values_default_literals_remote.test_slow`
 
 Graduated targets (now part of normal integration suite):
 - `test/sql/queries/insert_remote.test_slow` (RM01)
