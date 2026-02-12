@@ -1,0 +1,35 @@
+# name: test/sql/queries/insert_returning_explicit_columns_remote.test_slow
+# description: INSERT ... RETURNING with explicit column lists on remote DuckLake table
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm22 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm22;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm22.t(i INT, j INT);
+
+query II
+INSERT INTO remote_flight.roadmap_rm22.t(i, j) VALUES (1, 2) RETURNING i, j;
+----
+1	2
+
+query II
+INSERT INTO remote_flight.roadmap_rm22.t(j, i) VALUES (30, 20) RETURNING i, j;
+----
+20	30

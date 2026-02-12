@@ -8,6 +8,7 @@
 #include "execution/posthog_insert.hpp"
 
 #include "catalog/posthog_catalog.hpp"
+#include "duckdb/common/allocator.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/numeric_utils.hpp"
 #include "duckdb/parser/keyword_helper.hpp"
@@ -43,11 +44,12 @@ PhysicalPostHogInsert::PhysicalPostHogInsert(PhysicalPlan &physical_plan, vector
                                              PostHogCatalog &catalog, string remote_schema, string remote_table,
                                              vector<string> column_names, bool return_chunk,
                                              bool on_conflict_do_nothing, string on_conflict_clause,
-                                             idx_t estimated_cardinality)
+                                             vector<idx_t> return_input_index_map, idx_t estimated_cardinality)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       catalog_(catalog), remote_schema_(std::move(remote_schema)), remote_table_(std::move(remote_table)),
       column_names_(std::move(column_names)), return_chunk_(return_chunk),
-      on_conflict_do_nothing_(on_conflict_do_nothing), on_conflict_clause_(std::move(on_conflict_clause)) {
+      on_conflict_do_nothing_(on_conflict_do_nothing), on_conflict_clause_(std::move(on_conflict_clause)),
+      return_input_index_map_(std::move(return_input_index_map)) {
 }
 
 string PhysicalPostHogInsert::GetName() const {
@@ -84,7 +86,35 @@ SinkResultType PhysicalPostHogInsert::Sink(ExecutionContext &context, DataChunk 
 		sink_state.insert_count += NumericCast<idx_t>(affected);
 	}
 	if (sink_state.return_chunk) {
-		sink_state.return_collection.Append(chunk);
+		if (return_input_index_map_.empty()) {
+			sink_state.return_collection.Append(chunk);
+		} else {
+			bool needs_projection = return_input_index_map_.size() != chunk.ColumnCount();
+			if (!needs_projection) {
+				for (idx_t i = 0; i < return_input_index_map_.size(); i++) {
+					if (return_input_index_map_[i] != i) {
+						needs_projection = true;
+						break;
+					}
+				}
+			}
+			if (needs_projection) {
+				DataChunk projected_chunk;
+				projected_chunk.Initialize(Allocator::Get(context.client), GetTypes());
+				projected_chunk.SetCardinality(chunk);
+				for (idx_t col_idx = 0; col_idx < return_input_index_map_.size(); col_idx++) {
+					auto source_idx = return_input_index_map_[col_idx];
+					if (source_idx >= chunk.ColumnCount()) {
+						throw InternalException("PostHog: return column map index %llu exceeds insert chunk width %llu",
+						                        source_idx, chunk.ColumnCount());
+					}
+					projected_chunk.data[col_idx].Reference(chunk.data[source_idx]);
+				}
+				sink_state.return_collection.Append(projected_chunk);
+			} else {
+				sink_state.return_collection.Append(chunk);
+			}
+		}
 	}
 	return SinkResultType::NEED_MORE_INPUT;
 }
