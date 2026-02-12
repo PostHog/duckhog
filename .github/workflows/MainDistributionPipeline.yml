@@ -22,6 +22,8 @@ jobs:
       duckdb_version: v1.4.3
       ci_tools_version: v1.4.3
       extension_name: duckhog
+      extra_toolchains: 'parser_tools'
+      exclude_archs: 'linux_amd64_musl;windows_amd64;windows_amd64_mingw;wasm_mvp;wasm_eh;wasm_threads'
 
   code-quality-check:
     name: Code Quality Check
@@ -46,7 +48,7 @@ jobs:
       VCPKG_HOST_TRIPLET: x64-linux-release
       VCPKG_OVERLAY_PORTS: ${{ github.workspace }}/extension-ci-tools/vcpkg_ports
       VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/extension-ci-tools/toolchains
-      VCPKG_BINARY_SOURCES: clear;http,https://vcpkg-cache.duckdb.org,read
+      VCPKG_BINARY_SOURCES: clear;default,readwrite;http,https://vcpkg-cache.duckdb.org,read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,8 +59,22 @@ jobs:
       - name: Install Tooling
         run: |
           sudo apt-get update -y -qq
-          sudo apt-get install -y -qq ninja-build clang-tidy
+          sudo apt-get install -y -qq ninja-build clang-tidy flex bison
           sudo pip3 install pybind11[global] --break-system-packages
+
+      # GitHub evicts caches not accessed for 7 days. If tidy-check is
+      # suddenly slow again, a cache miss after a quiet week is likely the cause.
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-binaries-tidy-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+
+      - name: Restore vcpkg repo cache
+        uses: actions/cache@v4
+        with:
+          path: vcpkg
+          key: vcpkg-repo-${{ hashFiles('vcpkg-configuration.json') }}
 
       - name: Setup vcpkg
         run: |
@@ -69,9 +85,13 @@ jobs:
           print(data["default-registry"]["baseline"])
           PY
           )"
-          git clone https://github.com/microsoft/vcpkg.git vcpkg
-          cd vcpkg
-          git checkout "$BASELINE"
+          if [ ! -d "vcpkg/.git" ]; then
+            git clone https://github.com/microsoft/vcpkg.git vcpkg
+            cd vcpkg
+            git checkout "$BASELINE"
+          else
+            cd vcpkg
+          fi
           ./bootstrap-vcpkg.sh -disableMetrics
 
       - name: Tidy Check
