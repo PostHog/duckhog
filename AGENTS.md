@@ -21,6 +21,7 @@
   - `./scripts/test-servers.sh stop`
 - Full suite: `make test` (always do integration test setup using test-servers.sh)
 - Run start + integration tests + stop in one command so the Duckgres process stays alive for the entire test run.
+- Roadmap tests verify expected behavior and are intentionally failing, serving as a checklist for missing features. 
 
 ## Repo notes
 - Submodules required: `git submodule update --init --recursive`
