@@ -111,7 +111,7 @@ private:
 		}
 
 		std::lock_guard<std::mutex> lock(mutex_);
-		std::cerr << FormatPrefix(level) << message << std::endl;
+		std::cerr << FormatPrefix(level) << message << '\n';
 	}
 
 	template <typename... Args>
@@ -133,7 +133,7 @@ private:
 #pragma clang diagnostic pop
 #endif
 
-		std::cerr << FormatPrefix(level) << buffer << std::endl;
+		std::cerr << FormatPrefix(level) << buffer << '\n';
 	}
 
 	std::string FormatPrefix(PostHogLogLevel level) {
