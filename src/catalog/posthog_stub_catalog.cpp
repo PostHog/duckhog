@@ -60,6 +60,12 @@ PhysicalOperator &PostHogStubCatalog::PlanDelete(ClientContext &context, Physica
 
 PhysicalOperator &PostHogStubCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner,
                                                  LogicalUpdate &op, PhysicalOperator &plan) {
+	(void)plan;
+	return PlanUpdate(context, planner, op);
+}
+
+PhysicalOperator &PostHogStubCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner,
+                                                 LogicalUpdate &op) {
 	throw NotImplementedException("PostHog: Cannot update stub catalog '%s'. Use '%s_<catalog>' instead.",
 	                              database_name_, database_name_);
 }

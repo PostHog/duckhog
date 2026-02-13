@@ -11,6 +11,7 @@
 - Provide runbooks for local dev and failure recovery.
 - When asked to work on/implement a task in a document, mark the task upon completion
 - When creating new branch from origin/main, do not track origin/main. 
+- Before each commit, run make format-fix and make tidy-check in venv
 
 ## Tests
 - Unit tests only: `./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"`
@@ -20,6 +21,7 @@
   - `eval "$(./scripts/test-servers.sh env)"`
   - `./build/release/test/unittest "test/sql/queries/*"`
   - `./scripts/test-servers.sh stop`
+  - in codex sandbox mode, those must run in a single combined command to avoid being killed
 - Full local suite (unit + integration with automatic setup/teardown): `just test-all`
 - CI/default extension target: `make test` (from extension-ci-tools)
 - Roadmap tests verify expected behavior and are intentionally failing, serving as a checklist for missing features. 

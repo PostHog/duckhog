@@ -1,3 +1,4 @@
 black>=24
+clang-tidy
 clang_format==11.0.1
 cmake-format

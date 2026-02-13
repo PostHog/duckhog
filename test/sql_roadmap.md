@@ -50,7 +50,6 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- `rm02_update_remote.test_slow`
 - `rm03_delete_remote.test_slow`
 - `rm04_truncate_remote.test_slow`
 - `rm05_ctas_remote.test_slow`
@@ -72,6 +71,7 @@ Current targets:
 
 Graduated targets (now part of normal integration suite):
 - `test/sql/queries/insert_remote.test_slow` (RM01)
+- `test/sql/queries/update_remote.test_slow` (RM02)
 - `test/sql/queries/insert_default_values_remote.test_slow` (RM18)
 - `test/sql/queries/insert_returning_remote.test_slow` (RM15)
 

@@ -1,0 +1,54 @@
+# name: test/sql/queries/update_remote_errors.test_slow
+# description: UPDATE strict catalog validation on remote DuckLake table
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.update_remote_errors CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.update_remote_errors;
+
+statement ok
+CREATE TABLE remote_flight.update_remote_errors.t(i INT, j INT);
+
+statement ok
+INSERT INTO remote_flight.update_remote_errors.t VALUES (1, 10);
+
+statement ok
+ATTACH ':memory:' AS local_mem;
+
+statement ok
+CREATE TABLE local_mem.main.side(i INT, j INT);
+
+statement ok
+INSERT INTO local_mem.main.side VALUES (1, 99);
+
+statement error
+UPDATE remote_flight.update_remote_errors.t SET j = 1 FROM local_mem.main.side s;
+----
+explicit references to external catalogs are not supported in remote UPDATE
+
+statement error
+UPDATE remote_flight.update_remote_errors.t SET j = local_mem.main.side.j FROM local_mem.main.side;
+----
+explicit references to external catalogs are not supported in remote UPDATE
+
+statement error
+UPDATE remote_flight.update_remote_errors.t AS tgt
+SET j = j + 1
+WHERE EXISTS (SELECT 1 FROM local_mem.main.side s WHERE s.i = tgt.i);
+----
+explicit references to external catalogs are not supported in remote UPDATE

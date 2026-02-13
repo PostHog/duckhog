@@ -82,7 +82,8 @@ public:
 	//===--------------------------------------------------------------------===//
 
 	// Execute a SQL query and return results as an Arrow Table
-	std::shared_ptr<arrow::Table> ExecuteQuery(const std::string &sql);
+	std::shared_ptr<arrow::Table> ExecuteQuery(const std::string &sql,
+	                                           const std::optional<TransactionId> &txn_id = std::nullopt);
 
 	// Execute a SQL update/DDL statement (Flight SQL StatementUpdate).
 	int64_t ExecuteUpdate(const std::string &sql, const std::optional<TransactionId> &txn_id = std::nullopt);
