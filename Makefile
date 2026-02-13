@@ -27,3 +27,14 @@ tidy-check: ${EXTENSION_CONFIG_STEP}
 #   ./build/<cfg>/test/unittest "$(TESTS_BASE_DIRECTORY)*"
 # We inject both include and exclude patterns via TESTS_BASE_DIRECTORY.
 TESTS_BASE_DIRECTORY = test/*" "~test/sql/roadmap/
+
+# Ensure `make test` also prepares integration dependencies for Flight tests.
+# This overrides extension-ci-tools' `test_release_internal` recipe while
+# preserving its higher-level target wiring (`test` -> `test_release`).
+.PHONY: test_release_internal
+test_release_internal:
+	@set -eu; \
+	./scripts/test-servers.sh start --background --seed; \
+	trap './scripts/test-servers.sh stop' EXIT INT TERM; \
+	eval "$$(./scripts/test-servers.sh env)"; \
+	./build/release/$(TEST_PATH) "$(TESTS_BASE_DIRECTORY)*"

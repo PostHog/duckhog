@@ -22,6 +22,7 @@ export VCPKG_TOOLCHAIN_PATH=~/projects/vcpkg/scripts/buildsystems/vcpkg.cmake
 
 ```bash
 GEN=ninja make release
+# Includes integration setup/teardown automatically.
 make test
 ```
 
@@ -277,7 +278,10 @@ rm -rf build/release/vcpkg_installed/
 
 ## Testing
 
-See `test/README.md` for unit/integration test flows and Flight server setup.
+Use `make test` for the full suite (unit + integration); it now handles
+integration server startup/env setup/teardown automatically.
+
+See `test/README.md` for unit-only and manual integration test flows.
 
 ## IDE Setup
 

@@ -9,10 +9,11 @@ This directory contains all tests for the DuckHog DuckDB extension, following th
 GEN=ninja make release
 
 # Run the full test suite (unit + integration).
-# Integration tests will only run if FLIGHT_HOST/FLIGHT_PORT are set and the server is running.
+# This now auto-starts Duckgres + DuckLake infra, exports test env vars,
+# runs tests, and tears everything down.
 make test
 
-# Run integration tests (requires Duckgres control-plane Flight listener)
+# Run integration tests only (manual server lifecycle)
 ./scripts/test-servers.sh start --background --seed
 eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
@@ -23,6 +24,8 @@ eval "$(./scripts/test-servers.sh env)"
 ```
 
 ## Running Tests
+
+`make test` is the default full-suite command and includes integration server setup/teardown automatically.
 
 ### Unit Tests
 
@@ -66,7 +69,7 @@ eval "$(./scripts/test-servers.sh env)"
 ./scripts/test-servers.sh stop
 ```
 
-**Full suite with config file** (optional, mirrors DuckDB test config behavior):
+**Full suite with config file** (optional; still uses automatic integration server lifecycle):
 
 ```bash
 DUCKDB_TEST_CONFIG=test/configs/flight.json make test

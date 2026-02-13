@@ -90,8 +90,11 @@ cd ../duckhog
 # Build
 GEN=ninja make release
 
-# Test
+# Smoke test (extension loads)
 ./build/release/duckdb -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';"
+
+# Full test suite (unit + integration; integration setup is automatic)
+make test
 ```
 
 ## Architecture

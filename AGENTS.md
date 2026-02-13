@@ -19,8 +19,7 @@
   - `eval "$(./scripts/test-servers.sh env)"`
   - `./build/release/test/unittest "test/sql/queries/*"`
   - `./scripts/test-servers.sh stop`
-- Full suite: `make test` (always do integration test setup using test-servers.sh)
-- Run start + integration tests + stop in one command so the Duckgres process stays alive for the entire test run.
+- Full suite: `make test` (automatically runs start/env/test/stop for integration setup)
 - Roadmap tests verify expected behavior and are intentionally failing, serving as a checklist for missing features. 
 
 ## Repo notes
