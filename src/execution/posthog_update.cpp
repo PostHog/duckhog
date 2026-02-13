@@ -119,7 +119,7 @@ SourceResultType PhysicalPostHogUpdate::GetData(ExecutionContext &context, DataC
 				auto out_row = output_chunk.size();
 				output_chunk.SetCardinality(out_row + 1);
 				for (idx_t col_idx = 0; col_idx < GetTypes().size(); col_idx++) {
-					auto scalar_result = combined->column(static_cast<int>(col_idx))->GetScalar(row_idx);
+					auto scalar_result = combined->column(NumericCast<int>(col_idx))->GetScalar(row_idx);
 					if (!scalar_result.ok()) {
 						throw IOException("PostHog: failed to read UPDATE RETURNING scalar: %s",
 						                  scalar_result.status().ToString());
