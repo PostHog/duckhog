@@ -408,7 +408,8 @@ PhysicalOperator &PostHogCatalog::PlanUpdate(ClientContext &context, PhysicalPla
 	return PlanUpdate(context, planner, op);
 }
 
-PhysicalOperator &PostHogCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner, LogicalUpdate &op) {
+PhysicalOperator &PostHogCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner,
+                                             LogicalUpdate &op) {
 	if (!IsConnected()) {
 		throw CatalogException("PostHog: Not connected to remote server.");
 	}

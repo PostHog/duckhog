@@ -29,8 +29,7 @@ bool CatalogIsUnset(const string &name) {
 }
 
 void RemoveTrailingSemicolon(string &sql) {
-	while (!sql.empty() &&
-	       (sql.back() == ';' || std::isspace(static_cast<unsigned char>(sql.back())))) {
+	while (!sql.empty() && (sql.back() == ';' || std::isspace(static_cast<unsigned char>(sql.back())))) {
 		sql.pop_back();
 	}
 }
@@ -55,7 +54,8 @@ void RewriteColumnRef(ColumnRefExpression &colref, const string &attached_catalo
 	}
 }
 
-void RewriteExpression(unique_ptr<ParsedExpression> &expr, const string &attached_catalog, const string &remote_catalog) {
+void RewriteExpression(unique_ptr<ParsedExpression> &expr, const string &attached_catalog,
+                       const string &remote_catalog) {
 	if (!expr) {
 		return;
 	}
@@ -67,7 +67,9 @@ void RewriteExpression(unique_ptr<ParsedExpression> &expr, const string &attache
 		}
 		ParsedExpressionIterator::EnumerateQueryNodeChildren(
 		    *subquery_expr.subquery->node,
-		    [&](unique_ptr<ParsedExpression> &child_expr) { RewriteExpression(child_expr, attached_catalog, remote_catalog); },
+		    [&](unique_ptr<ParsedExpression> &child_expr) {
+			    RewriteExpression(child_expr, attached_catalog, remote_catalog);
+		    },
 		    [&](TableRef &child_ref) { RewriteTableRefCatalog(child_ref, attached_catalog, remote_catalog); });
 	});
 }
@@ -77,7 +79,8 @@ void RewriteTableRefCatalog(TableRef &table_ref, const string &attached_catalog,
 		auto &base_ref = table_ref.Cast<BaseTableRef>();
 		if (!CatalogIsUnset(base_ref.catalog_name) && !StringUtil::CIEquals(base_ref.catalog_name, attached_catalog) &&
 		    !StringUtil::CIEquals(base_ref.catalog_name, remote_catalog)) {
-			throw BinderException("PostHog: explicit references to external catalogs are not supported in remote UPDATE");
+			throw BinderException(
+			    "PostHog: explicit references to external catalogs are not supported in remote UPDATE");
 		}
 		if (StringUtil::CIEquals(base_ref.catalog_name, attached_catalog)) {
 			base_ref.catalog_name = remote_catalog;
@@ -90,7 +93,8 @@ void RewriteTableRef(unique_ptr<TableRef> &table_ref, const string &attached_cat
 		return;
 	}
 	ParsedExpressionIterator::EnumerateTableRefChildren(
-	    *table_ref, [&](unique_ptr<ParsedExpression> &child) { RewriteExpression(child, attached_catalog, remote_catalog); },
+	    *table_ref,
+	    [&](unique_ptr<ParsedExpression> &child) { RewriteExpression(child, attached_catalog, remote_catalog); },
 	    [&](TableRef &child_ref) { RewriteTableRefCatalog(child_ref, attached_catalog, remote_catalog); });
 }
 
