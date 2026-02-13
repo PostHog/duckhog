@@ -45,7 +45,13 @@ test-unit: build
 test-integration:
     ./build/release/test/unittest "test/sql/queries/*"
 
-# Run all tests (unit + integration, excludes roadmap)
+# Run full local suite (unit + integration with automatic setup/teardown).
+# Expects duckgres at ../duckgres by default (override with DUCKGRES_ROOT).
+[group('test')]
+test-all: build _require-duckgres
+    ./test/run_full_suite.sh "test/*" "~test/sql/roadmap/*"
+
+# Run default extension-ci-tools test target
 [group('test')]
 test: build
     make test
@@ -77,9 +83,10 @@ tidy-check:
 
 # === Servers ===
 
-# Start test servers (Duckgres + DuckLake infra) in background
+# Start test servers (Duckgres + DuckLake infra) in background.
+# Expects duckgres at ../duckgres by default (override with DUCKGRES_ROOT).
 [group('servers')]
-start-servers:
+start-servers: _require-duckgres
     ./scripts/test-servers.sh start --background --seed
 
 # Stop test servers
@@ -169,5 +176,17 @@ _require-vcpkg:
     fi
     if [ ! -f "$VCPKG_TOOLCHAIN_PATH" ]; then
         echo "ERROR: VCPKG_TOOLCHAIN_PATH does not exist: $VCPKG_TOOLCHAIN_PATH" >&2
+        exit 1
+    fi
+
+[private]
+_require-duckgres:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="${DUCKGRES_ROOT:-../duckgres}"
+    root="${root/#\~/$HOME}"
+    if [ ! -d "$root" ]; then
+        echo "ERROR: duckgres repo not found at: $root" >&2
+        echo "Clone duckgres to ../duckgres or set DUCKGRES_ROOT." >&2
         exit 1
     fi

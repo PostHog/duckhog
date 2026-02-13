@@ -71,30 +71,16 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed build instructions.
 ### Quick Build
 
 ```bash
-# Clone with submodules
-git clone --recurse-submodules https://github.com/PostHog/duckhog.git
-cd duckhog
-
-# Set up vcpkg (one-time setup)
-cd ..
-git clone https://github.com/Microsoft/vcpkg.git
-cd vcpkg && git checkout 23dc124705fcac41cf35c33dd9541f5094a9c19f
-./bootstrap-vcpkg.sh -disableMetrics
-export VCPKG_TOOLCHAIN_PATH=$(pwd)/scripts/buildsystems/vcpkg.cmake
-cd ../duckhog
-
-# Note: this repo pins the vcpkg baseline in vcpkg-configuration.json.
-# If you use a different vcpkg checkout, vcpkg will still resolve to the pinned baseline.
-# To upgrade dependencies, update the baseline commit in vcpkg-configuration.json.
-
-# Build
+# First-time setup (vcpkg/toolchain) is documented in docs/DEVELOPMENT.md.
+git submodule update --init --recursive
 GEN=ninja make release
 
 # Smoke test (extension loads)
 ./build/release/duckdb -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';"
 
-# Full test suite (unit + integration; integration setup is automatic)
-make test
+# Full local test suite (unit + integration; integration setup is automatic)
+# Requires duckgres checkout at ../duckgres (or set DUCKGRES_ROOT)
+just test-all
 ```
 
 ## Architecture

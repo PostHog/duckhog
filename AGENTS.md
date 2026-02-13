@@ -15,11 +15,13 @@
 ## Tests
 - Unit tests only: `./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"`
 - Integration tests (`duckgres` control-plane Flight):
+  - Expects a local `duckgres` checkout at `../duckgres` (or set `DUCKGRES_ROOT`)
   - `./scripts/test-servers.sh start --background --seed`
   - `eval "$(./scripts/test-servers.sh env)"`
   - `./build/release/test/unittest "test/sql/queries/*"`
   - `./scripts/test-servers.sh stop`
-- Full suite: `make test` (automatically runs start/env/test/stop for integration setup)
+- Full local suite (unit + integration with automatic setup/teardown): `just test-all`
+- CI/default extension target: `make test` (from extension-ci-tools)
 - Roadmap tests verify expected behavior and are intentionally failing, serving as a checklist for missing features. 
 
 ## Repo notes
