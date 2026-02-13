@@ -11,7 +11,7 @@
 - Provide runbooks for local dev and failure recovery.
 - When asked to work on/implement a task in a document, mark the task upon completion
 - When creating new branch from origin/main, do not track origin/main. 
-- Before each commit, run make format-fix 
+- Before each commit, run make format-fix and make tidy-check in venv
 
 ## Tests
 - Unit tests only: `./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"`

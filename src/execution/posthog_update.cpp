@@ -110,7 +110,7 @@ SourceResultType PhysicalPostHogUpdate::GetData(ExecutionContext &context, DataC
 				throw IOException("PostHog: failed to combine UPDATE RETURNING batches: %s",
 				                  combined_result.status().ToString());
 			}
-			auto combined = *combined_result;
+				const auto &combined = *combined_result;
 			for (int64_t row_idx = 0; row_idx < combined->num_rows(); row_idx++) {
 				if ((idx_t)output_chunk.size() == STANDARD_VECTOR_SIZE) {
 					state.return_collection.Append(output_chunk);
@@ -118,8 +118,8 @@ SourceResultType PhysicalPostHogUpdate::GetData(ExecutionContext &context, DataC
 				}
 				auto out_row = output_chunk.size();
 				output_chunk.SetCardinality(out_row + 1);
-				for (idx_t col_idx = 0; col_idx < GetTypes().size(); col_idx++) {
-					auto scalar_result = combined->column(col_idx)->GetScalar(row_idx);
+					for (idx_t col_idx = 0; col_idx < GetTypes().size(); col_idx++) {
+						auto scalar_result = combined->column(static_cast<int>(col_idx))->GetScalar(row_idx);
 					if (!scalar_result.ok()) {
 						throw IOException("PostHog: failed to read UPDATE RETURNING scalar: %s",
 						                  scalar_result.status().ToString());

@@ -25,7 +25,7 @@ namespace duckdb {
 namespace {
 
 bool CatalogIsUnset(const string &name) {
-	return name.empty() || name == INVALID_CATALOG;
+	return name.empty();
 }
 
 void RemoveTrailingSemicolon(string &sql) {

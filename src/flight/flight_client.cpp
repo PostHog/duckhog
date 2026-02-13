@@ -73,7 +73,8 @@ std::string Base64Encode(const std::string &input) {
 		case arrow::flight::FlightStatusCode::Unauthorized:
 			throw PermissionException(message);
 		case arrow::flight::FlightStatusCode::Cancelled:
-			throw InterruptException();
+			// DuckDB exception hierarchy does not derive from std::exception.
+			throw InterruptException(); // NOLINT(hicpp-exception-baseclass)
 		case arrow::flight::FlightStatusCode::Internal:
 		case arrow::flight::FlightStatusCode::Failed:
 			break;
