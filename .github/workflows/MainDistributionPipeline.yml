@@ -22,14 +22,14 @@ jobs:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     permissions:
       contents: read
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.3
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.4
     with:
-      duckdb_version: v1.4.3
-      ci_tools_version: v1.4.3
+      duckdb_version: v1.4.4
+      ci_tools_version: v1.4.4
       extension_name: duckhog
       extra_toolchains: parser_tools
+      use_merged_vcpkg_manifest: '1'
       exclude_archs: 'linux_amd64_musl;windows_amd64;windows_amd64_mingw;wasm_mvp;wasm_eh;wasm_threads'
-      vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
       vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,readwrite;http,https://vcpkg-cache.duckdb.org,read
     secrets:
       VCPKG_CACHING_AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_RW_AWS_ACCESS_KEY_ID }}
@@ -42,14 +42,14 @@ jobs:
     if: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.3
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.4
     with:
-      duckdb_version: v1.4.3
-      ci_tools_version: v1.4.3
+      duckdb_version: v1.4.4
+      ci_tools_version: v1.4.4
       extension_name: duckhog
       extra_toolchains: parser_tools
+      use_merged_vcpkg_manifest: '1'
       exclude_archs: 'linux_amd64_musl;windows_amd64;windows_amd64_mingw;wasm_mvp;wasm_eh;wasm_threads'
-      vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
       vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read
     secrets:
       VCPKG_CACHING_AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_RO_AWS_ACCESS_KEY_ID }}
@@ -59,10 +59,10 @@ jobs:
 
   code-quality-check:
     name: Code Quality Check
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.4.3
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.4.4
     with:
-      duckdb_version: v1.4.3
-      ci_tools_version: v1.4.3
+      duckdb_version: v1.4.4
+      ci_tools_version: v1.4.4
       extension_name: duckhog
       format_checks: 'format'
 
@@ -142,7 +142,7 @@ jobs:
 
       - name: Download DuckDB CLI
         run: |
-          wget -q https://github.com/duckdb/duckdb/releases/download/v1.4.3/duckdb_cli-linux-amd64.zip
+          wget -q https://github.com/duckdb/duckdb/releases/download/v1.4.4/duckdb_cli-linux-amd64.zip
           unzip -q duckdb_cli-linux-amd64.zip
           chmod +x duckdb
           mkdir -p build/release
