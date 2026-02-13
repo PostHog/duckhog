@@ -8,7 +8,9 @@
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_schema_entry.hpp"
 #include "catalog/posthog_table_entry.hpp"
+#include "execution/posthog_dml_rewriter.hpp"
 #include "execution/posthog_insert.hpp"
+#include "execution/posthog_update.hpp"
 #include "storage/posthog_transaction.hpp"
 #include "utils/posthog_logger.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
@@ -402,7 +404,22 @@ PhysicalOperator &PostHogCatalog::PlanDelete(ClientContext &context, PhysicalPla
 
 PhysicalOperator &PostHogCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner, LogicalUpdate &op,
                                              PhysicalOperator &plan) {
-	throw NotImplementedException("PostHog: UPDATE not yet implemented");
+	(void)plan;
+	return PlanUpdate(context, planner, op);
+}
+
+PhysicalOperator &PostHogCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner, LogicalUpdate &op) {
+	if (!IsConnected()) {
+		throw CatalogException("PostHog: Not connected to remote server.");
+	}
+	if (op.return_chunk) {
+		throw NotImplementedException("PostHog: UPDATE ... RETURNING is not yet supported by this Flight backend");
+	}
+
+	auto rewritten = RewriteRemoteUpdateSQL(context, database_name_, remote_catalog_);
+	return planner.Make<PhysicalPostHogUpdate>(op.types, *this, std::move(rewritten.non_returning_sql),
+	                                           std::move(rewritten.returning_sql), op.return_chunk,
+	                                           op.estimated_cardinality);
 }
 
 DatabaseSize PostHogCatalog::GetDatabaseSize(ClientContext &context) {

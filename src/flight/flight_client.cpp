@@ -208,7 +208,8 @@ arrow::flight::FlightCallOptions PostHogFlightClient::GetCallOptions() const {
 	return options;
 }
 
-std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::string &sql) {
+std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::string &sql,
+                                                                const std::optional<TransactionId> &txn_id) {
 	std::lock_guard<std::mutex> lock(client_mutex_);
 
 	if (!authenticated_) {
@@ -218,7 +219,13 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
 	auto call_options = GetCallOptions();
 
 	// Execute the query via Flight SQL Execute RPC
-	auto info_result = sql_client_->Execute(call_options, sql);
+	arrow::Result<std::unique_ptr<arrow::flight::FlightInfo>> info_result;
+	if (txn_id.has_value()) {
+		arrow::flight::sql::Transaction txn(*txn_id);
+		info_result = sql_client_->Execute(call_options, sql, txn);
+	} else {
+		info_result = sql_client_->Execute(call_options, sql);
+	}
 	if (!info_result.ok()) {
 		throw std::runtime_error("PostHog: Query execution failed: " + info_result.status().ToString());
 	}

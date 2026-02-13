@@ -20,6 +20,7 @@
   - `eval "$(./scripts/test-servers.sh env)"`
   - `./build/release/test/unittest "test/sql/queries/*"`
   - `./scripts/test-servers.sh stop`
+  - in codex sandbox mode, those must run in a single combined command to avoid being killed
 - Full local suite (unit + integration with automatic setup/teardown): `just test-all`
 - CI/default extension target: `make test` (from extension-ci-tools)
 - Roadmap tests verify expected behavior and are intentionally failing, serving as a checklist for missing features. 

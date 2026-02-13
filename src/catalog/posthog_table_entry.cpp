@@ -59,7 +59,7 @@ TableStorageInfo PostHogTableEntry::GetStorageInfo(ClientContext &context) {
 
 void PostHogTableEntry::BindUpdateConstraints(Binder &binder, LogicalGet &get, LogicalProjection &proj,
                                               LogicalUpdate &update, ClientContext &context) {
-	throw NotImplementedException("PostHog: UPDATE operations are not supported on remote tables");
+	TableCatalogEntry::BindUpdateConstraints(binder, get, proj, update, context);
 }
 
 } // namespace duckdb

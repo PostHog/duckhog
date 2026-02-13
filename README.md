@@ -98,6 +98,13 @@ The extension is built on several key components:
 - **Virtual Catalog**: Exposes remote schemas and tables to DuckDB's query planner
 - **Type Conversion**: Translates between Arrow and DuckDB data types
 
+## Remote DML Support
+
+- `INSERT` is supported for remote tables, including `INSERT ... RETURNING` for explicit column lists.
+- `UPDATE` is supported for remote tables and executes directly on the Flight SQL backend.
+  - `UPDATE ... RETURNING` is currently not supported by the Flight backend path.
+  - Explicit references to catalogs other than the attached remote catalog are rejected during rewrite/validation.
+
 ## Development Status
 
 | Milestone | Status |
