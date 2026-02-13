@@ -1,0 +1,41 @@
+# name: test/sql/roadmap/rm23_on_conflict_rewrite_path_remote.test_slow
+# description: Roadmap target RM23 - INSERT ... ON CONFLICT DO NOTHING should succeed on remote table with primary key
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm23 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm23;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm23.t(i INT PRIMARY KEY, v INT);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm23.t VALUES (1, 10);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm23.t VALUES (1, 20) ON CONFLICT(i) DO NOTHING;
+
+query I
+SELECT COUNT(*) FROM remote_flight.roadmap_rm23.t;
+----
+1
+
+query I
+SELECT v FROM remote_flight.roadmap_rm23.t WHERE i = 1;
+----
+10
