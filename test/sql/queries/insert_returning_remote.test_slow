@@ -1,0 +1,30 @@
+# name: test/sql/queries/insert_returning_remote.test_slow
+# description: INSERT ... RETURNING on remote DuckLake table
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm15 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm15;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm15.t(i INT);
+
+query I
+INSERT INTO remote_flight.roadmap_rm15.t VALUES (1) RETURNING i;
+----
+1

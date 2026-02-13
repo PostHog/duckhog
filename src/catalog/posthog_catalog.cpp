@@ -19,8 +19,10 @@
 #include "duckdb/planner/operator/logical_update.hpp"
 #include "duckdb/storage/database_size.hpp"
 #include "duckdb/common/unordered_set.hpp"
+#include "duckdb/parser/keyword_helper.hpp"
 
 #include <cctype>
+#include <algorithm>
 
 namespace duckdb {
 
@@ -284,28 +286,106 @@ PhysicalOperator &PostHogCatalog::PlanInsert(ClientContext &context, PhysicalPla
 	if (!IsConnected()) {
 		throw CatalogException("PostHog: Not connected to remote server.");
 	}
-	if (op.return_chunk) {
-		throw NotImplementedException("PostHog: INSERT ... RETURNING is not yet implemented");
+	if (op.on_conflict_info.action_type != OnConflictAction::THROW &&
+	    op.on_conflict_info.action_type != OnConflictAction::NOTHING) {
+		throw NotImplementedException("PostHog: INSERT ... ON CONFLICT currently supports only DO NOTHING");
 	}
-	if (op.on_conflict_info.action_type != OnConflictAction::THROW) {
-		throw NotImplementedException("PostHog: INSERT ... ON CONFLICT is not yet implemented");
+	if (op.return_chunk && op.on_conflict_info.action_type == OnConflictAction::NOTHING) {
+		throw NotImplementedException("PostHog: INSERT ... ON CONFLICT DO NOTHING RETURNING is not yet implemented");
+	}
+	if (op.return_chunk && !op.column_index_map.empty()) {
+		for (auto &column : op.table.GetColumns().Physical()) {
+			auto mapped_index = op.column_index_map[column.Physical()];
+			if (mapped_index == DConstants::INVALID_INDEX) {
+				throw NotImplementedException(
+				    "PostHog: INSERT ... RETURNING with omitted/default columns is not yet implemented");
+			}
+		}
+	}
+	if (op.on_conflict_info.on_conflict_condition || op.on_conflict_info.do_update_condition ||
+	    !op.on_conflict_info.set_columns.empty()) {
+		throw NotImplementedException("PostHog: INSERT ... ON CONFLICT currently supports only DO NOTHING");
 	}
 	if (!plan) {
 		throw NotImplementedException("PostHog: INSERT without an input source is not yet implemented");
 	}
 
-	if (!op.column_index_map.empty()) {
-		plan = planner.ResolveDefaultsProjection(op, *plan);
-	}
-
 	auto &table = op.table.Cast<PostHogTableEntry>();
 	vector<string> column_names;
-	for (auto &column : op.table.GetColumns().Physical()) {
-		column_names.push_back(column.Name());
+	vector<idx_t> return_input_index_map;
+	if (op.return_chunk) {
+		return_input_index_map.reserve(op.table.GetColumns().PhysicalColumnCount());
+	}
+	if (op.column_index_map.empty()) {
+		idx_t input_idx = 0;
+		for (auto &column : op.table.GetColumns().Physical()) {
+			column_names.push_back(column.Name());
+			if (op.return_chunk) {
+				return_input_index_map.push_back(input_idx);
+			}
+			input_idx++;
+		}
+	} else {
+		idx_t mapped_column_count = 0;
+		for (auto &column : op.table.GetColumns().Physical()) {
+			auto mapped_index = op.column_index_map[column.Physical()];
+			if (mapped_index == DConstants::INVALID_INDEX) {
+				continue;
+			}
+			mapped_column_count = std::max(mapped_column_count, mapped_index + 1);
+		}
+		column_names.resize(mapped_column_count);
+		for (auto &column : op.table.GetColumns().Physical()) {
+			auto mapped_index = op.column_index_map[column.Physical()];
+			if (mapped_index == DConstants::INVALID_INDEX) {
+				continue;
+			}
+			if (!column_names[mapped_index].empty()) {
+				throw InternalException("PostHog: duplicate mapped insert column index %llu", mapped_index);
+			}
+			column_names[mapped_index] = column.Name();
+			if (op.return_chunk) {
+				return_input_index_map.push_back(mapped_index);
+			}
+		}
+		for (idx_t i = 0; i < column_names.size(); i++) {
+			if (column_names[i].empty()) {
+				throw InternalException("PostHog: unmapped insert column index %llu", i);
+			}
+		}
 	}
 
-	auto &insert = planner.Make<PhysicalPostHogInsert>(op.types, *this, table.GetSchemaName(), table.name,
-	                                                   std::move(column_names), op.estimated_cardinality);
+	auto on_conflict_do_nothing = op.on_conflict_info.action_type == OnConflictAction::NOTHING;
+	string on_conflict_clause;
+	if (on_conflict_do_nothing) {
+		if (op.on_conflict_info.on_conflict_filter.empty()) {
+			on_conflict_clause = " ON CONFLICT DO NOTHING";
+		} else {
+			vector<string> conflict_columns;
+			for (auto &column : op.table.GetColumns().Physical()) {
+				if (op.on_conflict_info.on_conflict_filter.count(column.Physical().index) == 0) {
+					continue;
+				}
+				conflict_columns.push_back(column.Name());
+			}
+			if (conflict_columns.empty()) {
+				throw InternalException("PostHog: ON CONFLICT filter does not map to any table columns");
+			}
+			on_conflict_clause = " ON CONFLICT (";
+			for (idx_t i = 0; i < conflict_columns.size(); i++) {
+				if (i > 0) {
+					on_conflict_clause += ", ";
+				}
+				on_conflict_clause += KeywordHelper::WriteOptionallyQuoted(conflict_columns[i]);
+			}
+			on_conflict_clause += ") DO NOTHING";
+		}
+	}
+
+	auto &insert =
+	    planner.Make<PhysicalPostHogInsert>(op.types, *this, table.GetSchemaName(), table.name, std::move(column_names),
+	                                        op.return_chunk, on_conflict_do_nothing, std::move(on_conflict_clause),
+	                                        std::move(return_input_index_map), op.estimated_cardinality);
 	insert.children.push_back(*plan);
 	return insert;
 }

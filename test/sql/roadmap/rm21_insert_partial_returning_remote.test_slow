@@ -1,0 +1,30 @@
+# name: test/sql/roadmap/rm21_insert_partial_returning_remote.test_slow
+# description: Roadmap target RM21 - INSERT with omitted columns RETURNING on remote DuckLake table
+# group: [roadmap]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm21 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm21;
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm21.t(i INT DEFAULT 42, j INT DEFAULT 7);
+
+query II
+INSERT INTO remote_flight.roadmap_rm21.t(i) VALUES (1) RETURNING i, j;
+----
+1	7

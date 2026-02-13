@@ -1,4 +1,6 @@
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+# Prefer local venv tools (e.g., black/clang-format/cmake-format) when present.
+export PATH := $(PROJ_DIR).venv/bin:$(PATH)
 
 # Configuration of extension
 EXT_NAME=duckhog
@@ -8,6 +10,12 @@ EXT_FLAGS += -DMAIN_BRANCH_VERSIONING=0
 
 # Include the Makefile from extension-ci-tools
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
+
+.PHONY: dev-setup
+dev-setup:
+	python3 -m venv .venv
+	.venv/bin/python -m pip install --upgrade pip
+	.venv/bin/python -m pip install -r requirements-dev.txt
 
 .PHONY: test-roadmap
 test-roadmap:

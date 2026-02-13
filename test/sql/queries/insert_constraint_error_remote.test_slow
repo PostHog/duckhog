@@ -1,0 +1,33 @@
+# name: test/sql/queries/insert_constraint_error_remote.test_slow
+# description: Duplicate-key INSERT surfaces as constraint error on remote PostHog table
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote;
+
+statement ok
+DROP SCHEMA IF EXISTS remote.insert_constraint_error CASCADE;
+
+statement ok
+CREATE SCHEMA remote.insert_constraint_error;
+
+statement ok
+CREATE TABLE remote.insert_constraint_error.t(i INT PRIMARY KEY, v INT);
+
+statement ok
+INSERT INTO remote.insert_constraint_error.t VALUES (1, 10);
+
+statement error
+INSERT INTO remote.insert_constraint_error.t VALUES (1, 20);
+----
+Constraint Error: PostHog: Update execution failed

@@ -1,6 +1,6 @@
 # SQL Roadmap Suite Plan (DuckHog-Only, DuckLake-Referenced)
 
-Last updated: `2026-02-10`
+Last updated: `2026-02-12`
 
 ## Goal
 
@@ -63,9 +63,17 @@ Current targets:
 - `rm12_snapshots_remote.test_slow`
 - `rm13_table_info_remote.test_slow`
 - `rm14_nested_types_remote.test_slow`
+- `rm16_on_conflict_do_nothing_remote.test_slow`
+- `rm17_on_conflict_do_update_remote.test_slow`
+- `rm19_on_conflict_do_nothing_returning_remote.test_slow`
+- `rm20_insert_returning_omitted_columns_remote.test_slow`
+- `rm21_insert_partial_returning_remote.test_slow`
+- `rm22_insert_values_default_literals_remote.test_slow`
 
 Graduated targets (now part of normal integration suite):
 - `test/sql/queries/insert_remote.test_slow` (RM01)
+- `test/sql/queries/insert_default_values_remote.test_slow` (RM18)
+- `test/sql/queries/insert_returning_remote.test_slow` (RM15)
 
 ## Design Rules
 
