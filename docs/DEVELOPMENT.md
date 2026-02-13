@@ -21,6 +21,7 @@ export VCPKG_TOOLCHAIN_PATH=~/projects/vcpkg/scripts/buildsystems/vcpkg.cmake
 **Build + test:**
 
 ```bash
+make dev-setup
 GEN=ninja make release
 # Includes integration setup/teardown automatically.
 # Requires duckgres checkout at ../duckgres (or set DUCKGRES_ROOT).
@@ -36,6 +37,7 @@ For full test instructions (unit + integration), see `test/README.md`.
 - **Ninja** build system (recommended)
 - **C++17 compatible compiler** (Clang 10+ or GCC 9+)
 - **Git**
+- **Python 3** (for formatter tooling)
 
 ### macOS
 
@@ -126,6 +128,23 @@ If you already cloned without submodules:
 
 ```bash
 git submodule update --init --recursive
+```
+
+### Python Dev Tooling (Formatting)
+
+Install pinned formatter dependencies into a local virtual environment:
+
+```bash
+make dev-setup
+```
+
+This creates `.venv/` and installs `requirements-dev.txt` (`black`,
+`clang-format`, `cmake-format`). The top-level `Makefile` prepends `.venv/bin`
+to `PATH`, so formatter targets work without manual activation:
+
+```bash
+make format-fix
+make format-check
 ```
 
 ### Build Commands

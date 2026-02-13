@@ -73,6 +73,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed build instructions.
 ```bash
 # First-time setup (vcpkg/toolchain) is documented in docs/DEVELOPMENT.md.
 git submodule update --init --recursive
+make dev-setup
 GEN=ninja make release
 
 # Smoke test (extension loads)
@@ -82,6 +83,11 @@ GEN=ninja make release
 # Requires duckgres checkout at ../duckgres (or set DUCKGRES_ROOT)
 just test-all
 ```
+
+`make dev-setup` creates `.venv/` and installs pinned formatter dependencies
+from `requirements-dev.txt`. The project `Makefile` automatically prepends
+`.venv/bin` to `PATH`, so `make format-fix` works without manually activating
+the virtual environment.
 
 ## Architecture
 

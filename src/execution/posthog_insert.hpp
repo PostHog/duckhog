@@ -21,8 +21,8 @@ public:
 
 	PhysicalPostHogInsert(PhysicalPlan &physical_plan, vector<LogicalType> types, PostHogCatalog &catalog,
 	                      string remote_schema, string remote_table, vector<string> column_names, bool return_chunk,
-	                      bool on_conflict_do_nothing, string on_conflict_clause,
-	                      vector<idx_t> return_input_index_map, idx_t estimated_cardinality);
+	                      bool on_conflict_do_nothing, string on_conflict_clause, vector<idx_t> return_input_index_map,
+	                      idx_t estimated_cardinality);
 
 	string GetName() const override;
 
