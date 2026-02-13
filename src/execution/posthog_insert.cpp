@@ -70,6 +70,9 @@ SinkResultType PhysicalPostHogInsert::Sink(ExecutionContext &context, DataChunk 
 	int64_t affected = 0;
 	try {
 		affected = catalog_.GetFlightClient().ExecuteUpdate(sql, remote_txn_id);
+	} catch (const Exception &) {
+		// ensure duckdb::Exceptions are bubbled up instead of being caught in next catch
+		throw;
 	} catch (const std::exception &ex) {
 		throw IOException("PostHog: INSERT into %s failed for chunk with %llu row(s): %s", QualifyTableName(),
 		                  chunk.size(), ex.what());

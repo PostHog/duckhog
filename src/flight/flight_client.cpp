@@ -8,6 +8,9 @@
 
 #include "flight/flight_client.hpp"
 
+#include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
+
 #include <arrow/api.h>
 #include <arrow/device.h>
 #include <arrow/flight/api.h>
@@ -56,6 +59,51 @@ std::string Base64Encode(const std::string &input) {
 	}
 
 	return output;
+}
+
+[[noreturn]] void ThrowExecuteUpdateError(const arrow::Status &status) {
+	auto message = "PostHog: Update execution failed: " + status.ToString();
+	auto detail = arrow::flight::FlightStatusDetail::UnwrapStatus(status);
+	if (detail) {
+		switch (detail->code()) {
+		case arrow::flight::FlightStatusCode::TimedOut:
+		case arrow::flight::FlightStatusCode::Unavailable:
+			throw IOException(message);
+		case arrow::flight::FlightStatusCode::Unauthenticated:
+		case arrow::flight::FlightStatusCode::Unauthorized:
+			throw PermissionException(message);
+		case arrow::flight::FlightStatusCode::Cancelled:
+			throw InterruptException();
+		case arrow::flight::FlightStatusCode::Internal:
+		case arrow::flight::FlightStatusCode::Failed:
+			break;
+		}
+	}
+
+	switch (status.code()) {
+	case arrow::StatusCode::AlreadyExists:
+		throw ConstraintException(message);
+	case arrow::StatusCode::NotImplemented:
+		throw NotImplementedException(message);
+	case arrow::StatusCode::IOError:
+	case arrow::StatusCode::Cancelled:
+		throw IOException(message);
+	case arrow::StatusCode::Invalid: {
+		// Some Flight SQL servers encode engine-level SQL errors as Invalid status.
+		auto lowered = StringUtil::Lower(status.message());
+		if (StringUtil::Contains(lowered, "constraint error") ||
+		    StringUtil::Contains(lowered, "violates primary key constraint") ||
+		    StringUtil::Contains(lowered, "unique/primary key constraints")) {
+			throw ConstraintException(message);
+		}
+		if (StringUtil::Contains(lowered, "not implemented error")) {
+			throw NotImplementedException(message);
+		}
+		throw InvalidInputException(message);
+	}
+	default:
+		throw InvalidInputException(message);
+	}
 }
 } // namespace
 
@@ -250,7 +298,7 @@ int64_t PostHogFlightClient::ExecuteUpdate(const std::string &sql, const std::op
 		result = sql_client_->ExecuteUpdate(call_options, sql);
 	}
 	if (!result.ok()) {
-		throw std::runtime_error("PostHog: Update execution failed: " + result.status().ToString());
+		ThrowExecuteUpdateError(result.status());
 	}
 
 	return *result;
