@@ -60,7 +60,8 @@ unique_ptr<GlobalSinkState> PhysicalPostHogInsert::GetGlobalSinkState(ClientCont
 	return make_uniq<PostHogInsertGlobalState>(context, GetTypes(), return_chunk_);
 }
 
-SinkResultType PhysicalPostHogInsert::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
+SinkResultType PhysicalPostHogInsert::Sink(ExecutionContext &context, DataChunk &chunk,
+                                           OperatorSinkInput &input) const {
 	if (chunk.size() == 0) {
 		return SinkResultType::NEED_MORE_INPUT;
 	}
@@ -136,8 +137,8 @@ unique_ptr<GlobalSourceState> PhysicalPostHogInsert::GetGlobalSourceState(Client
 	return make_uniq<PostHogInsertSourceState>();
 }
 
-SourceResultType PhysicalPostHogInsert::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
-                                                        OperatorSourceInput &input) const {
+SourceResultType PhysicalPostHogInsert::GetData(ExecutionContext &context, DataChunk &chunk,
+                                                OperatorSourceInput &input) const {
 	(void)context;
 	auto &source_state = input.global_state.Cast<PostHogInsertSourceState>();
 	auto &global_sink = this->sink_state->Cast<PostHogInsertGlobalState>();

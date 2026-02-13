@@ -20,6 +20,10 @@ This extension allows you to attach a PostHog data source to DuckDB and query it
 -- Coming soon: Install from community extensions
 INSTALL duckhog FROM community;
 LOAD duckhog;
+
+-- local dev
+./build/release/duckdb -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';"
+
 ```
 
 ### Usage

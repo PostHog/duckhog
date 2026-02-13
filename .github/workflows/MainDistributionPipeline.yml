@@ -4,6 +4,8 @@
 name: Main Extension Distribution Pipeline
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -15,13 +17,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  duckdb-stable-build:
-    name: Build extension binaries
+  duckdb-stable-build-main:
+    name: Build extension binaries (main)
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.3
     with:
       duckdb_version: v1.4.3
       ci_tools_version: v1.4.3
       extension_name: duckhog
+      extra_toolchains: parser_tools
+      exclude_archs: 'linux_amd64_musl;windows_amd64;windows_amd64_mingw;wasm_mvp;wasm_eh;wasm_threads'
+      vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
+      vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,readwrite;http,https://vcpkg-cache.duckdb.org,read
+    secrets:
+      VCPKG_CACHING_AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_RW_AWS_ACCESS_KEY_ID }}
+      VCPKG_CACHING_AWS_SECRET_ACCESS_KEY: ${{ secrets.VCPKG_CACHING_RW_AWS_SECRET_ACCESS_KEY }}
+      VCPKG_CACHING_AWS_ENDPOINT_URL: ${{ secrets.VCPKG_CACHING_AWS_ENDPOINT_URL }}
+      VCPKG_CACHING_AWS_DEFAULT_REGION: ${{ secrets.VCPKG_CACHING_AWS_DEFAULT_REGION }}
+
+  duckdb-stable-build-pr:
+    name: Build extension binaries (PR)
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.3
+    with:
+      duckdb_version: v1.4.3
+      ci_tools_version: v1.4.3
+      extension_name: duckhog
+      extra_toolchains: parser_tools
+      exclude_archs: 'linux_amd64_musl;windows_amd64;windows_amd64_mingw;wasm_mvp;wasm_eh;wasm_threads'
+      vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
+      vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read
+    secrets:
+      VCPKG_CACHING_AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_RO_AWS_ACCESS_KEY_ID }}
+      VCPKG_CACHING_AWS_SECRET_ACCESS_KEY: ${{ secrets.VCPKG_CACHING_RO_AWS_SECRET_ACCESS_KEY }}
+      VCPKG_CACHING_AWS_ENDPOINT_URL: ${{ secrets.VCPKG_CACHING_AWS_ENDPOINT_URL }}
+      VCPKG_CACHING_AWS_DEFAULT_REGION: ${{ secrets.VCPKG_CACHING_AWS_DEFAULT_REGION }}
 
   code-quality-check:
     name: Code Quality Check
@@ -34,7 +68,9 @@ jobs:
 
   tidy-check:
     name: Tidy Check
-    runs-on: ubuntu-24.04
+    runs-on:
+      - self-hosted
+      - depot-ubuntu-24.04-64
     env:
       CC: gcc
       CXX: g++
@@ -46,7 +82,12 @@ jobs:
       VCPKG_HOST_TRIPLET: x64-linux-release
       VCPKG_OVERLAY_PORTS: ${{ github.workspace }}/extension-ci-tools/vcpkg_ports
       VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/extension-ci-tools/toolchains
-      VCPKG_BINARY_SOURCES: clear;http,https://vcpkg-cache.duckdb.org,read
+      AWS_ACCESS_KEY_ID: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_RW_AWS_ACCESS_KEY_ID || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_RO_AWS_ACCESS_KEY_ID || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_RW_AWS_SECRET_ACCESS_KEY || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_RO_AWS_SECRET_ACCESS_KEY || '' }}
+      AWS_DEFAULT_REGION: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_AWS_DEFAULT_REGION || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_AWS_DEFAULT_REGION || '' }}
+      AWS_ENDPOINT_URL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_AWS_ENDPOINT_URL || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_AWS_ENDPOINT_URL || '' }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      VCPKG_BINARY_SOURCES: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,readwrite;http,https://vcpkg-cache.duckdb.org,read' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read' || 'clear;http,https://vcpkg-cache.duckdb.org,read' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -80,7 +121,10 @@ jobs:
   integration-tests:
     name: Integration Tests (DuckLake Pattern)
     runs-on: ubuntu-latest
-    needs: duckdb-stable-build
+    needs:
+      - duckdb-stable-build-main
+      - duckdb-stable-build-pr
+    if: ${{ always() && (needs.duckdb-stable-build-main.result == 'success' || needs.duckdb-stable-build-pr.result == 'success') }}
     env:
       FLIGHT_HOST: 127.0.0.1
       FLIGHT_PORT: 8815
