@@ -102,3 +102,40 @@ query I
 SELECT j FROM remote_flight.update_remote.t WHERE i = 102;
 ----
 888
+
+statement ok
+CREATE TABLE remote_flight.update_remote.side(i INT, new_j INT, bump INT);
+
+statement ok
+INSERT INTO remote_flight.update_remote.side VALUES (102, 5000, 1), (103, 6000, 5), (999, 7000, 7);
+
+query I
+UPDATE remote_flight.update_remote.t AS tgt
+SET j = src.new_j, i = tgt.i + src.bump
+FROM remote_flight.update_remote.side AS src
+WHERE tgt.i = src.i;
+----
+2
+
+query II
+SELECT i, j FROM remote_flight.update_remote.t ORDER BY i;
+----
+103	5000
+108	6000
+111	11
+
+statement ok
+INSERT INTO remote_flight.update_remote.side VALUES (111, 9000, 0);
+
+query I
+UPDATE remote_flight.update_remote.t AS tgt
+SET j = side.new_j
+FROM remote_flight.update_remote.side AS side
+WHERE tgt.i = side.i AND tgt.i = 111;
+----
+1
+
+query I
+SELECT j FROM remote_flight.update_remote.t WHERE i = 111;
+----
+9000

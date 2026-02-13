@@ -12,6 +12,7 @@
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/parser/expression/columnref_expression.hpp"
+#include "duckdb/parser/expression/subquery_expression.hpp"
 #include "duckdb/parser/parsed_expression_iterator.hpp"
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/parser/statement/update_statement.hpp"
@@ -33,6 +34,8 @@ void RemoveTrailingSemicolon(string &sql) {
 		sql.pop_back();
 	}
 }
+
+void RewriteTableRefCatalog(TableRef &table_ref, const string &attached_catalog, const string &remote_catalog);
 
 void RewriteColumnRef(ColumnRefExpression &colref, const string &attached_catalog, const string &remote_catalog) {
 	if (colref.column_names.size() < 3) {
@@ -58,6 +61,15 @@ void RewriteExpression(unique_ptr<ParsedExpression> &expr, const string &attache
 	}
 	ParsedExpressionIterator::VisitExpressionMutable<ColumnRefExpression>(
 	    *expr, [&](ColumnRefExpression &colref) { RewriteColumnRef(colref, attached_catalog, remote_catalog); });
+	ParsedExpressionIterator::VisitExpressionMutable<SubqueryExpression>(*expr, [&](SubqueryExpression &subquery_expr) {
+		if (!subquery_expr.subquery || !subquery_expr.subquery->node) {
+			return;
+		}
+		ParsedExpressionIterator::EnumerateQueryNodeChildren(
+		    *subquery_expr.subquery->node,
+		    [&](unique_ptr<ParsedExpression> &child_expr) { RewriteExpression(child_expr, attached_catalog, remote_catalog); },
+		    [&](TableRef &child_ref) { RewriteTableRefCatalog(child_ref, attached_catalog, remote_catalog); });
+	});
 }
 
 void RewriteTableRefCatalog(TableRef &table_ref, const string &attached_catalog, const string &remote_catalog) {
