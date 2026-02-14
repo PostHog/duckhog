@@ -370,12 +370,11 @@ start_duckgres() {
     fi
 
     ensure_port_free "$PG_HOST" "$PG_PORT" "Duckgres PG"
-    ensure_port_free "$FLIGHT_HOST" "$FLIGHT_PORT" "Duckgres Flight"
 
     mkdir -p "$TEST_DIR" "$DUCKGRES_DATA_DIR" "$DUCKGRES_SOCKET_DIR"
 
     log_info "Starting Duckgres control-plane..."
-    log_info "PG: ${PG_HOST}:${PG_PORT}, Flight: ${FLIGHT_HOST}:${FLIGHT_PORT}"
+    log_info "PG: ${PG_HOST}:${PG_PORT}"
     log_info "DuckLake metadata: 127.0.0.1:${DUCKLAKE_METADATA_PORT}, object store: ${s3_endpoint}"
 
     if [ "$mode" = "background" ]; then
@@ -383,8 +382,7 @@ start_duckgres() {
             --mode control-plane \
             --host "$PG_HOST" \
             --port "$PG_PORT" \
-            --flight-port "$FLIGHT_PORT" \
-            --worker-count "$DUCKGRES_WORKERS" \
+            --min-workers "$DUCKGRES_WORKERS" \
             --socket-dir "$DUCKGRES_SOCKET_DIR" \
             --data-dir "$DUCKGRES_DATA_DIR" \
             --cert "$DUCKGRES_CERT" \
@@ -394,7 +392,8 @@ start_duckgres() {
         echo $! > "$PID_DUCKGRES_FILE"
 
         wait_for_port "$PG_HOST" "$PG_PORT" "Duckgres PG"
-        wait_for_port "$FLIGHT_HOST" "$FLIGHT_PORT" "Duckgres Flight"
+        # NOTE: Flight SQL endpoint is not currently exposed by duckgres.
+        # Integration tests requiring FLIGHT_HOST/FLIGHT_PORT will be skipped.
         return 0
     fi
 
@@ -402,8 +401,7 @@ start_duckgres() {
         --mode control-plane \
         --host "$PG_HOST" \
         --port "$PG_PORT" \
-        --flight-port "$FLIGHT_PORT" \
-        --worker-count "$DUCKGRES_WORKERS" \
+        --min-workers "$DUCKGRES_WORKERS" \
         --socket-dir "$DUCKGRES_SOCKET_DIR" \
         --data-dir "$DUCKGRES_DATA_DIR" \
         --cert "$DUCKGRES_CERT" \
