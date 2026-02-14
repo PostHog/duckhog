@@ -404,19 +404,20 @@ PhysicalOperator &PostHogCatalog::PlanCreateTableAs(ClientContext &context, Phys
 
 PhysicalOperator &PostHogCatalog::PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op,
                                              PhysicalOperator &plan) {
-    (void)plan;
-    return PlanDelete(context, planner, op);
+	(void)plan;
+	return PlanDelete(context, planner, op);
 }
 
-PhysicalOperator &PostHogCatalog::PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op) {
+PhysicalOperator &PostHogCatalog::PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner,
+                                             LogicalDelete &op) {
 	if (!IsConnected()) {
 		throw CatalogException("PostHog: Not connected to remote server");
 	}
 
 	auto rewritten = RewriteRemoteDeleteSQL(context, database_name_, remote_catalog_);
 	return planner.Make<PhysicalPostHogDelete>(op.types, *this, std::move(rewritten.non_returning_sql),
-		                                       std::move(rewritten.returning_sql), op.return_chunk,
-   											   op.estimated_cardinality);
+	                                           std::move(rewritten.returning_sql), op.return_chunk,
+	                                           op.estimated_cardinality);
 }
 
 PhysicalOperator &PostHogCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner, LogicalUpdate &op,

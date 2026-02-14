@@ -106,48 +106,48 @@ void RewriteTableRef(unique_ptr<TableRef> &table_ref, const string &attached_cat
 
 PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(const string &query, const string &attached_catalog,
                                                  const string &remote_catalog) {
-    Parser parser;
-    parser.ParseQuery(query);
+	Parser parser;
+	parser.ParseQuery(query);
 
-    DeleteStatement *delete_stmt = nullptr;
-    for (auto &statement : parser.statements) {
-    	if (statement->type != StatementType::DELETE_STATEMENT) {
-     		throw NotImplementedException("PostHog: mixed statement batches are not supported for remote DELETE");
-        }
-        if(delete_stmt) {
-        	throw NotImplementedException("PostHog: expected exactly one DELETE statement in query batch");
-        }
-        delete_stmt = &statement->Cast<DeleteStatement>();
-    }
-    if(!delete_stmt) {
-    	throw NotImplementedException("PostHog: no DELETE statement found in query batch");
-    }
+	DeleteStatement *delete_stmt = nullptr;
+	for (auto &statement : parser.statements) {
+		if (statement->type != StatementType::DELETE_STATEMENT) {
+			throw NotImplementedException("PostHog: mixed statement batches are not supported for remote DELETE");
+		}
+		if (delete_stmt) {
+			throw NotImplementedException("PostHog: expected exactly one DELETE statement in query batch");
+		}
+		delete_stmt = &statement->Cast<DeleteStatement>();
+	}
+	if (!delete_stmt) {
+		throw NotImplementedException("PostHog: no DELETE statement found in query batch");
+	}
 
-    auto rewritten_stmt_holder = delete_stmt->Copy();
-    auto &rewritten_stmt = rewritten_stmt_holder->Cast<DeleteStatement>();
-    RewriteTableRef(rewritten_stmt.table, attached_catalog, remote_catalog);
-    for (auto &using_clause : rewritten_stmt.using_clauses) {
-    	RewriteTableRef(using_clause, attached_catalog, remote_catalog);
-    }
-    RewriteExpression(rewritten_stmt.condition, attached_catalog, remote_catalog);
-    for (auto &expr: rewritten_stmt.returning_list) {
-        RewriteExpression(expr, attached_catalog, remote_catalog);
-    }
-    // TODO: Add support for CTE expressions, currently will fail on the remote side.
+	auto rewritten_stmt_holder = delete_stmt->Copy();
+	auto &rewritten_stmt = rewritten_stmt_holder->Cast<DeleteStatement>();
+	RewriteTableRef(rewritten_stmt.table, attached_catalog, remote_catalog);
+	for (auto &using_clause : rewritten_stmt.using_clauses) {
+		RewriteTableRef(using_clause, attached_catalog, remote_catalog);
+	}
+	RewriteExpression(rewritten_stmt.condition, attached_catalog, remote_catalog);
+	for (auto &expr : rewritten_stmt.returning_list) {
+		RewriteExpression(expr, attached_catalog, remote_catalog);
+	}
+	// TODO: Add support for CTE expressions, currently will fail on the remote side.
 
-    PostHogRewrittenDeleteSQL result;
-    result.has_returning_clause = !rewritten_stmt.returning_list.empty();
+	PostHogRewrittenDeleteSQL result;
+	result.has_returning_clause = !rewritten_stmt.returning_list.empty();
 
-    rewritten_stmt.returning_list.clear();
-    result.non_returning_sql = rewritten_stmt.ToString();
-    RemoveTrailingSemicolon(result.non_returning_sql);
+	rewritten_stmt.returning_list.clear();
+	result.non_returning_sql = rewritten_stmt.ToString();
+	RemoveTrailingSemicolon(result.non_returning_sql);
 
-    // Route DELETE .. RETURNING through a SELECT wrapper so backends that
-    // append LIMIT 0 for schema probing still parse the statement.
-    result.returning_sql = "WITH __duckhog_deleted_rows AS (" + result.non_returning_sql +
-                                                            " RETURNING *) SELECT * FROM __duckhog_deleted_rows";
+	// Route DELETE .. RETURNING through a SELECT wrapper so backends that
+	// append LIMIT 0 for schema probing still parse the statement.
+	result.returning_sql = "WITH __duckhog_deleted_rows AS (" + result.non_returning_sql +
+	                       " RETURNING *) SELECT * FROM __duckhog_deleted_rows";
 
-    return result;
+	return result;
 }
 
 PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(ClientContext &context, const string &attached_catalog,
@@ -187,7 +187,7 @@ PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(ClientContext &context, const s
 	for (auto &expr : rewritten_stmt.returning_list) {
 		RewriteExpression(expr, attached_catalog, remote_catalog);
 	}
-    // TODO: Add support for CTE expressions, currently will fail on the remote side.
+	// TODO: Add support for CTE expressions, currently will fail on the remote side.
 
 	PostHogRewrittenUpdateSQL result;
 	result.has_returning_clause = !rewritten_stmt.returning_list.empty();
