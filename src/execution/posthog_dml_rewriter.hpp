@@ -22,4 +22,13 @@ struct PostHogRewrittenUpdateSQL {
 PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(ClientContext &context, const std::string &attached_catalog,
                                                  const std::string &remote_catalog);
 
+struct PostHogRewrittenDeleteSQL {
+	std::string non_returning_sql;
+	std::string returning_sql;
+	bool has_returning_clause = false;
+};
+
+PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(ClientContext &context, const std::string &attached_catalog,
+                                                 const std::string &remote_catalog);
+
 } // namespace duckdb

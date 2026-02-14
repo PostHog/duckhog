@@ -36,9 +36,11 @@ set(EXTENSION_SOURCES
     src/catalog/posthog_schema_entry.cpp
     src/catalog/posthog_table_entry.cpp
     src/catalog/remote_scan.cpp
+    src/execution/posthog_delete.cpp
     src/execution/posthog_insert.cpp
     src/execution/posthog_dml_rewriter.cpp
     src/execution/posthog_update.cpp
+    src/utils/arrow_value.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

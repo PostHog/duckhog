@@ -1,11 +1,11 @@
 //===----------------------------------------------------------------------===//
 //                         PostHog DuckDB Extension
 //
-// execution/posthog_update.cpp
+// execution/posthog_delete.cpp
 //
 //===----------------------------------------------------------------------===//
 
-#include "execution/posthog_update.hpp"
+#include "execution/posthog_delete.hpp"
 
 #include "catalog/posthog_catalog.hpp"
 #include "duckdb/common/allocator.hpp"
@@ -19,8 +19,8 @@ namespace duckdb {
 
 namespace {
 
-struct PostHogUpdateSourceState : public GlobalSourceState {
-	PostHogUpdateSourceState(ClientContext &context, const vector<LogicalType> &types, bool return_chunk_p)
+struct PostHogDeleteSourceState : public GlobalSourceState {
+	PostHogDeleteSourceState(ClientContext &context, const vector<LogicalType> &types, bool return_chunk_p)
 	    : return_collection(context, types), return_chunk(return_chunk_p) {
 	}
 
@@ -33,7 +33,7 @@ struct PostHogUpdateSourceState : public GlobalSourceState {
 
 } // namespace
 
-PhysicalPostHogUpdate::PhysicalPostHogUpdate(PhysicalPlan &physical_plan, vector<LogicalType> types,
+PhysicalPostHogDelete::PhysicalPostHogDelete(PhysicalPlan &physical_plan, vector<LogicalType> types,
                                              PostHogCatalog &catalog, string non_returning_sql, string returning_sql,
                                              bool return_chunk, idx_t estimated_cardinality)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
@@ -41,17 +41,17 @@ PhysicalPostHogUpdate::PhysicalPostHogUpdate(PhysicalPlan &physical_plan, vector
       return_chunk_(return_chunk) {
 }
 
-string PhysicalPostHogUpdate::GetName() const {
-	return "POSTHOG_UPDATE";
+string PhysicalPostHogDelete::GetName() const {
+	return "POSTHOG_DELETE";
 }
 
-unique_ptr<GlobalSourceState> PhysicalPostHogUpdate::GetGlobalSourceState(ClientContext &context) const {
-	return make_uniq<PostHogUpdateSourceState>(context, GetTypes(), return_chunk_);
+unique_ptr<GlobalSourceState> PhysicalPostHogDelete::GetGlobalSourceState(ClientContext &context) const {
+	return make_uniq<PostHogDeleteSourceState>(context, GetTypes(), return_chunk_);
 }
 
-SourceResultType PhysicalPostHogUpdate::GetData(ExecutionContext &context, DataChunk &chunk,
+SourceResultType PhysicalPostHogDelete::GetData(ExecutionContext &context, DataChunk &chunk,
                                                 OperatorSourceInput &input) const {
-	auto &state = input.global_state.Cast<PostHogUpdateSourceState>();
+	auto &state = input.global_state.Cast<PostHogDeleteSourceState>();
 	if (!state.initialized) {
 		auto remote_txn_id = PostHogTransaction::Get(context.client, catalog_).remote_txn_id;
 		if (!state.return_chunk) {
@@ -63,7 +63,7 @@ SourceResultType PhysicalPostHogUpdate::GetData(ExecutionContext &context, DataC
 
 			auto combined_result = result->CombineChunksToBatch();
 			if (!combined_result.ok()) {
-				throw IOException("PostHog: failed to combine UPDATE RETURNING batches: %s",
+				throw IOException("PostHog: failed to combine DELETE RETURNING batches: %s",
 				                  combined_result.status().ToString());
 			}
 			const auto &combined = *combined_result;
@@ -77,7 +77,7 @@ SourceResultType PhysicalPostHogUpdate::GetData(ExecutionContext &context, DataC
 				for (idx_t col_idx = 0; col_idx < GetTypes().size(); col_idx++) {
 					auto scalar_result = combined->column(static_cast<int>(col_idx))->GetScalar(row_idx);
 					if (!scalar_result.ok()) {
-						throw IOException("PostHog: failed to read UPDATE RETURNING scalar: %s",
+						throw IOException("PostHog: failed to read DELETE RETURNING scalar: %s",
 						                  scalar_result.status().ToString());
 					}
 					output_chunk.SetValue(col_idx, out_row, ArrowScalarToValue(*scalar_result, GetTypes()[col_idx]));

@@ -8,6 +8,11 @@
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_schema_entry.hpp"
 #include "catalog/posthog_table_entry.hpp"
+#include "duckdb/common/exception/catalog_exception.hpp"
+#include "duckdb/execution/physical_operator.hpp"
+#include "duckdb/execution/physical_plan_generator.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "execution/posthog_delete.hpp"
 #include "execution/posthog_dml_rewriter.hpp"
 #include "execution/posthog_insert.hpp"
 #include "execution/posthog_update.hpp"
@@ -399,7 +404,19 @@ PhysicalOperator &PostHogCatalog::PlanCreateTableAs(ClientContext &context, Phys
 
 PhysicalOperator &PostHogCatalog::PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op,
                                              PhysicalOperator &plan) {
-	throw NotImplementedException("PostHog: DELETE not yet implemented");
+    (void)plan;
+    return PlanDelete(context, planner, op);
+}
+
+PhysicalOperator &PostHogCatalog::PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op) {
+	if (!IsConnected()) {
+		throw CatalogException("PostHog: Not connected to remote server");
+	}
+
+	auto rewritten = RewriteRemoteDeleteSQL(context, database_name_, remote_catalog_);
+	return planner.Make<PhysicalPostHogDelete>(op.types, *this, std::move(rewritten.non_returning_sql),
+		                                       std::move(rewritten.returning_sql), op.return_chunk,
+   											   op.estimated_cardinality);
 }
 
 PhysicalOperator &PostHogCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner, LogicalUpdate &op,
