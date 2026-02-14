@@ -69,7 +69,7 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME}
 # C++ unit tests (compiled into DuckDB's unittest binary via ALL_OBJECT_FILES)
 if(${BUILD_UNITTESTS})
     add_library_unity(test_duckhog_cpp OBJECT
-        test/cpp/test_dml_rewriter.cpp
+        test/cpp/test_delete_rewriter.cpp
     )
     target_include_directories(test_duckhog_cpp PRIVATE src/include src
         ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/catch
