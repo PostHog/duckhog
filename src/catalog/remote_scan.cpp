@@ -144,7 +144,7 @@ unique_ptr<GlobalTableFunctionState> PostHogRemoteScan::InitGlobal(ClientContext
 		result->projection_ids = input.projection_ids;
 		for (const auto &col_idx : input.column_ids) {
 			if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
-				result->scanned_types.emplace_back(LogicalType::ROW_TYPE);
+				result->scanned_types.emplace_back(LogicalType(LogicalType::ROW_TYPE));
 			} else {
 				result->scanned_types.push_back(bind_data.all_types[col_idx]);
 			}
