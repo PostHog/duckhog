@@ -104,6 +104,8 @@ The extension is built on several key components:
 - `UPDATE` is supported for remote tables and executes directly on the Flight SQL backend.
   - `UPDATE ... RETURNING` is currently not supported by the Flight backend path.
   - Explicit references to catalogs other than the attached remote catalog are rejected during rewrite/validation.
+- `DELETE` is supported for remote tables, including `WHERE`, `USING`, and `RETURNING` clauses.
+- CTE references within `UPDATE` and `DELETE` statements are not yet rewritten to the remote catalog.
 
 ## Development Status
 

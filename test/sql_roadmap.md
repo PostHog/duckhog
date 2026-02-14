@@ -1,6 +1,6 @@
 # SQL Roadmap Suite Plan (DuckHog-Only, DuckLake-Referenced)
 
-Last updated: `2026-02-12`
+Last updated: `2026-02-13`
 
 ## Goal
 
@@ -50,7 +50,6 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- `rm03_delete_remote.test_slow`
 - `rm04_truncate_remote.test_slow`
 - `rm05_ctas_remote.test_slow`
 - `rm06_create_view_remote.test_slow`
@@ -74,6 +73,7 @@ Graduated targets (now part of normal integration suite):
 - `test/sql/queries/update_remote.test_slow` (RM02)
 - `test/sql/queries/insert_default_values_remote.test_slow` (RM18)
 - `test/sql/queries/insert_returning_remote.test_slow` (RM15)
+- `test/sql/queries/delete_remote.test_slow` (RM03)
 
 ## Design Rules
 
