@@ -1,0 +1,217 @@
+# name: test/sql/queries/delete_remote.test_slow
+# description: DELETE on remote DuckLake table
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.delete_remote CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.delete_remote;
+
+statement ok
+CREATE TABLE remote_flight.delete_remote.t(i INT, j INT DEFAULT 99);
+
+statement ok
+INSERT INTO remote_flight.delete_remote.t VALUES (1, 10), (2, 20), (3, 30), (4, 40), (5, 50);
+
+# --- Basic DELETE with WHERE ---
+
+query I
+DELETE FROM remote_flight.delete_remote.t WHERE i = 1;
+----
+1
+
+query II
+SELECT i, j FROM remote_flight.delete_remote.t ORDER BY i;
+----
+2	20
+3	30
+4	40
+5	50
+
+# --- DELETE with no matching rows returns 0 ---
+
+query I
+DELETE FROM remote_flight.delete_remote.t WHERE i = -1;
+----
+0
+
+query I
+SELECT count(*) FROM remote_flight.delete_remote.t;
+----
+4
+
+# --- DELETE multiple rows ---
+
+query I
+DELETE FROM remote_flight.delete_remote.t WHERE i > 3;
+----
+2
+
+query II
+SELECT i, j FROM remote_flight.delete_remote.t ORDER BY i;
+----
+2	20
+3	30
+
+# --- Re-insert for further tests ---
+
+statement ok
+INSERT INTO remote_flight.delete_remote.t VALUES (1, 10), (4, 40), (5, 50), (6, 60);
+
+# --- DELETE without WHERE (delete all) ---
+
+statement ok
+CREATE TABLE remote_flight.delete_remote.t_all(x INT);
+
+statement ok
+INSERT INTO remote_flight.delete_remote.t_all VALUES (1), (2), (3);
+
+query I
+DELETE FROM remote_flight.delete_remote.t_all;
+----
+3
+
+query I
+SELECT count(*) FROM remote_flight.delete_remote.t_all;
+----
+0
+
+# --- DELETE with complex WHERE ---
+
+query I
+DELETE FROM remote_flight.delete_remote.t WHERE i > 2 AND j < 50;
+----
+2
+
+query II
+SELECT i, j FROM remote_flight.delete_remote.t ORDER BY i;
+----
+1	10
+2	20
+5	50
+6	60
+
+# --- DELETE with IS NULL ---
+
+statement ok
+INSERT INTO remote_flight.delete_remote.t VALUES (NULL, NULL);
+
+query I
+DELETE FROM remote_flight.delete_remote.t WHERE i IS NULL;
+----
+1
+
+query I
+SELECT count(*) FROM remote_flight.delete_remote.t;
+----
+4
+
+# --- DELETE with BETWEEN ---
+
+query I
+DELETE FROM remote_flight.delete_remote.t WHERE i BETWEEN 5 AND 6;
+----
+2
+
+query II
+SELECT i, j FROM remote_flight.delete_remote.t ORDER BY i;
+----
+1	10
+2	20
+
+# --- Transaction: ROLLBACK undoes DELETE ---
+
+statement ok
+INSERT INTO remote_flight.delete_remote.t VALUES (7, 70), (8, 80);
+
+statement ok
+BEGIN;
+
+query I
+DELETE FROM remote_flight.delete_remote.t WHERE i = 7;
+----
+1
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT count(*) FROM remote_flight.delete_remote.t WHERE i = 7;
+----
+1
+
+# --- Transaction: COMMIT persists DELETE ---
+
+statement ok
+BEGIN;
+
+query I
+DELETE FROM remote_flight.delete_remote.t WHERE i = 8;
+----
+1
+
+statement ok
+COMMIT;
+
+query I
+SELECT count(*) FROM remote_flight.delete_remote.t WHERE i = 8;
+----
+0
+
+# --- DELETE with USING (join-based delete) ---
+
+statement ok
+CREATE TABLE remote_flight.delete_remote.blocklist(blocked_id INT);
+
+statement ok
+INSERT INTO remote_flight.delete_remote.blocklist VALUES (1), (2);
+
+query I
+DELETE FROM remote_flight.delete_remote.t USING remote_flight.delete_remote.blocklist WHERE t.i = blocklist.blocked_id;
+----
+2
+
+query II
+SELECT i, j FROM remote_flight.delete_remote.t ORDER BY i;
+----
+7	70
+
+# --- DELETE with subquery in WHERE ---
+
+statement ok
+INSERT INTO remote_flight.delete_remote.t VALUES (10, 100), (11, 110);
+
+statement ok
+CREATE TABLE remote_flight.delete_remote.keep(keep_id INT);
+
+statement ok
+INSERT INTO remote_flight.delete_remote.keep VALUES (7);
+
+query I
+DELETE FROM remote_flight.delete_remote.t WHERE i NOT IN (SELECT keep_id FROM remote_flight.delete_remote.keep);
+----
+2
+
+query II
+SELECT i, j FROM remote_flight.delete_remote.t ORDER BY i;
+----
+7	70
+
+# --- Cleanup ---
+
+statement ok
+DROP SCHEMA remote_flight.delete_remote CASCADE;

@@ -24,9 +24,11 @@ duckdb_unittest_tempdir/
 *.dll
 *.duckdb_extension
 
-# IDE
+# IDE / tooling caches
 .idea/
 .vscode/
+.cache/
+.claude/
 *.swp
 *.swo
 

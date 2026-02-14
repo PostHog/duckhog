@@ -38,7 +38,7 @@ deep-clean:
 # Run unit tests (no server required)
 [group('test')]
 test-unit: build
-    ./build/release/test/unittest "test/sql/*" "~test/sql/queries/*" "~test/sql/roadmap/*"
+    ./build/release/test/unittest "[duckhog],test/sql/*" "~test/sql/queries/*" "~test/sql/roadmap/*"
 
 # Run integration tests (requires running test servers)
 [group('test')]

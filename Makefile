@@ -34,4 +34,4 @@ tidy-check: ${EXTENSION_CONFIG_STEP}
 # The extension-ci-tools recipe invokes:
 #   ./build/<cfg>/test/unittest "$(TESTS_BASE_DIRECTORY)*"
 # We inject both include and exclude patterns via TESTS_BASE_DIRECTORY.
-TESTS_BASE_DIRECTORY = test/*" "~test/sql/roadmap/
+TESTS_BASE_DIRECTORY = [duckhog],test/*" "~test/sql/roadmap/

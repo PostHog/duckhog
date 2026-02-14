@@ -8,6 +8,8 @@
 #pragma once
 
 #include "duckdb/catalog/catalog.hpp"
+#include "duckdb/execution/physical_operator.hpp"
+#include "duckdb/execution/physical_plan_generator.hpp"
 #include "utils/connection_string.hpp"
 #include "flight/flight_client.hpp"
 
@@ -47,6 +49,7 @@ public:
 	                                    PhysicalOperator &plan) override;
 	PhysicalOperator &PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op,
 	                             PhysicalOperator &plan) override;
+	PhysicalOperator &PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op) override;
 	PhysicalOperator &PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner, LogicalUpdate &op) override;
 	PhysicalOperator &PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner, LogicalUpdate &op,
 	                             PhysicalOperator &plan) override;
