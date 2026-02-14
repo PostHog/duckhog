@@ -28,6 +28,8 @@ struct PostHogRewrittenDeleteSQL {
 	bool has_returning_clause = false;
 };
 
+PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(const std::string &query, const std::string &attached_catalog,
+                                                 const std::string &remote_catalog);
 PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(ClientContext &context, const std::string &attached_catalog,
                                                  const std::string &remote_catalog);
 

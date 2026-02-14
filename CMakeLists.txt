@@ -66,6 +66,19 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME}
     protobuf::libprotobuf
 )
 
+# C++ unit tests (compiled into DuckDB's unittest binary via ALL_OBJECT_FILES)
+if(${BUILD_UNITTESTS})
+    add_library_unity(test_duckhog_cpp OBJECT
+        test/cpp/test_dml_rewriter.cpp
+    )
+    target_include_directories(test_duckhog_cpp PRIVATE src/include src
+        ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/catch
+        ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/test/include)
+    set(ALL_OBJECT_FILES
+        ${ALL_OBJECT_FILES} $<TARGET_OBJECTS:test_duckhog_cpp>
+        PARENT_SCOPE)
+endif()
+
 install(
   TARGETS ${EXTENSION_NAME}
   EXPORT "${DUCKDB_EXPORT_SET}"

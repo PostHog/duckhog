@@ -104,10 +104,10 @@ void RewriteTableRef(unique_ptr<TableRef> &table_ref, const string &attached_cat
 
 } // namespace
 
-PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(ClientContext &context, const string &attached_catalog,
+PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(const string &query, const string &attached_catalog,
                                                  const string &remote_catalog) {
-    Parser parser(context.GetParserOptions());
-    parser.ParseQuery(context.GetCurrentQuery());
+    Parser parser;
+    parser.ParseQuery(query);
 
     DeleteStatement *delete_stmt = nullptr;
     for (auto &statement : parser.statements) {
@@ -148,6 +148,11 @@ PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(ClientContext &context, const s
                                                             " RETURNING *) SELECT * FROM __duckhog_deleted_rows";
 
     return result;
+}
+
+PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(ClientContext &context, const string &attached_catalog,
+                                                 const string &remote_catalog) {
+	return RewriteRemoteDeleteSQL(context.GetCurrentQuery(), attached_catalog, remote_catalog);
 }
 
 PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(ClientContext &context, const string &attached_catalog,
