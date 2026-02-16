@@ -416,8 +416,7 @@ TEST_CASE("Delete rewriter - TRUNCATE has no returning clause", "[duckhog][dml-r
 }
 
 TEST_CASE("Delete rewriter - TRUNCATE with quoted identifiers", "[duckhog][dml-rewriter][delete][truncate]") {
-	auto result =
-	    RewriteRemoteDeleteSQL("TRUNCATE TABLE remote_flight.\"my schema\".\"my table\"", ATTACHED, REMOTE);
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE remote_flight.\"my schema\".\"my table\"", ATTACHED, REMOTE);
 
 	REQUIRE(result.non_returning_sql.find("remote_flight") == string::npos);
 	REQUIRE(result.non_returning_sql.find("ducklake") != string::npos);
