@@ -1,6 +1,6 @@
 # SQL Roadmap Suite Plan (DuckHog-Only, DuckLake-Referenced)
 
-Last updated: `2026-02-13`
+Last updated: `2026-02-16`
 
 ## Goal
 
@@ -50,30 +50,34 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- `rm04_truncate_remote.test_slow`
-- `rm05_ctas_remote.test_slow`
-- `rm06_create_view_remote.test_slow`
-- `rm07_rename_table_remote.test_slow`
-- `rm08_partition_insert_remote.test_slow`
-- `rm09_merge_remote.test_slow`
-- `rm10_time_travel_remote.test_slow`
-- `rm11_table_changes_remote.test_slow`
-- `rm12_snapshots_remote.test_slow`
-- `rm13_table_info_remote.test_slow`
-- `rm14_nested_types_remote.test_slow`
-- `rm16_on_conflict_do_nothing_remote.test_slow`
-- `rm17_on_conflict_do_update_remote.test_slow`
-- `rm19_on_conflict_do_nothing_returning_remote.test_slow`
-- `rm20_insert_returning_omitted_columns_remote.test_slow`
-- `rm21_insert_partial_returning_remote.test_slow`
-- `rm22_insert_values_default_literals_remote.test_slow`
+- [`rm04_truncate_remote.test_slow`](sql/roadmap/rm04_truncate_remote.test_slow) — [#27](https://github.com/PostHog/duckhog/issues/27)
+- [`rm05_ctas_remote.test_slow`](sql/roadmap/rm05_ctas_remote.test_slow) — [#28](https://github.com/PostHog/duckhog/issues/28)
+- [`rm06_create_view_remote.test_slow`](sql/roadmap/rm06_create_view_remote.test_slow) — [#29](https://github.com/PostHog/duckhog/issues/29)
+- [`rm07_rename_table_remote.test_slow`](sql/roadmap/rm07_rename_table_remote.test_slow) — [#30](https://github.com/PostHog/duckhog/issues/30)
+- [`rm08_partition_insert_remote.test_slow`](sql/roadmap/rm08_partition_insert_remote.test_slow) — [#31](https://github.com/PostHog/duckhog/issues/31)
+- [`rm09_merge_remote.test_slow`](sql/roadmap/rm09_merge_remote.test_slow) — [#32](https://github.com/PostHog/duckhog/issues/32)
+- [`rm10_time_travel_remote.test_slow`](sql/roadmap/rm10_time_travel_remote.test_slow) — [#33](https://github.com/PostHog/duckhog/issues/33)
+- [`rm11_table_changes_remote.test_slow`](sql/roadmap/rm11_table_changes_remote.test_slow) — [#34](https://github.com/PostHog/duckhog/issues/34)
+- [`rm12_snapshots_remote.test_slow`](sql/roadmap/rm12_snapshots_remote.test_slow) — [#35](https://github.com/PostHog/duckhog/issues/35)
+- [`rm13_table_info_remote.test_slow`](sql/roadmap/rm13_table_info_remote.test_slow) — [#36](https://github.com/PostHog/duckhog/issues/36)
+- [`rm14_nested_types_remote.test_slow`](sql/roadmap/rm14_nested_types_remote.test_slow) — [#37](https://github.com/PostHog/duckhog/issues/37)
+- [`rm16_on_conflict_do_nothing_remote.test_slow`](sql/roadmap/rm16_on_conflict_do_nothing_remote.test_slow) — [#38](https://github.com/PostHog/duckhog/issues/38)
+- [`rm17_on_conflict_do_update_remote.test_slow`](sql/roadmap/rm17_on_conflict_do_update_remote.test_slow) — [#39](https://github.com/PostHog/duckhog/issues/39)
+- [`rm19_on_conflict_do_nothing_returning_remote.test_slow`](sql/roadmap/rm19_on_conflict_do_nothing_returning_remote.test_slow) — [#40](https://github.com/PostHog/duckhog/issues/40)
+- [`rm20_insert_returning_omitted_columns_remote.test_slow`](sql/roadmap/rm20_insert_returning_omitted_columns_remote.test_slow) — [#41](https://github.com/PostHog/duckhog/issues/41)
+- [`rm21_insert_partial_returning_remote.test_slow`](sql/roadmap/rm21_insert_partial_returning_remote.test_slow) — [#42](https://github.com/PostHog/duckhog/issues/42)
+- [`rm22_insert_values_default_literals_remote.test_slow`](sql/roadmap/rm22_insert_values_default_literals_remote.test_slow) — [#43](https://github.com/PostHog/duckhog/issues/43)
+- [`rm23_on_conflict_rewrite_path_remote.test_slow`](sql/roadmap/rm23_on_conflict_rewrite_path_remote.test_slow) — [#44](https://github.com/PostHog/duckhog/issues/44)
+
+Non-test-file targets:
+- DML rewriter CTE support (UPDATE/DELETE) — [#45](https://github.com/PostHog/duckhog/issues/45)
 
 Graduated targets (now part of normal integration suite):
-- `test/sql/queries/insert_remote.test_slow` (RM01)
-- `test/sql/queries/update_remote.test_slow` (RM02)
-- `test/sql/queries/insert_default_values_remote.test_slow` (RM18)
-- `test/sql/queries/insert_returning_remote.test_slow` (RM15)
-- `test/sql/queries/delete_remote.test_slow` (RM03)
+- [`insert_remote.test_slow`](sql/queries/insert_remote.test_slow) (RM01)
+- [`update_remote.test_slow`](sql/queries/update_remote.test_slow) (RM02)
+- [`insert_default_values_remote.test_slow`](sql/queries/insert_default_values_remote.test_slow) (RM18)
+- [`insert_returning_remote.test_slow`](sql/queries/insert_returning_remote.test_slow) (RM15)
+- [`delete_remote.test_slow`](sql/queries/delete_remote.test_slow) (RM03)
 
 ## Design Rules
 
