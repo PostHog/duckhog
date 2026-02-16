@@ -30,3 +30,14 @@
 - Submodules required: `git submodule update --init --recursive`
 - Dependencies are managed by vcpkg; ensure `VCPKG_TOOLCHAIN_PATH` is set (see `docs/DEVELOPMENT.md`).
 - SQLLogicTest files live under `test/sql`; integration tests use `.test_slow`.
+
+## Skills
+A skill is a set of local instructions to follow that is stored in a `SKILL.md` file.
+
+### Available skills
+- `issue-gate`: GitHub issue preflight workflow for new tasks. Use before starting any new implementation task to create/claim/abort based on issue state. (file: `skills/issue-gate/SKILL.md`)
+
+### Trigger rules
+- Run `$issue-gate` before starting new implementation work.
+- Execute the issue-gate preflight directly with `gh` (per `skills/issue-gate/SKILL.md`) and follow the returned decision contract.
+- Stop task execution on `ABORT_IN_PROGRESS` and `ABORT_UNCERTAIN`.
