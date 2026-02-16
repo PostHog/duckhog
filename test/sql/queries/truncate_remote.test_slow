@@ -124,6 +124,8 @@ SELECT i, j FROM remote_flight.truncate_remote.t;
 
 statement error
 TRUNCATE TABLE remote_flight.truncate_remote.no_such_table;
+----
+Table with name no_such_table does not exist
 
 # --- Error: TRUNCATE after DROP ---
 
@@ -135,6 +137,8 @@ DROP TABLE remote_flight.truncate_remote.t_drop;
 
 statement error
 TRUNCATE TABLE remote_flight.truncate_remote.t_drop;
+----
+Table with name t_drop does not exist
 
 # --- Cleanup ---
 
