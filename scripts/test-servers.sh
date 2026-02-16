@@ -45,6 +45,7 @@ DUCKGRES_SOCKET_DIR="${DUCKGRES_SOCKET_DIR:-${TEST_DIR}/duckgres-sockets}"
 DUCKGRES_CERT="${DUCKGRES_CERT:-${TEST_DIR}/server.crt}"
 DUCKGRES_KEY="${DUCKGRES_KEY:-${TEST_DIR}/server.key}"
 DUCKGRES_WORKERS="${DUCKGRES_WORKERS:-4}"
+DUCKGRES_MAX_WORKERS="${DUCKGRES_MAX_WORKERS:-64}"
 DUCKLAKE_POSTGRES_PORT="${DUCKLAKE_POSTGRES_PORT:-35432}"
 DUCKLAKE_METADATA_PORT="${DUCKLAKE_METADATA_PORT:-35433}"
 DUCKLAKE_MINIO_PORT="${DUCKLAKE_MINIO_PORT:-39000}"
@@ -415,6 +416,7 @@ start_duckgres() {
         "DUCKGRES_DUCKLAKE_S3_URL_STYLE=path"
         "DUCKGRES_FLIGHT_HOST=${FLIGHT_HOST}"
         "DUCKGRES_FLIGHT_PORT=${FLIGHT_PORT}"
+        "DUCKGRES_MAX_WORKERS=${DUCKGRES_MAX_WORKERS}"
     )
 
     if pid_is_running "$PID_DUCKGRES_FILE"; then
@@ -446,6 +448,7 @@ start_duckgres() {
     log_info "Starting Duckgres control-plane..."
     log_info "PG: ${PG_HOST}:${PG_PORT}"
     log_info "Flight: ${FLIGHT_HOST}:${FLIGHT_PORT} (mode: ${DUCKGRES_FLIGHT_MODE})"
+    log_info "Workers: min=${DUCKGRES_WORKERS}, max=${DUCKGRES_MAX_WORKERS}"
     log_info "DuckLake metadata: 127.0.0.1:${DUCKLAKE_METADATA_PORT}, object store: ${s3_endpoint}"
     if [ "${DUCKGRES_EXPOSES_FLIGHT}" -ne 1 ]; then
         log_warn "Duckgres control-plane Flight listener flag/env not detected; skipping Flight readiness check."
