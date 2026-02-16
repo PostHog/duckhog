@@ -35,7 +35,7 @@ DUCKHOG_USER="${DUCKHOG_USER:-postgres}"
 DUCKHOG_PASSWORD="${DUCKHOG_PASSWORD:-postgres}"
 FLIGHT_ENDPOINT="${FLIGHT_ENDPOINT:-grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}}"
 
-DUCKGRES_ROOT_DEFAULT="${PROJECT_ROOT}/../duckgres"
+DUCKGRES_ROOT_DEFAULT="${PROJECT_ROOT}/duckgres"
 DUCKGRES_ROOT="${DUCKGRES_ROOT:-${DUCKGRES_ROOT_DEFAULT}}"
 DUCKGRES_INTEGRATION_DIR="${DUCKGRES_ROOT}/tests/integration"
 DUCKGRES_COMPOSE_FILE="${DUCKGRES_INTEGRATION_DIR}/docker-compose.yml"
@@ -50,6 +50,10 @@ DUCKLAKE_METADATA_PORT="${DUCKLAKE_METADATA_PORT:-35433}"
 DUCKLAKE_MINIO_PORT="${DUCKLAKE_MINIO_PORT:-39000}"
 DUCKLAKE_INFRA_TIMEOUT="${DUCKLAKE_INFRA_TIMEOUT:-30s}"
 DUCKHOG_KEEP_DUCKLAKE_INFRA="${DUCKHOG_KEEP_DUCKLAKE_INFRA:-0}"
+DUCKGRES_HELP_TEXT=""
+DUCKGRES_FLIGHT_MODE=""
+DUCKGRES_FLIGHT_ARGS=()
+DUCKGRES_EXPOSES_FLIGHT=0
 
 log_info() {
     echo "[INFO] $1"
@@ -61,6 +65,52 @@ log_warn() {
 
 log_error() {
     echo "[ERROR] $1" >&2
+}
+
+duckgres_help() {
+    if [ -n "$DUCKGRES_HELP_TEXT" ]; then
+        printf "%s\n" "$DUCKGRES_HELP_TEXT"
+        return 0
+    fi
+
+    DUCKGRES_HELP_TEXT="$("$DUCKGRES_BIN" --help 2>&1 || true)"
+    printf "%s\n" "$DUCKGRES_HELP_TEXT"
+}
+
+duckgres_supports_flag() {
+    local flag_name="$1"
+    duckgres_help | grep -Eq "(^|[[:space:]])-{1,2}${flag_name}([[:space:]=]|$)"
+}
+
+build_duckgres_flight_args() {
+    DUCKGRES_FLIGHT_ARGS=()
+    DUCKGRES_FLIGHT_MODE="duckgres-default"
+    DUCKGRES_EXPOSES_FLIGHT=0
+
+    # Prefer explicit Flight options when available.
+    if duckgres_supports_flag "flight-listen"; then
+        DUCKGRES_FLIGHT_ARGS=(--flight-listen "${FLIGHT_HOST}:${FLIGHT_PORT}")
+        DUCKGRES_FLIGHT_MODE="flight-listen"
+        DUCKGRES_EXPOSES_FLIGHT=1
+        return
+    fi
+    if duckgres_supports_flag "flight-port"; then
+        DUCKGRES_FLIGHT_ARGS=(--flight-port "${FLIGHT_PORT}")
+        DUCKGRES_FLIGHT_MODE="flight-port"
+        DUCKGRES_EXPOSES_FLIGHT=1
+        if duckgres_supports_flag "flight-host"; then
+            DUCKGRES_FLIGHT_ARGS+=(--flight-host "${FLIGHT_HOST}")
+            DUCKGRES_FLIGHT_MODE="flight-host+flight-port"
+        fi
+        return
+    fi
+
+    # Some builds wire Flight only through env vars.
+    if duckgres_help | grep -q "DUCKGRES_FLIGHT_PORT"; then
+        DUCKGRES_FLIGHT_MODE="env-flight-port"
+        DUCKGRES_EXPOSES_FLIGHT=1
+        return
+    fi
 }
 
 require_go() {
@@ -80,7 +130,7 @@ require_python() {
 ensure_duckgres_root() {
     if [ ! -d "$DUCKGRES_ROOT" ]; then
         log_error "Duckgres repo not found: $DUCKGRES_ROOT"
-        log_error "Set DUCKGRES_ROOT to your duckgres checkout path"
+        log_error "Initialize submodules (git submodule update --init --recursive) or set DUCKGRES_ROOT"
         exit 1
     fi
 }
@@ -350,6 +400,7 @@ start_duckgres() {
     local metadata_store
     local s3_endpoint
     local -a ducklake_env
+    local -a duckgres_args
 
     metadata_store="postgres:host=127.0.0.1 port=${DUCKLAKE_METADATA_PORT} user=ducklake password=ducklake dbname=ducklake"
     s3_endpoint="127.0.0.1:${DUCKLAKE_MINIO_PORT}"
@@ -362,6 +413,8 @@ start_duckgres() {
         "DUCKGRES_DUCKLAKE_S3_SECRET_KEY=minioadmin"
         "DUCKGRES_DUCKLAKE_S3_REGION=us-east-1"
         "DUCKGRES_DUCKLAKE_S3_URL_STYLE=path"
+        "DUCKGRES_FLIGHT_HOST=${FLIGHT_HOST}"
+        "DUCKGRES_FLIGHT_PORT=${FLIGHT_PORT}"
     )
 
     if pid_is_running "$PID_DUCKGRES_FILE"; then
@@ -369,43 +422,48 @@ start_duckgres() {
         return 0
     fi
 
+    build_duckgres_flight_args
+
     ensure_port_free "$PG_HOST" "$PG_PORT" "Duckgres PG"
+    if [ "${DUCKGRES_EXPOSES_FLIGHT}" -eq 1 ] && [ "${FLIGHT_HOST}:${FLIGHT_PORT}" != "${PG_HOST}:${PG_PORT}" ]; then
+        ensure_port_free "$FLIGHT_HOST" "$FLIGHT_PORT" "Duckgres Flight"
+    fi
 
     mkdir -p "$TEST_DIR" "$DUCKGRES_DATA_DIR" "$DUCKGRES_SOCKET_DIR"
 
+    duckgres_args=(
+        --mode control-plane
+        --host "$PG_HOST"
+        --port "$PG_PORT"
+        --min-workers "$DUCKGRES_WORKERS"
+        --socket-dir "$DUCKGRES_SOCKET_DIR"
+        --data-dir "$DUCKGRES_DATA_DIR"
+        --cert "$DUCKGRES_CERT"
+        --key "$DUCKGRES_KEY"
+    )
+    duckgres_args+=("${DUCKGRES_FLIGHT_ARGS[@]}")
+
     log_info "Starting Duckgres control-plane..."
     log_info "PG: ${PG_HOST}:${PG_PORT}"
+    log_info "Flight: ${FLIGHT_HOST}:${FLIGHT_PORT} (mode: ${DUCKGRES_FLIGHT_MODE})"
     log_info "DuckLake metadata: 127.0.0.1:${DUCKLAKE_METADATA_PORT}, object store: ${s3_endpoint}"
+    if [ "${DUCKGRES_EXPOSES_FLIGHT}" -ne 1 ]; then
+        log_warn "Duckgres control-plane Flight listener flag/env not detected; skipping Flight readiness check."
+    fi
 
     if [ "$mode" = "background" ]; then
-        nohup env "${ducklake_env[@]}" "$DUCKGRES_BIN" \
-            --mode control-plane \
-            --host "$PG_HOST" \
-            --port "$PG_PORT" \
-            --min-workers "$DUCKGRES_WORKERS" \
-            --socket-dir "$DUCKGRES_SOCKET_DIR" \
-            --data-dir "$DUCKGRES_DATA_DIR" \
-            --cert "$DUCKGRES_CERT" \
-            --key "$DUCKGRES_KEY" \
-            > "${TEST_DIR}/duckgres.log" 2>&1 < /dev/null &
+        nohup env "${ducklake_env[@]}" "$DUCKGRES_BIN" "${duckgres_args[@]}" > "${TEST_DIR}/duckgres.log" 2>&1 < /dev/null &
 
         echo $! > "$PID_DUCKGRES_FILE"
 
         wait_for_port "$PG_HOST" "$PG_PORT" "Duckgres PG"
-        # NOTE: Flight SQL endpoint is not currently exposed by duckgres.
-        # Integration tests requiring FLIGHT_HOST/FLIGHT_PORT will be skipped.
+        if [ "${DUCKGRES_EXPOSES_FLIGHT}" -eq 1 ]; then
+            wait_for_port "$FLIGHT_HOST" "$FLIGHT_PORT" "Duckgres Flight"
+        fi
         return 0
     fi
 
-    exec env "${ducklake_env[@]}" "$DUCKGRES_BIN" \
-        --mode control-plane \
-        --host "$PG_HOST" \
-        --port "$PG_PORT" \
-        --min-workers "$DUCKGRES_WORKERS" \
-        --socket-dir "$DUCKGRES_SOCKET_DIR" \
-        --data-dir "$DUCKGRES_DATA_DIR" \
-        --cert "$DUCKGRES_CERT" \
-        --key "$DUCKGRES_KEY"
+    exec env "${ducklake_env[@]}" "$DUCKGRES_BIN" "${duckgres_args[@]}"
 }
 
 start_servers() {

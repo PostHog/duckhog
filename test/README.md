@@ -11,7 +11,7 @@ GEN=ninja make release
 # Run the full local test suite (unit + integration).
 # This auto-starts Duckgres + DuckLake infra, exports test env vars,
 # runs tests, and tears everything down.
-# Requires duckgres checkout at ../duckgres (or set DUCKGRES_ROOT).
+# Requires the duckgres submodule at ./duckgres (or set DUCKGRES_ROOT).
 just test-all
 
 # Run integration tests only (manual server lifecycle)
@@ -28,7 +28,7 @@ eval "$(./scripts/test-servers.sh env)"
 
 `just test-all` is the default full local suite command and includes
 integration server setup/teardown automatically.
-It expects duckgres at `../duckgres` by default (override with `DUCKGRES_ROOT`).
+It expects duckgres at `./duckgres` by default (override with `DUCKGRES_ROOT`).
 
 ### Unit Tests
 
@@ -57,6 +57,10 @@ Integration tests (`.test_slow` files) require a running Duckgres control-plane 
 eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
 ```
+
+`test-servers.sh` always waits for PG readiness and auto-detects supported
+duckgres Flight flag variants; when a Flight control-plane flag/env is
+available, it also waits for Flight readiness.
 
 **Background mode** (for CI or single terminal):
 

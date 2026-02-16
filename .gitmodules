@@ -6,3 +6,7 @@
 	path = extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools
 	branch = main
+[submodule "duckgres"]
+	path = duckgres
+	url = https://github.com/PostHog/duckgres.git
+	branch = main
