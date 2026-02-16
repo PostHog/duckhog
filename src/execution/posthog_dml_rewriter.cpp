@@ -104,6 +104,9 @@ void RewriteTableRef(unique_ptr<TableRef> &table_ref, const string &attached_cat
 
 } // namespace
 
+// TRUNCATE TABLE also flows through this path: DuckDB's grammar (delete.y) desugars
+// TRUNCATE into a PGDeleteStmt with no WHERE/USING/RETURNING/WITH clauses, so it arrives
+// here as a plain unconditional DELETE and is forwarded to the remote server as such.
 PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(const string &query, const string &attached_catalog,
                                                  const string &remote_catalog) {
 	Parser parser;

@@ -1,5 +1,8 @@
 # name: test/sql/roadmap/rm04_truncate_remote.test_slow
 # description: Roadmap target RM04 - TRUNCATE remote DuckLake table
+# note: DuckDB's grammar (delete.y) desugars TRUNCATE into a DELETE with no WHERE clause,
+#       so this is handled by the existing remote DELETE path (RewriteRemoteDeleteSQL) with
+#       no TRUNCATE-specific code required.
 # group: [roadmap]
 
 require duckhog
