@@ -58,6 +58,12 @@ eval "$(./scripts/test-servers.sh env)"
 ./build/release/test/unittest "test/sql/queries/*"
 ```
 
+`test-servers.sh` always waits for PG readiness and auto-detects supported
+duckgres Flight flag variants; when a Flight control-plane flag/env is
+available, it also waits for Flight readiness.
+By default it sets `DUCKGRES_MAX_WORKERS=64` for integration runs (override by
+exporting `DUCKGRES_MAX_WORKERS` before `start`).
+
 **Background mode** (for CI or single terminal):
 
 ```bash

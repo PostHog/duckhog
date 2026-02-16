@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "flight/flight_client.hpp"
+#include "utils/posthog_logger.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -19,6 +20,7 @@
 #include <arrow/ipc/dictionary.h>
 #include <arrow/ipc/options.h>
 #include <arrow/ipc/reader.h>
+#include <chrono>
 #include <iostream>
 #include <string_view>
 #include <stdexcept>
@@ -26,6 +28,12 @@
 namespace duckdb {
 
 namespace {
+using SteadyClock = std::chrono::steady_clock;
+
+int64_t ElapsedMillis(const SteadyClock::time_point &started_at) {
+	return std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - started_at).count();
+}
+
 std::string Base64Encode(const std::string &input) {
 	static const char kBase64Alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 	std::string output;
@@ -512,6 +520,8 @@ std::vector<PostHogDbSchemaInfo> PostHogFlightClient::ListDbSchemas(const std::s
 
 std::vector<std::string> PostHogFlightClient::ListTables(const std::string &catalog, const std::string &schema) {
 	std::lock_guard<std::mutex> lock(client_mutex_);
+	auto op_started_at = SteadyClock::now();
+	POSTHOG_LOG_DEBUG("Flight ListTables start catalog='%s' schema='%s'", catalog.c_str(), schema.c_str());
 
 	if (!authenticated_) {
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
@@ -521,28 +531,40 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 
 	// GetTables returns information about tables
 	// Parameters: catalog, schema_filter_pattern, table_name_filter_pattern, include_schema, table_types
+	auto get_tables_started_at = SteadyClock::now();
 	auto info_result =
 	    sql_client_->GetTables(call_options, catalog.empty() ? nullptr : &catalog, &schema, nullptr, false, nullptr);
 	if (!info_result.ok()) {
 		throw std::runtime_error("PostHog: Failed to list tables: " + info_result.status().ToString());
 	}
+	POSTHOG_LOG_DEBUG("Flight ListTables GetTables RPC completed in %lld ms",
+	                  static_cast<long long>(ElapsedMillis(get_tables_started_at)));
 
 	std::vector<std::string> tables;
 	auto flight_info = std::move(*info_result);
+	POSTHOG_LOG_DEBUG("Flight ListTables endpoints=%zu", flight_info->endpoints().size());
 
 	if (flight_info->endpoints().empty()) {
+		POSTHOG_LOG_DEBUG("Flight ListTables finished with 0 endpoints in %lld ms",
+		                  static_cast<long long>(ElapsedMillis(op_started_at)));
 		return tables;
 	}
 
 	// Fetch the table list
+	auto do_get_started_at = SteadyClock::now();
 	auto stream_result = sql_client_->DoGet(call_options, flight_info->endpoints()[0].ticket);
 	if (!stream_result.ok()) {
 		throw std::runtime_error("PostHog: Failed to fetch table list: " + stream_result.status().ToString());
 	}
+	POSTHOG_LOG_DEBUG("Flight ListTables DoGet opened in %lld ms",
+	                  static_cast<long long>(ElapsedMillis(do_get_started_at)));
 
 	auto stream = std::move(*stream_result);
+	size_t chunk_count = 0;
+	size_t row_count = 0;
 
 	while (true) {
+		auto next_started_at = SteadyClock::now();
 		auto chunk_result = stream->Next();
 		if (!chunk_result.ok()) {
 			throw std::runtime_error("PostHog: Failed to read table list: " + chunk_result.status().ToString());
@@ -550,8 +572,15 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 
 		const auto &chunk = *chunk_result;
 		if (!chunk.data) {
+			POSTHOG_LOG_DEBUG("Flight ListTables stream drained (chunks=%zu rows=%zu) in %lld ms", chunk_count,
+			                  row_count, static_cast<long long>(ElapsedMillis(op_started_at)));
 			break;
 		}
+		chunk_count++;
+		row_count += static_cast<size_t>(chunk.data->num_rows());
+		POSTHOG_LOG_DEBUG("Flight ListTables chunk #%zu rows=%lld next_ms=%lld", chunk_count,
+		                  static_cast<long long>(chunk.data->num_rows()),
+		                  static_cast<long long>(ElapsedMillis(next_started_at)));
 
 		auto catalog_col = chunk.data->GetColumnByName("catalog_name");
 		auto table_col = chunk.data->GetColumnByName("table_name");
@@ -605,12 +634,17 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 		}
 	}
 
+	POSTHOG_LOG_DEBUG("Flight ListTables done tables=%zu total_ms=%lld", tables.size(),
+	                  static_cast<long long>(ElapsedMillis(op_started_at)));
 	return tables;
 }
 
 std::shared_ptr<arrow::Schema>
 PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::string &schema, const std::string &table) {
 	std::lock_guard<std::mutex> lock(client_mutex_);
+	auto op_started_at = SteadyClock::now();
+	POSTHOG_LOG_DEBUG("Flight GetTableSchema start catalog='%s' schema='%s' table='%s'", catalog.c_str(),
+	                  schema.c_str(), table.c_str());
 
 	if (!authenticated_) {
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
@@ -619,34 +653,45 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 	auto call_options = GetCallOptions();
 
 	// GetTables with include_schema=true returns serialized schema in the result
+	auto get_tables_started_at = SteadyClock::now();
 	auto info_result =
 	    sql_client_->GetTables(call_options, catalog.empty() ? nullptr : &catalog, &schema, &table, true, nullptr);
 	if (!info_result.ok()) {
 		throw std::runtime_error("PostHog: Failed to get table schema: " + info_result.status().ToString());
 	}
+	POSTHOG_LOG_DEBUG("Flight GetTableSchema GetTables RPC completed in %lld ms",
+	                  static_cast<long long>(ElapsedMillis(get_tables_started_at)));
 
 	auto flight_info = std::move(*info_result);
+	POSTHOG_LOG_DEBUG("Flight GetTableSchema endpoints=%zu", flight_info->endpoints().size());
 
 	if (flight_info->endpoints().empty()) {
 		throw std::runtime_error("PostHog: Table not found(endpoint empty): " + schema + "." + table);
 	}
 
 	// Fetch the table metadata
+	auto do_get_started_at = SteadyClock::now();
 	auto stream_result = sql_client_->DoGet(call_options, flight_info->endpoints()[0].ticket);
 	if (!stream_result.ok()) {
 		throw std::runtime_error("PostHog: Failed to fetch table metadata: " + stream_result.status().ToString());
 	}
+	POSTHOG_LOG_DEBUG("Flight GetTableSchema DoGet opened in %lld ms",
+	                  static_cast<long long>(ElapsedMillis(do_get_started_at)));
 
 	auto stream = std::move(*stream_result);
+	auto next_started_at = SteadyClock::now();
 	auto chunk_result = stream->Next();
 	if (!chunk_result.ok()) {
 		throw std::runtime_error("PostHog: Failed to read table metadata: " + chunk_result.status().ToString());
 	}
+	POSTHOG_LOG_DEBUG("Flight GetTableSchema first chunk read in %lld ms",
+	                  static_cast<long long>(ElapsedMillis(next_started_at)));
 
 	const auto &chunk = *chunk_result;
 	if (!chunk.data || chunk.data->num_rows() == 0) {
 		throw std::runtime_error("PostHog: Table not found(no data): " + schema + "." + table);
 	}
+	POSTHOG_LOG_DEBUG("Flight GetTableSchema first chunk rows=%lld", static_cast<long long>(chunk.data->num_rows()));
 
 	// The table_schema column contains the IPC-serialized Arrow schema
 	// RecordBatch::GetColumnByName returns Array, not ChunkedArray
@@ -739,7 +784,9 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 
 	// Drain remaining chunks so this stream is fully consumed before the next
 	// RPC on a single-connection Flight session.
+	size_t drain_chunks = 0;
 	while (true) {
+		auto drain_started_at = SteadyClock::now();
 		auto next_chunk_result = stream->Next();
 		if (!next_chunk_result.ok()) {
 			throw std::runtime_error("PostHog: Failed to finish reading table metadata: " +
@@ -747,8 +794,13 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 		}
 		const auto &next_chunk = *next_chunk_result;
 		if (!next_chunk.data) {
+			POSTHOG_LOG_DEBUG("Flight GetTableSchema drained %zu additional chunks", drain_chunks);
 			break;
 		}
+		drain_chunks++;
+		POSTHOG_LOG_DEBUG("Flight GetTableSchema drain chunk #%zu rows=%lld next_ms=%lld", drain_chunks,
+		                  static_cast<long long>(next_chunk.data->num_rows()),
+		                  static_cast<long long>(ElapsedMillis(drain_started_at)));
 	}
 
 	// Deserialize the Arrow schema from IPC format
@@ -763,6 +815,8 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 		                         schema_read_result.status().ToString());
 	}
 
+	POSTHOG_LOG_DEBUG("Flight GetTableSchema done fields=%d total_ms=%lld", (*schema_read_result)->num_fields(),
+	                  static_cast<long long>(ElapsedMillis(op_started_at)));
 	return *schema_read_result;
 }
 

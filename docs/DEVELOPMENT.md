@@ -222,6 +222,7 @@ duckhog/
 │       ├── connection_string.cpp  # Connection string parser
 │       └── connection_string.hpp
 ├── duckdb/                        # DuckDB submodule
+├── duckgres/                      # Duckgres submodule (integration harness)
 ├── extension-ci-tools/            # CI tooling submodule
 ├── CMakeLists.txt                 # Build configuration
 ├── vcpkg.json                     # Dependency manifest
@@ -300,7 +301,7 @@ rm -rf build/release/vcpkg_installed/
 
 Use `just test-all` for the full local suite (unit + integration); it handles
 integration server startup/env setup/teardown automatically.
-This expects a local duckgres checkout at `../duckgres` by default (or set `DUCKGRES_ROOT`).
+This expects duckgres at `../duckgres` by default (or set `DUCKGRES_ROOT`).
 
 `make test` remains the extension-ci-tools default target used by CI.
 
