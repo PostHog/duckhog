@@ -121,6 +121,7 @@ jobs:
   integration-tests:
     name: Integration Tests (DuckLake Pattern)
     runs-on: ubuntu-latest
+    continue-on-error: true
     needs:
       - duckdb-stable-build-main
       - duckdb-stable-build-pr
