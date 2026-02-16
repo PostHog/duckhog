@@ -80,7 +80,7 @@ GEN=ninja make release
 ./build/release/duckdb -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';"
 
 # Full local test suite (unit + integration; integration setup is automatic)
-# Requires the duckgres submodule at ./duckgres (or set DUCKGRES_ROOT)
+# Requires duckgres checkout at ../duckgres (or set DUCKGRES_ROOT)
 just test-all
 ```
 

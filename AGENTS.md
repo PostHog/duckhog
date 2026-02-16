@@ -16,7 +16,7 @@
 ## Tests
 - Unit tests only: `./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"`
 - Integration tests (`duckgres` control-plane Flight):
-  - Expects the `duckgres` submodule at `./duckgres` (or set `DUCKGRES_ROOT`)
+  - Expects duckgres checkout at `../duckgres` (or set `DUCKGRES_ROOT`)
   - `./scripts/test-servers.sh start --background --seed`
   - `eval "$(./scripts/test-servers.sh env)"`
   - `./build/release/test/unittest "test/sql/queries/*"`

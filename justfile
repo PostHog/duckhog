@@ -46,7 +46,7 @@ test-integration:
     ./build/release/test/unittest "test/sql/queries/*"
 
 # Run full local suite (unit + integration with automatic setup/teardown).
-# Expects duckgres at ./duckgres by default (override with DUCKGRES_ROOT).
+# Expects duckgres at ../duckgres by default (override with DUCKGRES_ROOT).
 [group('test')]
 test-all: build _require-duckgres
     ./test/run_full_suite.sh "test/*" "~test/sql/roadmap/*"
@@ -84,7 +84,7 @@ tidy-check:
 # === Servers ===
 
 # Start test servers (Duckgres + DuckLake infra) in background.
-# Expects duckgres at ./duckgres by default (override with DUCKGRES_ROOT).
+# Expects duckgres at ../duckgres by default (override with DUCKGRES_ROOT).
 [group('servers')]
 start-servers: _require-duckgres
     ./scripts/test-servers.sh start --background --seed
@@ -183,10 +183,10 @@ _require-vcpkg:
 _require-duckgres:
     #!/usr/bin/env bash
     set -euo pipefail
-    root="${DUCKGRES_ROOT:-duckgres}"
+    root="${DUCKGRES_ROOT:-../duckgres}"
     root="${root/#\~/$HOME}"
     if [ ! -d "$root" ]; then
         echo "ERROR: duckgres repo not found at: $root" >&2
-        echo "Initialize submodules (git submodule update --init --recursive) or set DUCKGRES_ROOT." >&2
+        echo "Clone duckgres to ../duckgres or set DUCKGRES_ROOT." >&2
         exit 1
     fi

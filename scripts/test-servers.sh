@@ -35,7 +35,7 @@ DUCKHOG_USER="${DUCKHOG_USER:-postgres}"
 DUCKHOG_PASSWORD="${DUCKHOG_PASSWORD:-postgres}"
 FLIGHT_ENDPOINT="${FLIGHT_ENDPOINT:-grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}}"
 
-DUCKGRES_ROOT_DEFAULT="${PROJECT_ROOT}/duckgres"
+DUCKGRES_ROOT_DEFAULT="${PROJECT_ROOT}/../duckgres"
 DUCKGRES_ROOT="${DUCKGRES_ROOT:-${DUCKGRES_ROOT_DEFAULT}}"
 DUCKGRES_INTEGRATION_DIR="${DUCKGRES_ROOT}/tests/integration"
 DUCKGRES_COMPOSE_FILE="${DUCKGRES_INTEGRATION_DIR}/docker-compose.yml"
@@ -130,7 +130,7 @@ require_python() {
 ensure_duckgres_root() {
     if [ ! -d "$DUCKGRES_ROOT" ]; then
         log_error "Duckgres repo not found: $DUCKGRES_ROOT"
-        log_error "Initialize submodules (git submodule update --init --recursive) or set DUCKGRES_ROOT"
+        log_error "Set DUCKGRES_ROOT to your duckgres checkout path"
         exit 1
     fi
 }

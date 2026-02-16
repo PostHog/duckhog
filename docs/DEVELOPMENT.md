@@ -24,7 +24,7 @@ export VCPKG_TOOLCHAIN_PATH=~/projects/vcpkg/scripts/buildsystems/vcpkg.cmake
 make dev-setup
 GEN=ninja make release
 # Includes integration setup/teardown automatically.
-# Requires the duckgres submodule at ./duckgres (or set DUCKGRES_ROOT).
+# Requires duckgres checkout at ../duckgres (or set DUCKGRES_ROOT).
 just test-all
 ```
 
@@ -301,7 +301,7 @@ rm -rf build/release/vcpkg_installed/
 
 Use `just test-all` for the full local suite (unit + integration); it handles
 integration server startup/env setup/teardown automatically.
-This expects the duckgres submodule at `./duckgres` by default (or set `DUCKGRES_ROOT`).
+This expects duckgres at `../duckgres` by default (or set `DUCKGRES_ROOT`).
 
 `make test` remains the extension-ci-tools default target used by CI.
 
