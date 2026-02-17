@@ -185,9 +185,13 @@ jobs:
           git checkout "$BASELINE"
           ./bootstrap-vcpkg.sh -disableMetrics
 
-      - name: Set DuckDB version
+      - name: Resolve DuckDB SHA from submodule pin
         run: |
-          DUCKDB_GIT_VERSION=v1.4.4 make set_duckdb_version
+          echo "DUCKDB_GIT_SHA=$(git -C duckdb rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Set DuckDB version by SHA
+        run: |
+          DUCKDB_GIT_VERSION="$DUCKDB_GIT_SHA" make set_duckdb_version
 
       - name: Configure build
         run: |
