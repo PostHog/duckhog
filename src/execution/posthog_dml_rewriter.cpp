@@ -160,10 +160,10 @@ PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(ClientContext &context, const s
 	return RewriteRemoteDeleteSQL(context.GetCurrentQuery(), attached_catalog, remote_catalog);
 }
 
-PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(ClientContext &context, const string &attached_catalog,
+PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(const string &query, const string &attached_catalog,
                                                  const string &remote_catalog) {
-	Parser parser(context.GetParserOptions());
-	parser.ParseQuery(context.GetCurrentQuery());
+	Parser parser;
+	parser.ParseQuery(query);
 
 	UpdateStatement *update_stmt = nullptr;
 	for (auto &statement : parser.statements) {
@@ -227,6 +227,11 @@ string BuildRemoteCreateTableSQL(const CreateTableInfo &info, const string &atta
 	create_info.query.reset();
 
 	return create_info.ToString();
+}
+
+PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(ClientContext &context, const string &attached_catalog,
+                                                 const string &remote_catalog) {
+	return RewriteRemoteUpdateSQL(context.GetCurrentQuery(), attached_catalog, remote_catalog);
 }
 
 } // namespace duckdb
