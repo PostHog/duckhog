@@ -116,6 +116,13 @@ shell: build
 verify: build
     ./build/release/duckdb -c "SELECT extension_name, loaded, extension_version FROM duckdb_extensions() WHERE extension_name = 'duckhog';"
 
+# === Issues ===
+
+# Claim a GitHub issue: assign to yourself and label status:in-progress
+[group('dev')]
+claim issue:
+    gh issue edit {{issue}} --add-assignee @me --add-label status:in-progress
+
 # === Setup ===
 
 # One-time setup: install deps, vcpkg, and submodules
