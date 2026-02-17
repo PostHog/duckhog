@@ -12,6 +12,7 @@
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/execution/physical_plan_generator.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "execution/posthog_create_table_as.hpp"
 #include "execution/posthog_delete.hpp"
 #include "execution/posthog_dml_rewriter.hpp"
 #include "execution/posthog_insert.hpp"
@@ -399,7 +400,32 @@ PhysicalOperator &PostHogCatalog::PlanInsert(ClientContext &context, PhysicalPla
 
 PhysicalOperator &PostHogCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
                                                     LogicalCreateTable &op, PhysicalOperator &plan) {
-	throw NotImplementedException("PostHog: CREATE TABLE AS not yet implemented");
+	if (!IsConnected()) {
+		throw CatalogException("PostHog: Not connected to remote server.");
+	}
+
+	auto &bound_info = *op.info;
+	auto &base = bound_info.Base();
+
+	// Copy the CreateTableInfo and rewrite the catalog for the remote side.
+	auto copied = unique_ptr_cast<CreateInfo, CreateTableInfo>(base.Copy());
+	copied->catalog = remote_catalog_;
+	// Clear the query — columns have been resolved by the binder.
+	copied->query.reset();
+
+	// Build column name list from the resolved columns.
+	vector<string> column_names;
+	for (auto &col : copied->columns.Physical()) {
+		column_names.push_back(col.Name());
+	}
+
+	auto remote_schema = copied->schema;
+	auto remote_table = copied->table;
+	auto &ctas = planner.Make<PhysicalPostHogCreateTableAs>(op.types, *this, std::move(copied),
+	                                                        std::move(remote_schema), std::move(remote_table),
+	                                                        std::move(column_names), op.estimated_cardinality);
+	ctas.children.push_back(plan);
+	return ctas;
 }
 
 PhysicalOperator &PostHogCatalog::PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op,

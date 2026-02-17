@@ -33,4 +33,9 @@ PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(const std::string &query, const
 PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(ClientContext &context, const std::string &attached_catalog,
                                                  const std::string &remote_catalog);
 
+struct CreateTableInfo;
+
+std::string BuildRemoteCreateTableSQL(const CreateTableInfo &info, const std::string &attached_catalog,
+                                      const std::string &remote_catalog);
+
 } // namespace duckdb

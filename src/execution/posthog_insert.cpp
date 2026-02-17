@@ -11,7 +11,7 @@
 #include "duckdb/common/allocator.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/numeric_utils.hpp"
-#include "duckdb/parser/keyword_helper.hpp"
+#include "execution/posthog_sql_utils.hpp"
 #include "storage/posthog_transaction.hpp"
 
 namespace duckdb {
@@ -33,10 +33,6 @@ struct PostHogInsertSourceState : public GlobalSourceState {
 	bool initialized = false;
 	bool finished = false;
 };
-
-string QuoteIdent(const string &ident) {
-	return KeywordHelper::WriteOptionallyQuoted(ident);
-}
 
 } // namespace
 
@@ -161,52 +157,11 @@ SourceResultType PhysicalPostHogInsert::GetData(ExecutionContext &context, DataC
 }
 
 string PhysicalPostHogInsert::QualifyTableName() const {
-	return QuoteIdent(catalog_.GetRemoteCatalog()) + "." + QuoteIdent(remote_schema_) + "." + QuoteIdent(remote_table_);
+	return QualifyRemoteTableName(catalog_.GetRemoteCatalog(), remote_schema_, remote_table_);
 }
 
 string PhysicalPostHogInsert::BuildInsertSQL(const DataChunk &chunk) const {
-	string sql = "INSERT INTO " + QualifyTableName();
-	if (column_names_.empty()) {
-		if (chunk.size() != 1) {
-			throw NotImplementedException("PostHog: multi-row INSERT DEFAULT VALUES is not yet implemented");
-		}
-		sql += " DEFAULT VALUES";
-		sql += on_conflict_clause_;
-		sql += ";";
-		return sql;
-	}
-	if (chunk.ColumnCount() != column_names_.size()) {
-		throw InternalException("PostHog: insert chunk has %llu columns but table has %llu insert columns",
-		                        chunk.ColumnCount(), column_names_.size());
-	}
-
-	sql += " (";
-	for (idx_t col_idx = 0; col_idx < column_names_.size(); col_idx++) {
-		if (col_idx > 0) {
-			sql += ", ";
-		}
-		sql += QuoteIdent(column_names_[col_idx]);
-	}
-	sql += ") VALUES ";
-
-	for (idx_t row_idx = 0; row_idx < chunk.size(); row_idx++) {
-		if (row_idx > 0) {
-			sql += ", ";
-		}
-		sql += "(";
-		for (idx_t col_idx = 0; col_idx < chunk.ColumnCount(); col_idx++) {
-			if (col_idx > 0) {
-				sql += ", ";
-			}
-			sql += chunk.GetValue(col_idx, row_idx).ToSQLString();
-		}
-		sql += ")";
-	}
-
-	sql += on_conflict_clause_;
-
-	sql += ";";
-	return sql;
+	return duckdb::BuildInsertSQL(QualifyTableName(), column_names_, chunk, on_conflict_clause_);
 }
 
 } // namespace duckdb

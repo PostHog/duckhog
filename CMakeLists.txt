@@ -36,9 +36,11 @@ set(EXTENSION_SOURCES
     src/catalog/posthog_schema_entry.cpp
     src/catalog/posthog_table_entry.cpp
     src/catalog/remote_scan.cpp
+    src/execution/posthog_create_table_as.cpp
     src/execution/posthog_delete.cpp
-    src/execution/posthog_insert.cpp
     src/execution/posthog_dml_rewriter.cpp
+    src/execution/posthog_insert.cpp
+    src/execution/posthog_sql_utils.cpp
     src/execution/posthog_update.cpp
     src/utils/arrow_value.cpp
 )
@@ -69,6 +71,7 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME}
 # C++ unit tests (compiled into DuckDB's unittest binary via ALL_OBJECT_FILES)
 if(${BUILD_UNITTESTS})
     add_library_unity(test_duckhog_cpp OBJECT
+        test/cpp/test_ctas_rewriter.cpp
         test/cpp/test_delete_rewriter.cpp
     )
     target_include_directories(test_duckhog_cpp PRIVATE src/include src
