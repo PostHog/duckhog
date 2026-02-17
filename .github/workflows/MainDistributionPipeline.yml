@@ -132,6 +132,19 @@ jobs:
       DUCKHOG_USER: postgres
       DUCKHOG_PASSWORD: postgres
       DUCKGRES_ROOT: ${{ github.workspace }}/duckgres
+      GEN: ninja
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      VCPKG_TARGET_TRIPLET: x64-linux-release
+      VCPKG_HOST_TRIPLET: x64-linux-release
+      VCPKG_OVERLAY_PORTS: ${{ github.workspace }}/extension-ci-tools/vcpkg_ports
+      VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/extension-ci-tools/toolchains
+      USE_MERGED_VCPKG_MANIFEST: '1'
+      AWS_ACCESS_KEY_ID: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_RW_AWS_ACCESS_KEY_ID || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_RO_AWS_ACCESS_KEY_ID || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_RW_AWS_SECRET_ACCESS_KEY || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_RO_AWS_SECRET_ACCESS_KEY || '' }}
+      AWS_DEFAULT_REGION: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_AWS_DEFAULT_REGION || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_AWS_DEFAULT_REGION || '' }}
+      AWS_ENDPOINT_URL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_AWS_ENDPOINT_URL || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_AWS_ENDPOINT_URL || '' }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      VCPKG_BINARY_SOURCES: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,readwrite;http,https://vcpkg-cache.duckdb.org,read' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read' || 'clear;http,https://vcpkg-cache.duckdb.org,read' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,9 +157,45 @@ jobs:
           repository: PostHog/duckgres
           path: duckgres
 
-      - name: Build unittest runner
+      - name: Install build tooling
         run: |
-          GEN=ninja make release
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq ninja-build ccache
+          mkdir -p ccache_dir
+
+      - name: Restore ccache from stable build
+        uses: actions/cache/restore@v4
+        with:
+          path: ./ccache_dir
+          key: ccache-integration-unittest-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-extension-distribution-linux_amd64-v1.4.4
+
+      - name: Setup vcpkg
+        run: |
+          BASELINE="$(python3 - <<'PY'
+          import json
+          with open("vcpkg-configuration.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+          print(data["default-registry"]["baseline"])
+          PY
+          )"
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          cd vcpkg
+          git checkout "$BASELINE"
+          ./bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Set DuckDB version
+        run: |
+          DUCKDB_GIT_VERSION=v1.4.4 make set_duckdb_version
+
+      - name: Configure build
+        run: |
+          CCACHE_DIR="${GITHUB_WORKSPACE}/ccache_dir" make configure_ci
+
+      - name: Build unittest target
+        run: |
+          CCACHE_DIR="${GITHUB_WORKSPACE}/ccache_dir" cmake --build build/release --target unittest --parallel "$(nproc)"
 
       - name: Download extension artifact
         uses: actions/download-artifact@v4
