@@ -1,0 +1,160 @@
+# name: test/sql/queries/ctas_remote.test_slow
+# description: CREATE TABLE AS on remote DuckLake table
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.ctas_remote CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.ctas_remote;
+
+# --- Source table for CTAS ---
+
+statement ok
+CREATE TABLE remote_flight.ctas_remote.source(id INT, name VARCHAR, val DOUBLE);
+
+statement ok
+INSERT INTO remote_flight.ctas_remote.source VALUES (1, 'alice', 1.5), (2, 'bob', 2.5), (3, 'charlie', 3.5);
+
+# --- Basic CTAS ---
+
+statement ok
+CREATE TABLE remote_flight.ctas_remote.t1 AS SELECT * FROM remote_flight.ctas_remote.source;
+
+query III
+SELECT id, name, val FROM remote_flight.ctas_remote.t1 ORDER BY id;
+----
+1	alice	1.5
+2	bob	2.5
+3	charlie	3.5
+
+# --- CTAS with column subset ---
+
+statement ok
+CREATE TABLE remote_flight.ctas_remote.t2 AS SELECT id, name FROM remote_flight.ctas_remote.source WHERE id <= 2;
+
+query II
+SELECT id, name FROM remote_flight.ctas_remote.t2 ORDER BY id;
+----
+1	alice
+2	bob
+
+# --- CTAS with expressions and aliases ---
+
+statement ok
+CREATE TABLE remote_flight.ctas_remote.t3 AS SELECT id * 10 AS scaled_id, upper(name) AS upper_name FROM remote_flight.ctas_remote.source;
+
+query II
+SELECT scaled_id, upper_name FROM remote_flight.ctas_remote.t3 ORDER BY scaled_id;
+----
+10	ALICE
+20	BOB
+30	CHARLIE
+
+# --- CTAS with aggregation ---
+
+statement ok
+CREATE TABLE remote_flight.ctas_remote.t4 AS SELECT count(*) AS cnt, sum(val) AS total FROM remote_flight.ctas_remote.source;
+
+query II
+SELECT cnt, total FROM remote_flight.ctas_remote.t4;
+----
+3	7.5
+
+# --- CTAS with empty result ---
+
+statement ok
+CREATE TABLE remote_flight.ctas_remote.t_empty AS SELECT * FROM remote_flight.ctas_remote.source WHERE id < 0;
+
+query I
+SELECT count(*) FROM remote_flight.ctas_remote.t_empty;
+----
+0
+
+# --- CTAS preserves column types ---
+
+query I
+SELECT column_name FROM (DESCRIBE remote_flight.ctas_remote.t1) ORDER BY column_name;
+----
+id
+name
+val
+
+# --- Insert into CTAS-created table ---
+
+statement ok
+INSERT INTO remote_flight.ctas_remote.t1 VALUES (4, 'dave', 4.5);
+
+query III
+SELECT id, name, val FROM remote_flight.ctas_remote.t1 WHERE id = 4;
+----
+4	dave	4.5
+
+# --- CTAS in transaction with ROLLBACK ---
+
+statement ok
+BEGIN;
+
+statement ok
+CREATE TABLE remote_flight.ctas_remote.t_txn_rollback AS SELECT 1 AS x;
+
+statement ok
+ROLLBACK;
+
+# Table should not exist after rollback
+statement error
+SELECT * FROM remote_flight.ctas_remote.t_txn_rollback;
+----
+Table with name t_txn_rollback does not exist
+
+# --- CTAS in transaction with COMMIT ---
+
+statement ok
+BEGIN;
+
+statement ok
+CREATE TABLE remote_flight.ctas_remote.t_txn_commit AS SELECT 42 AS x;
+
+statement ok
+COMMIT;
+
+query I
+SELECT x FROM remote_flight.ctas_remote.t_txn_commit;
+----
+42
+
+# --- Error: CTAS with duplicate table name ---
+
+statement error
+CREATE TABLE remote_flight.ctas_remote.t1 AS SELECT 1 AS x;
+----
+already exists
+
+# --- CTAS from local data (not from remote table) ---
+
+statement ok
+CREATE TABLE remote_flight.ctas_remote.t_from_values AS SELECT * FROM (VALUES (10, 'x'), (20, 'y')) AS v(a, b);
+
+query II
+SELECT a, b FROM remote_flight.ctas_remote.t_from_values ORDER BY a;
+----
+10	x
+20	y
+
+# --- Cleanup ---
+
+statement ok
+DROP SCHEMA remote_flight.ctas_remote CASCADE;

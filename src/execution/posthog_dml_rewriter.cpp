@@ -8,6 +8,8 @@
 #include "execution/posthog_dml_rewriter.hpp"
 
 #include "duckdb.h"
+#include "duckdb/common/exception/binder_exception.hpp"
+#include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/common/constants.hpp"
 #include "duckdb/common/enums/statement_type.hpp"
 #include "duckdb/common/exception.hpp"
@@ -205,6 +207,26 @@ PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(ClientContext &context, const s
 	                       " RETURNING *) SELECT * FROM __duckhog_updated_rows";
 
 	return result;
+}
+
+string BuildRemoteCreateTableSQL(const CreateTableInfo &info, const string &attached_catalog,
+                                 const string &remote_catalog) {
+	auto copied = info.Copy();
+	auto &create_info = copied->Cast<CreateTableInfo>();
+
+	if (!CatalogIsUnset(create_info.catalog) && !StringUtil::CIEquals(create_info.catalog, attached_catalog) &&
+	    !StringUtil::CIEquals(create_info.catalog, remote_catalog)) {
+		throw BinderException("PostHog: explicit references to external catalogs are not supported in remote CTAS");
+	}
+	if (StringUtil::CIEquals(create_info.catalog, attached_catalog)) {
+		create_info.catalog = remote_catalog;
+	}
+
+	// Clear the query — the binder has already resolved columns into the ColumnList,
+	// so ToString() will emit pure CREATE TABLE DDL with column definitions.
+	create_info.query.reset();
+
+	return create_info.ToString();
 }
 
 } // namespace duckdb
