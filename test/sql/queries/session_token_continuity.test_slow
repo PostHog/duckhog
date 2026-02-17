@@ -1,0 +1,66 @@
+# name: test/sql/queries/session_token_continuity.test_slow
+# description: Session-token continuity across query/metadata/transaction RPC sequences
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote;
+
+statement ok
+DROP TABLE IF EXISTS remote.main.session_token_continuity;
+
+statement ok
+CREATE TABLE remote.main.session_token_continuity(id INTEGER, v VARCHAR);
+
+statement ok
+INSERT INTO remote.main.session_token_continuity VALUES (1, 'a'), (2, 'b'), (3, 'c');
+
+# Repeated remote query handle usage should remain stable.
+query I
+SELECT COUNT(*) FROM remote.main.session_token_continuity;
+----
+3
+
+query I
+SELECT COUNT(*) FROM remote.main.session_token_continuity WHERE id >= 2;
+----
+2
+
+# Metadata RPCs should continue to work after query RPCs.
+query I
+SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
+FROM information_schema.tables
+WHERE table_catalog = 'remote' AND table_schema = 'main' AND table_name = 'session_token_continuity';
+----
+1
+
+# Transaction-scoped query paths should keep continuity as well.
+statement ok
+BEGIN;
+
+query I
+SELECT COUNT(*) FROM remote.main.session_token_continuity;
+----
+3
+
+statement ok
+COMMIT;
+
+query IT
+SELECT id, v FROM remote.main.session_token_continuity ORDER BY id;
+----
+1	a
+2	b
+3	c
+
+statement ok
+DROP TABLE remote.main.session_token_continuity;

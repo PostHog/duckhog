@@ -55,7 +55,7 @@ class PostHogFlightClient {
 public:
 	PostHogFlightClient(const std::string &endpoint, const std::string &user, const std::string &password,
 	                    bool tls_skip_verify);
-	~PostHogFlightClient() = default;
+	~PostHogFlightClient();
 
 	// Prevent copying (Flight client is not copyable)
 	PostHogFlightClient(const PostHogFlightClient &) = delete;
@@ -140,6 +140,7 @@ private:
 	std::string endpoint_;
 	std::string user_;
 	std::string password_;
+	std::string session_token_;
 	bool authenticated_ = false;
 
 	// Arrow Flight clients
@@ -150,6 +151,9 @@ private:
 
 	// Get call options with authentication headers
 	arrow::flight::FlightCallOptions GetCallOptions() const;
+	bool ShouldRetryMetadataWithFreshSession(const arrow::Status &status) const;
+	void InvalidateSessionTokenLocked(const char *reason, const arrow::Status *status = nullptr);
+	void BestEffortCloseSessionLocked();
 };
 
 } // namespace duckdb
