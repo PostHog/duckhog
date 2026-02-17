@@ -119,7 +119,7 @@ jobs:
         run: make tidy-check
 
   integration-tests:
-    name: Integration Tests (DuckLake Pattern)
+    name: Integration Tests
     runs-on: ubuntu-latest
     continue-on-error: true
     needs:
