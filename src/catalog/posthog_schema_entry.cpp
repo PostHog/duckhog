@@ -9,6 +9,7 @@
 #include "catalog/posthog_schema_entry.hpp"
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_table_entry.hpp"
+#include "execution/posthog_dml_rewriter.hpp"
 #include "storage/posthog_transaction.hpp"
 #include "utils/posthog_logger.hpp"
 #include "duckdb/catalog/catalog.hpp"
@@ -248,7 +249,17 @@ optional_ptr<CatalogEntry> PostHogSchemaEntry::CreateIndex(CatalogTransaction tr
 }
 
 optional_ptr<CatalogEntry> PostHogSchemaEntry::CreateView(CatalogTransaction transaction, CreateViewInfo &info) {
-	throw NotImplementedException("PostHog: CREATE VIEW not supported on remote database");
+	if (!posthog_catalog_.IsConnected()) {
+		throw CatalogException("PostHog: Not connected to remote server.");
+	}
+
+	auto &context = transaction.GetContext();
+	auto remote_txn_id = PostHogTransaction::Get(context, posthog_catalog_).remote_txn_id;
+
+	auto sql = BuildRemoteCreateViewSQL(info, posthog_catalog_.GetDatabaseName(), posthog_catalog_.GetRemoteCatalog());
+
+	posthog_catalog_.GetFlightClient().ExecuteUpdate(sql, remote_txn_id);
+	return nullptr;
 }
 
 optional_ptr<CatalogEntry> PostHogSchemaEntry::CreateSequence(CatalogTransaction transaction,
@@ -331,8 +342,8 @@ void PostHogSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {
 		throw CatalogException("PostHog: Not connected to remote server.");
 	}
 
-	if (info.type != CatalogType::TABLE_ENTRY) {
-		throw NotImplementedException("PostHog: only DROP TABLE is supported for remote databases");
+	if (info.type != CatalogType::TABLE_ENTRY && info.type != CatalogType::VIEW_ENTRY) {
+		throw NotImplementedException("PostHog: only DROP TABLE and DROP VIEW are supported for remote databases");
 	}
 
 	auto remote_txn_id = PostHogTransaction::Get(context, posthog_catalog_).remote_txn_id;
@@ -344,10 +355,12 @@ void PostHogSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {
 
 	posthog_catalog_.GetFlightClient().ExecuteUpdate(sql, remote_txn_id);
 
-	std::lock_guard<std::mutex> lock(tables_mutex_);
-	table_cache_.erase(info.name);
-	tables_loaded_ = true;
-	tables_loaded_at_ = std::chrono::steady_clock::now();
+	if (info.type == CatalogType::TABLE_ENTRY) {
+		std::lock_guard<std::mutex> lock(tables_mutex_);
+		table_cache_.erase(info.name);
+		tables_loaded_ = true;
+		tables_loaded_at_ = std::chrono::steady_clock::now();
+	}
 }
 
 //===----------------------------------------------------------------------===//
@@ -530,7 +543,11 @@ void PostHogSchemaEntry::Scan(CatalogType type, const std::function<void(Catalog
 
 optional_ptr<CatalogEntry> PostHogSchemaEntry::LookupEntry(CatalogTransaction transaction,
                                                            const EntryLookupInfo &lookup_info) {
-	if (lookup_info.GetCatalogType() != CatalogType::TABLE_ENTRY) {
+	// VIEW_ENTRY is required here: DuckDB resolves DROP VIEW (and other view operations)
+	// by looking up the entry as VIEW_ENTRY. Views are stored in table_cache_ because the
+	// remote server's ListTables returns both tables and views indistinguishably.
+	if (lookup_info.GetCatalogType() != CatalogType::TABLE_ENTRY &&
+	    lookup_info.GetCatalogType() != CatalogType::VIEW_ENTRY) {
 		return nullptr;
 	}
 

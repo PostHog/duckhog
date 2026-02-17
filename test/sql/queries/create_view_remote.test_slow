@@ -1,0 +1,134 @@
+# name: test/sql/queries/create_view_remote.test_slow
+# description: CREATE VIEW on remote DuckLake catalog (RM06)
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.view_rm06 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.view_rm06;
+
+statement ok
+CREATE TABLE remote_flight.view_rm06.t(i INT, j INT);
+
+statement ok
+INSERT INTO remote_flight.view_rm06.t VALUES (1, 10), (2, 20), (3, 30);
+
+# --- Basic CREATE VIEW ---
+
+statement ok
+CREATE VIEW remote_flight.view_rm06.v AS SELECT i, j FROM remote_flight.view_rm06.t;
+
+query II
+SELECT i, j FROM remote_flight.view_rm06.v ORDER BY i;
+----
+1	10
+2	20
+3	30
+
+# --- View with WHERE filter ---
+
+statement ok
+CREATE VIEW remote_flight.view_rm06.v_filtered AS SELECT i, j FROM remote_flight.view_rm06.t WHERE i > 1;
+
+query II
+SELECT i, j FROM remote_flight.view_rm06.v_filtered ORDER BY i;
+----
+2	20
+3	30
+
+# --- View reflects underlying data changes ---
+
+statement ok
+INSERT INTO remote_flight.view_rm06.t VALUES (4, 40);
+
+query II
+SELECT i, j FROM remote_flight.view_rm06.v ORDER BY i;
+----
+1	10
+2	20
+3	30
+4	40
+
+# --- View reflects DELETE on underlying table ---
+
+query I
+DELETE FROM remote_flight.view_rm06.t WHERE i = 4;
+----
+1
+
+query II
+SELECT i, j FROM remote_flight.view_rm06.v ORDER BY i;
+----
+1	10
+2	20
+3	30
+
+# --- DROP VIEW ---
+
+statement ok
+DROP VIEW remote_flight.view_rm06.v_filtered;
+
+# --- DROP VIEW IF EXISTS (no-op on missing view) ---
+
+statement ok
+DROP VIEW IF EXISTS remote_flight.view_rm06.v_filtered;
+
+# --- CREATE OR REPLACE VIEW ---
+
+statement ok
+CREATE OR REPLACE VIEW remote_flight.view_rm06.v AS SELECT i FROM remote_flight.view_rm06.t WHERE i <= 2;
+
+query I
+SELECT i FROM remote_flight.view_rm06.v ORDER BY i;
+----
+1
+2
+
+# --- CREATE VIEW IF NOT EXISTS (no-op on existing view) ---
+
+statement ok
+CREATE VIEW IF NOT EXISTS remote_flight.view_rm06.v AS SELECT j FROM remote_flight.view_rm06.t;
+
+# Should still return the original definition (i, not j)
+query I
+SELECT i FROM remote_flight.view_rm06.v ORDER BY i;
+----
+1
+2
+
+# --- View with JOIN ---
+
+statement ok
+CREATE TABLE remote_flight.view_rm06.t2(i INT, label VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.view_rm06.t2 VALUES (1, 'one'), (2, 'two'), (3, 'three');
+
+statement ok
+CREATE VIEW remote_flight.view_rm06.v_join AS SELECT t.i, t.j, t2.label FROM remote_flight.view_rm06.t JOIN remote_flight.view_rm06.t2 ON t.i = t2.i;
+
+query III
+SELECT i, j, label FROM remote_flight.view_rm06.v_join ORDER BY i;
+----
+1	10	one
+2	20	two
+3	30	three
+
+# --- Cleanup ---
+
+statement ok
+DROP SCHEMA remote_flight.view_rm06 CASCADE;

@@ -10,6 +10,7 @@
 #include "duckdb.h"
 #include "duckdb/common/exception/binder_exception.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/parsed_data/create_view_info.hpp"
 #include "duckdb/common/constants.hpp"
 #include "duckdb/common/enums/statement_type.hpp"
 #include "duckdb/common/exception.hpp"
@@ -232,6 +233,30 @@ string BuildRemoteCreateTableSQL(const CreateTableInfo &info, const string &atta
 PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(ClientContext &context, const string &attached_catalog,
                                                  const string &remote_catalog) {
 	return RewriteRemoteUpdateSQL(context.GetCurrentQuery(), attached_catalog, remote_catalog);
+}
+
+string BuildRemoteCreateViewSQL(const CreateViewInfo &info, const string &attached_catalog,
+                                const string &remote_catalog) {
+	auto copied = unique_ptr_cast<CreateInfo, CreateViewInfo>(info.Copy());
+
+	if (!CatalogIsUnset(copied->catalog) && !StringUtil::CIEquals(copied->catalog, attached_catalog) &&
+	    !StringUtil::CIEquals(copied->catalog, remote_catalog)) {
+		throw BinderException(
+		    "PostHog: explicit references to external catalogs are not supported in remote CREATE VIEW");
+	}
+	if (StringUtil::CIEquals(copied->catalog, attached_catalog)) {
+		copied->catalog = remote_catalog;
+	}
+
+	// Rewrite catalog references inside the view's SELECT query.
+	if (copied->query && copied->query->node) {
+		ParsedExpressionIterator::EnumerateQueryNodeChildren(
+		    *copied->query->node,
+		    [&](unique_ptr<ParsedExpression> &child) { RewriteExpression(child, attached_catalog, remote_catalog); },
+		    [&](TableRef &child_ref) { RewriteTableRefCatalog(child_ref, attached_catalog, remote_catalog); });
+	}
+
+	return copied->ToString();
 }
 
 } // namespace duckdb
