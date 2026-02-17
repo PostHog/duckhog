@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
@@ -117,6 +118,20 @@ jobs:
 
       - name: Tidy Check
         run: make tidy-check
+
+  rerun-on-failure:
+    name: Rerun failed jobs
+    needs:
+      - duckdb-stable-build-main
+      - duckdb-stable-build-pr
+    if: ${{ always() && (needs.duckdb-stable-build-main.result == 'failure' || needs.duckdb-stable-build-pr.result == 'failure') && fromJSON(github.run_attempt) < 3 }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger rerun workflow
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run rerun.yml -F run_id=${{ github.run_id }}
 
   integration-tests:
     name: Integration Tests (DuckLake Pattern)
