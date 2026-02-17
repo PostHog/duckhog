@@ -1,0 +1,576 @@
+# name: test/sql/queries/partition_insert_remote.test_slow
+# description: INSERT into partitioned remote DuckLake table (RM08)
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+# Single-catalog attach for DML operations
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+# Multi-catalog attach for metadata inspection
+statement ok
+ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.part_rm08 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.part_rm08;
+
+# ============================================================
+# Basic partitioned table: single key
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.part_rm08.t(part_key INT, v VARCHAR);
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.t SET PARTITIONED BY (part_key);
+
+statement ok
+INSERT INTO remote_flight.part_rm08.t VALUES (1, 'a'), (2, 'b'), (1, 'c');
+
+# --- Verify data is correct ---
+
+query IT
+SELECT part_key, v FROM remote_flight.part_rm08.t ORDER BY part_key, v;
+----
+1	a
+1	c
+2	b
+
+# --- Verify partition key filter works ---
+
+query IT
+SELECT part_key, v FROM remote_flight.part_rm08.t WHERE part_key = 1 ORDER BY v;
+----
+1	a
+1	c
+
+query IT
+SELECT part_key, v FROM remote_flight.part_rm08.t WHERE part_key = 2;
+----
+2	b
+
+# --- Verify metadata: partition column is registered ---
+
+query IT
+SELECT pc.partition_key_index, pc.transform
+FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+WHERE pc.table_id = (
+    SELECT t.table_id FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
+    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    WHERE s.schema_name = 'part_rm08' AND t.table_name = 't'
+);
+----
+0	identity
+
+# --- Verify metadata: data files have distinct partition values ---
+
+query T
+SELECT DISTINCT fpv.partition_value
+FROM remote___ducklake_metadata_ducklake.public.ducklake_file_partition_value fpv
+WHERE fpv.table_id = (
+    SELECT t.table_id FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
+    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    WHERE s.schema_name = 'part_rm08' AND t.table_name = 't'
+)
+ORDER BY fpv.partition_value;
+----
+1
+2
+
+# ============================================================
+# INSERT another batch, verify all data visible
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.part_rm08.t VALUES (3, 'd'), (1, 'e');
+
+query IT
+SELECT part_key, v FROM remote_flight.part_rm08.t ORDER BY part_key, v;
+----
+1	a
+1	c
+1	e
+2	b
+3	d
+
+# --- Metadata: three distinct partition values after second INSERT ---
+
+query T
+SELECT DISTINCT fpv.partition_value
+FROM remote___ducklake_metadata_ducklake.public.ducklake_file_partition_value fpv
+WHERE fpv.table_id = (
+    SELECT t.table_id FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
+    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    WHERE s.schema_name = 'part_rm08' AND t.table_name = 't'
+)
+ORDER BY fpv.partition_value;
+----
+1
+2
+3
+
+# ============================================================
+# Aggregate queries on partitioned table
+# ============================================================
+
+query II
+SELECT part_key, COUNT(*) FROM remote_flight.part_rm08.t GROUP BY part_key ORDER BY part_key;
+----
+1	3
+2	1
+3	1
+
+query I
+SELECT COUNT(DISTINCT part_key) FROM remote_flight.part_rm08.t;
+----
+3
+
+# ============================================================
+# DELETE on partitioned table
+# ============================================================
+
+query I
+DELETE FROM remote_flight.part_rm08.t WHERE part_key = 2;
+----
+1
+
+query IT
+SELECT part_key, v FROM remote_flight.part_rm08.t ORDER BY part_key, v;
+----
+1	a
+1	c
+1	e
+3	d
+
+# --- DELETE all rows from a partition, verify other partitions intact ---
+
+query I
+DELETE FROM remote_flight.part_rm08.t WHERE part_key = 1;
+----
+3
+
+query IT
+SELECT part_key, v FROM remote_flight.part_rm08.t ORDER BY part_key, v;
+----
+3	d
+
+# ============================================================
+# UPDATE on partitioned table
+# ============================================================
+
+statement ok
+UPDATE remote_flight.part_rm08.t SET v = 'updated' WHERE part_key = 3;
+
+query IT
+SELECT part_key, v FROM remote_flight.part_rm08.t WHERE part_key = 3;
+----
+3	updated
+
+# ============================================================
+# Multiple partition keys
+# ============================================================
+
+# NOTE: amount uses DOUBLE instead of DECIMAL(10,2) because DECIMAL columns
+# return NULL through Flight SQL — see docs/DUCKLAKE_BUGS.md #2.
+statement ok
+CREATE TABLE remote_flight.part_rm08.multi(region VARCHAR, year INT, amount DOUBLE);
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.multi SET PARTITIONED BY (region, year);
+
+statement ok
+INSERT INTO remote_flight.part_rm08.multi VALUES
+    ('us', 2024, 100.0),
+    ('us', 2025, 200.0),
+    ('eu', 2024, 150.0),
+    ('eu', 2025, 250.0),
+    ('us', 2024, 50.0);
+
+# --- Verify data ---
+
+query TIR
+SELECT region, year, amount FROM remote_flight.part_rm08.multi ORDER BY region, year, amount;
+----
+eu	2024	150.0
+eu	2025	250.0
+us	2024	50.0
+us	2024	100.0
+us	2025	200.0
+
+# --- Filter on first partition key ---
+
+query TIR
+SELECT region, year, amount FROM remote_flight.part_rm08.multi WHERE region = 'eu' ORDER BY year;
+----
+eu	2024	150.0
+eu	2025	250.0
+
+# --- Filter on second partition key ---
+
+query TIR
+SELECT region, year, amount FROM remote_flight.part_rm08.multi WHERE year = 2024 ORDER BY region, amount;
+----
+eu	2024	150.0
+us	2024	50.0
+us	2024	100.0
+
+# --- Filter on both partition keys ---
+
+query TIR
+SELECT region, year, amount FROM remote_flight.part_rm08.multi WHERE region = 'us' AND year = 2024 ORDER BY amount;
+----
+us	2024	50.0
+us	2024	100.0
+
+# --- Metadata: two partition columns registered ---
+
+query IT
+SELECT pc.partition_key_index, pc.transform
+FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+WHERE pc.table_id = (
+    SELECT t.table_id FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
+    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    WHERE s.schema_name = 'part_rm08' AND t.table_name = 'multi'
+)
+ORDER BY pc.partition_key_index;
+----
+0	identity
+1	identity
+
+# --- Aggregate across partition keys ---
+
+query TIR
+SELECT region, year, SUM(amount) FROM remote_flight.part_rm08.multi GROUP BY region, year ORDER BY region, year;
+----
+eu	2024	150.0
+eu	2025	250.0
+us	2024	150.0
+us	2025	200.0
+
+# ============================================================
+# RESET PARTITIONED BY
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.part_rm08.resettable(pk INT, val VARCHAR);
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.resettable SET PARTITIONED BY (pk);
+
+statement ok
+INSERT INTO remote_flight.part_rm08.resettable VALUES (1, 'before_reset'), (2, 'before_reset');
+
+# --- Verify partitioning is active via metadata ---
+
+query IT
+SELECT pc.partition_key_index, pc.transform
+FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+WHERE pc.table_id = (
+    SELECT t.table_id FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
+    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    WHERE s.schema_name = 'part_rm08' AND t.table_name = 'resettable'
+);
+----
+0	identity
+
+# --- RESET partitioning ---
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.resettable RESET PARTITIONED BY;
+
+# --- Metadata: DuckLake retains partition_column rows after RESET ---
+# This is DuckLake behavior — RESET removes partitioning semantics but
+# the metadata row persists. This golden output detects behavior changes.
+
+query IT
+SELECT pc.partition_key_index, pc.transform
+FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+WHERE pc.table_id = (
+    SELECT t.table_id FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
+    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    WHERE s.schema_name = 'part_rm08' AND t.table_name = 'resettable'
+);
+----
+0	identity
+
+# --- Data still accessible after RESET ---
+
+query IT
+SELECT pk, val FROM remote_flight.part_rm08.resettable ORDER BY pk;
+----
+1	before_reset
+2	before_reset
+
+# --- INSERT works after RESET (no partitioning) ---
+
+statement ok
+INSERT INTO remote_flight.part_rm08.resettable VALUES (3, 'after_reset');
+
+query IT
+SELECT pk, val FROM remote_flight.part_rm08.resettable ORDER BY pk;
+----
+1	before_reset
+2	before_reset
+3	after_reset
+
+# ============================================================
+# Re-SET PARTITIONED BY after RESET
+# ============================================================
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.resettable SET PARTITIONED BY (pk);
+
+statement ok
+INSERT INTO remote_flight.part_rm08.resettable VALUES (4, 're_partitioned');
+
+query IT
+SELECT pk, val FROM remote_flight.part_rm08.resettable ORDER BY pk;
+----
+1	before_reset
+2	before_reset
+3	after_reset
+4	re_partitioned
+
+# --- Metadata: DuckLake accumulates partition_column rows across SET cycles ---
+# After SET→RESET→SET, we see 2 rows (one from each SET).
+# This golden output captures DuckLake's append-only metadata behavior.
+
+query I
+SELECT COUNT(*)
+FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+WHERE pc.table_id = (
+    SELECT t.table_id FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
+    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    WHERE s.schema_name = 'part_rm08' AND t.table_name = 'resettable'
+);
+----
+2
+
+# ============================================================
+# Various data types as partition keys
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.part_rm08.typed(
+    dt DATE,
+    flag BOOLEAN,
+    label VARCHAR,
+    amount DOUBLE
+);
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.typed SET PARTITIONED BY (dt);
+
+statement ok
+INSERT INTO remote_flight.part_rm08.typed VALUES
+    ('2024-01-15', true, 'alpha', 1.5),
+    ('2024-01-15', false, 'beta', 2.5),
+    ('2024-06-30', true, 'gamma', 3.5),
+    ('2024-12-31', false, 'delta', 4.5);
+
+query TITR
+SELECT dt, flag, label, amount FROM remote_flight.part_rm08.typed ORDER BY dt, label;
+----
+2024-01-15	true	alpha	1.5
+2024-01-15	false	beta	2.5
+2024-06-30	true	gamma	3.5
+2024-12-31	false	delta	4.5
+
+# --- Filter on DATE partition key ---
+
+query TITR
+SELECT dt, flag, label, amount FROM remote_flight.part_rm08.typed WHERE dt = '2024-01-15' ORDER BY label;
+----
+2024-01-15	true	alpha	1.5
+2024-01-15	false	beta	2.5
+
+# --- Range filter on DATE partition key ---
+
+query TITR
+SELECT dt, flag, label, amount FROM remote_flight.part_rm08.typed WHERE dt >= '2024-06-01' ORDER BY dt;
+----
+2024-06-30	true	gamma	3.5
+2024-12-31	false	delta	4.5
+
+# ============================================================
+# VARCHAR partition key
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.part_rm08.str_part(category VARCHAR, id INT, name VARCHAR);
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.str_part SET PARTITIONED BY (category);
+
+statement ok
+INSERT INTO remote_flight.part_rm08.str_part VALUES
+    ('electronics', 1, 'laptop'),
+    ('electronics', 2, 'phone'),
+    ('clothing', 3, 'shirt'),
+    ('food', 4, 'apple');
+
+query TIT
+SELECT category, id, name FROM remote_flight.part_rm08.str_part WHERE category = 'electronics' ORDER BY id;
+----
+electronics	1	laptop
+electronics	2	phone
+
+query I
+SELECT COUNT(*) FROM remote_flight.part_rm08.str_part WHERE category = 'food';
+----
+1
+
+# --- Metadata: distinct partition values for string keys ---
+
+query T
+SELECT DISTINCT fpv.partition_value
+FROM remote___ducklake_metadata_ducklake.public.ducklake_file_partition_value fpv
+WHERE fpv.table_id = (
+    SELECT t.table_id FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
+    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    WHERE s.schema_name = 'part_rm08' AND t.table_name = 'str_part'
+)
+ORDER BY fpv.partition_value;
+----
+clothing
+electronics
+food
+
+# ============================================================
+# NULL values in partition key — known DuckLake bug
+# ============================================================
+# DuckLake crashes with "Calling StringValue::Get on a NULL value" in
+# DuckLakeInsert::AddWrittenFiles when a partition key column contains NULL.
+# This is a server-side bug — INSERT with NULL in a partition key is a
+# valid operation that should either work or return a clean error.
+
+statement ok
+CREATE TABLE remote_flight.part_rm08.nulls(pk INT, v VARCHAR);
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.nulls SET PARTITIONED BY (pk);
+
+# Non-NULL INSERT works fine
+statement ok
+INSERT INTO remote_flight.part_rm08.nulls VALUES (1, 'a'), (2, 'b');
+
+query IT
+SELECT pk, v FROM remote_flight.part_rm08.nulls ORDER BY pk;
+----
+1	a
+2	b
+
+# NOTE: INSERT with NULL partition key crashes DuckLake with:
+#   INTERNAL Error: Calling StringValue::Get on a NULL value
+#   in DuckLakeInsert::AddWrittenFiles
+# This is a DuckLake server-side bug — see docs/DUCKLAKE_BUGS.md #1.
+# Cannot test with `statement error` because SQLLogicTest treats internal
+# exceptions as test failures.
+# When DuckLake fixes this, add back a test for NULL partition keys.
+
+# ============================================================
+# Large single-partition INSERT (many rows, same key)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.part_rm08.bulk(pk INT, seq INT);
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.bulk SET PARTITIONED BY (pk);
+
+# INSERT 100 rows all to partition 42
+statement ok
+INSERT INTO remote_flight.part_rm08.bulk SELECT 42, i FROM range(100) t(i);
+
+query II
+SELECT pk, COUNT(*) FROM remote_flight.part_rm08.bulk GROUP BY pk;
+----
+42	100
+
+query I
+SELECT MIN(seq) FROM remote_flight.part_rm08.bulk;
+----
+0
+
+query I
+SELECT MAX(seq) FROM remote_flight.part_rm08.bulk;
+----
+99
+
+# --- Add a second partition ---
+
+statement ok
+INSERT INTO remote_flight.part_rm08.bulk SELECT 99, i FROM range(50) t(i);
+
+query II
+SELECT pk, COUNT(*) FROM remote_flight.part_rm08.bulk GROUP BY pk ORDER BY pk;
+----
+42	100
+99	50
+
+# ============================================================
+# UPDATE across partition boundary (change partition key value)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.part_rm08.cross_update(pk INT, v VARCHAR);
+
+statement ok
+ALTER TABLE remote_flight.part_rm08.cross_update SET PARTITIONED BY (pk);
+
+statement ok
+INSERT INTO remote_flight.part_rm08.cross_update VALUES (1, 'stays'), (1, 'moves'), (2, 'stays_too');
+
+# --- Move a row from partition 1 to partition 2 ---
+
+statement ok
+UPDATE remote_flight.part_rm08.cross_update SET pk = 2 WHERE v = 'moves';
+
+query IT
+SELECT pk, v FROM remote_flight.part_rm08.cross_update WHERE pk = 1;
+----
+1	stays
+
+query IT
+SELECT pk, v FROM remote_flight.part_rm08.cross_update WHERE pk = 2 ORDER BY v;
+----
+2	moves
+2	stays_too
+
+# ============================================================
+# DELETE with non-matching partition filter (no rows affected)
+# ============================================================
+
+query I
+DELETE FROM remote_flight.part_rm08.cross_update WHERE pk = 999;
+----
+0
+
+# --- Data unchanged ---
+
+query I
+SELECT COUNT(*) FROM remote_flight.part_rm08.cross_update;
+----
+3
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.part_rm08 CASCADE;
+
+statement ok
+DETACH remote;
