@@ -144,7 +144,7 @@ jobs:
       - name: Download DuckDB CLI
         run: |
           wget -q https://github.com/duckdb/duckdb/releases/download/v1.4.4/duckdb_cli-linux-amd64.zip
-          unzip -q duckdb_cli-linux-amd64.zip
+          unzip -oq duckdb_cli-linux-amd64.zip
           chmod +x duckdb
           mkdir -p build/release
           mv duckdb build/release/
