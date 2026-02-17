@@ -26,6 +26,62 @@ unique_ptr<CreateViewInfo> ParseCreateView(const string &sql) {
 } // namespace
 
 // ============================================================
+// ParseCreateView helper validation
+// ============================================================
+
+TEST_CASE("View rewriter - ParseCreateView produces correct AST fields", "[duckhog][dml-rewriter][create-view]") {
+	auto info = ParseCreateView("CREATE VIEW remote_flight.s.v AS SELECT i FROM remote_flight.s.t");
+
+	REQUIRE(info->catalog == "remote_flight");
+	REQUIRE(info->schema == "s");
+	REQUIRE(info->view_name == "v");
+	REQUIRE(info->query != nullptr);
+	REQUIRE(info->on_conflict == OnCreateConflict::ERROR_ON_CONFLICT);
+	REQUIRE(info->aliases.empty());
+}
+
+TEST_CASE("View rewriter - ParseCreateView with aliases", "[duckhog][dml-rewriter][create-view]") {
+	auto info = ParseCreateView("CREATE VIEW remote_flight.s.v(a, b) AS SELECT 1, 2");
+
+	REQUIRE(info->view_name == "v");
+	REQUIRE(info->aliases.size() == 2);
+	REQUIRE(info->aliases[0] == "a");
+	REQUIRE(info->aliases[1] == "b");
+}
+
+TEST_CASE("View rewriter - ParseCreateView OR REPLACE sets on_conflict", "[duckhog][dml-rewriter][create-view]") {
+	auto info = ParseCreateView("CREATE OR REPLACE VIEW remote_flight.s.v AS SELECT 1");
+
+	REQUIRE(info->on_conflict == OnCreateConflict::REPLACE_ON_CONFLICT);
+}
+
+TEST_CASE("View rewriter - ParseCreateView IF NOT EXISTS sets on_conflict", "[duckhog][dml-rewriter][create-view]") {
+	auto info = ParseCreateView("CREATE VIEW IF NOT EXISTS remote_flight.s.v AS SELECT 1");
+
+	REQUIRE(info->on_conflict == OnCreateConflict::IGNORE_ON_CONFLICT);
+}
+
+// ============================================================
+// Golden output (exact string match to detect DuckDB ToString changes)
+// ============================================================
+
+TEST_CASE("View rewriter - golden output simple view", "[duckhog][dml-rewriter][create-view]") {
+	auto info = ParseCreateView("CREATE VIEW remote_flight.s.v AS SELECT i FROM remote_flight.s.t");
+
+	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
+
+	REQUIRE(sql == "CREATE VIEW ducklake.s.v AS SELECT i FROM ducklake.s.t;");
+}
+
+TEST_CASE("View rewriter - golden output with aliases", "[duckhog][dml-rewriter][create-view]") {
+	auto info = ParseCreateView("CREATE VIEW remote_flight.s.v(a, b) AS SELECT i, j FROM remote_flight.s.t");
+
+	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
+
+	REQUIRE(sql == "CREATE VIEW ducklake.s.v (a, b) AS SELECT i, j FROM ducklake.s.t;");
+}
+
+// ============================================================
 // Basic functionality
 // ============================================================
 
@@ -35,9 +91,8 @@ TEST_CASE("View rewriter - simple view", "[duckhog][dml-rewriter][create-view]")
 	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
 
 	REQUIRE(sql.find("CREATE VIEW") != string::npos);
-	REQUIRE(sql.find("ducklake") != string::npos);
+	REQUIRE(sql.find("ducklake.s.v") != string::npos);
 	REQUIRE(sql.find("remote_flight") == string::npos);
-	REQUIRE(sql.find("v") != string::npos);
 }
 
 TEST_CASE("View rewriter - view with column aliases", "[duckhog][dml-rewriter][create-view]") {
@@ -46,8 +101,9 @@ TEST_CASE("View rewriter - view with column aliases", "[duckhog][dml-rewriter][c
 	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
 
 	REQUIRE(sql.find("remote_flight") == string::npos);
-	REQUIRE(sql.find("ducklake") != string::npos);
-	REQUIRE(sql.find("(a, b)") != string::npos);
+	REQUIRE(sql.find("ducklake.s.v") != string::npos);
+	// Aliases appear after view name; exact format checked in golden test
+	REQUIRE(sql.find("a, b") != string::npos);
 }
 
 // ============================================================
@@ -97,6 +153,7 @@ TEST_CASE("View rewriter - no catalog specified", "[duckhog][dml-rewriter][creat
 
 	// No catalog to rewrite — should pass through
 	REQUIRE(sql.find("s.v") != string::npos);
+	REQUIRE(sql.find("ducklake") == string::npos);
 }
 
 TEST_CASE("View rewriter - bare view name no schema", "[duckhog][dml-rewriter][create-view]") {
@@ -104,16 +161,7 @@ TEST_CASE("View rewriter - bare view name no schema", "[duckhog][dml-rewriter][c
 
 	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
 
-	REQUIRE(sql.find("CREATE VIEW v") != string::npos);
-}
-
-TEST_CASE("View rewriter - empty catalog empty schema", "[duckhog][dml-rewriter][create-view]") {
-	auto info = ParseCreateView("CREATE VIEW v AS SELECT 1");
-
-	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
-
-	REQUIRE(sql.find("remote_flight") == string::npos);
-	REQUIRE(sql.find("v") != string::npos);
+	REQUIRE(sql.find("CREATE VIEW v ") != string::npos);
 }
 
 // ============================================================
@@ -147,10 +195,12 @@ TEST_CASE("View rewriter - table without catalog in query unchanged", "[duckhog]
 
 	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
 
-	// View name rewritten, but unqualified table stays
+	// View name rewritten
 	REQUIRE(sql.find("ducklake.s.v") != string::npos);
-	// The unqualified s.t should still be present
-	REQUIRE(sql.find("s.t") != string::npos);
+	// Table ref NOT prefixed with ducklake
+	REQUIRE(sql.find("ducklake.s.t") == string::npos);
+	// But s.t is still present in the query body
+	REQUIRE(sql.find("FROM s.t") != string::npos);
 }
 
 TEST_CASE("View rewriter - table with alias in query", "[duckhog][dml-rewriter][create-view]") {
@@ -172,7 +222,8 @@ TEST_CASE("View rewriter - qualified column ref rewritten", "[duckhog][dml-rewri
 	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
 
 	REQUIRE(sql.find("remote_flight") == string::npos);
-	REQUIRE(sql.find("ducklake.s.t") != string::npos);
+	// Column ref should be rewritten to ducklake.s.t.i
+	REQUIRE(sql.find("ducklake.s.t.i") != string::npos);
 }
 
 TEST_CASE("View rewriter - unqualified column ref unchanged", "[duckhog][dml-rewriter][create-view]") {
@@ -181,7 +232,8 @@ TEST_CASE("View rewriter - unqualified column ref unchanged", "[duckhog][dml-rew
 	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
 
 	REQUIRE(sql.find("remote_flight") == string::npos);
-	REQUIRE(sql.find("i") != string::npos);
+	// 'i' should appear as a bare column name in SELECT
+	REQUIRE(sql.find("SELECT i") != string::npos);
 }
 
 // ============================================================
@@ -230,6 +282,14 @@ TEST_CASE("View rewriter - correlated subquery WHERE EXISTS", "[duckhog][dml-rew
 	REQUIRE(sql.find("remote_flight") == string::npos);
 	REQUIRE(sql.find("ducklake.s.t1") != string::npos);
 	REQUIRE(sql.find("ducklake.s.t2") != string::npos);
+}
+
+TEST_CASE("View rewriter - external catalog in subquery throws", "[duckhog][dml-rewriter][create-view]") {
+	auto info = ParseCreateView("CREATE VIEW remote_flight.s.v AS "
+	                            "SELECT * FROM remote_flight.s.t1 "
+	                            "WHERE i IN (SELECT j FROM other_catalog.s.t2)");
+
+	REQUIRE_THROWS_AS(BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE), BinderException);
 }
 
 // ============================================================
@@ -451,6 +511,12 @@ TEST_CASE("View rewriter - external catalog in query table ref throws", "[duckho
 	REQUIRE_THROWS_AS(BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE), BinderException);
 }
 
+TEST_CASE("View rewriter - external catalog in query column ref throws", "[duckhog][dml-rewriter][create-view]") {
+	auto info = ParseCreateView("CREATE VIEW remote_flight.s.v AS SELECT other_catalog.s.t.col FROM remote_flight.s.t");
+
+	REQUIRE_THROWS_AS(BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE), BinderException);
+}
+
 // ============================================================
 // Immutability
 // ============================================================
@@ -513,7 +579,7 @@ TEST_CASE("View rewriter - many column aliases", "[duckhog][dml-rewriter][create
 	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
 
 	REQUIRE(sql.find("remote_flight") == string::npos);
-	REQUIRE(sql.find("ducklake") != string::npos);
+	REQUIRE(sql.find("ducklake.s.v") != string::npos);
 	REQUIRE(sql.find("c0") != string::npos);
 	REQUIRE(sql.find("c49") != string::npos);
 }
@@ -551,4 +617,16 @@ TEST_CASE("View rewriter - output contains AS keyword", "[duckhog][dml-rewriter]
 	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
 
 	REQUIRE(sql.find(" AS ") != string::npos);
+}
+
+TEST_CASE("View rewriter - output is parseable SQL", "[duckhog][dml-rewriter][create-view]") {
+	auto info = ParseCreateView("CREATE VIEW remote_flight.s.v AS SELECT i FROM remote_flight.s.t WHERE i > 0");
+
+	auto sql = BuildRemoteCreateViewSQL(*info, VIEW_ATTACHED, VIEW_REMOTE);
+
+	// Output should parse successfully as a CREATE VIEW statement
+	Parser parser;
+	REQUIRE_NOTHROW(parser.ParseQuery(sql));
+	REQUIRE(parser.statements.size() == 1);
+	REQUIRE(parser.statements[0]->type == StatementType::CREATE_STATEMENT);
 }

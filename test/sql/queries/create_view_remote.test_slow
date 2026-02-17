@@ -128,6 +128,35 @@ SELECT i, j, label FROM remote_flight.view_rm06.v_join ORDER BY i;
 2	20	two
 3	30	three
 
+# --- Duplicate CREATE VIEW (no IF NOT EXISTS) should error ---
+
+statement error
+CREATE VIEW remote_flight.view_rm06.v AS SELECT 1;
+----
+already exists
+
+# --- SELECT from dropped view should error ---
+
+statement ok
+DROP VIEW remote_flight.view_rm06.v_join;
+
+statement error
+SELECT * FROM remote_flight.view_rm06.v_join;
+----
+does not exist
+
+# --- View with computed expression column ---
+
+statement ok
+CREATE VIEW remote_flight.view_rm06.v_computed AS SELECT i, i * 2 AS doubled FROM remote_flight.view_rm06.t;
+
+query II
+SELECT i, doubled FROM remote_flight.view_rm06.v_computed ORDER BY i;
+----
+1	2
+2	4
+3	6
+
 # --- Cleanup ---
 
 statement ok
