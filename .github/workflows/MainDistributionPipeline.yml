@@ -120,12 +120,10 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - depot-ubuntu-24.04-64
     continue-on-error: true
-    # needs:
-    #   - duckdb-stable-build-main
-    #   - duckdb-stable-build-pr
-    # if: ${{ always() && (needs.duckdb-stable-build-main.result == 'success' || needs.duckdb-stable-build-pr.result == 'success') }}
     env:
       FLIGHT_HOST: 127.0.0.1
       FLIGHT_PORT: 8815
