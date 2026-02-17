@@ -49,6 +49,7 @@ gh api --paginate "/repos/owner/repo/issues?state=open&per_page=100" | jq -s '
 - `CLAIM`: assign actor and set labels, then continue task against the claimed issue.
 - `ABORT_IN_PROGRESS`: stop task and hand off only when the matched issue is in progress and not assigned to the current actor.
 - `ABORT_UNCERTAIN`: stop task and request human triage.
+6. When creating the PR for the task, reference the issue in the PR description using a closing keyword (for example: `Closes #$ISSUE`).
 
 ## LLM Matching Input (required)
 Provide qualitative matching from the runtime LLM with `ISSUE_GATE_MATCH_JSON`:
