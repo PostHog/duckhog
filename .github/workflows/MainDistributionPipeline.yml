@@ -154,7 +154,7 @@ jobs:
       - name: Download extension artifact
         uses: actions/download-artifact@v4
         with:
-          name: duckdb-stable-linux-amd64-extension-duckhog
+          name: duckhog-v1.4.4-extension-linux_amd64
           path: build/release/extension/duckhog/
 
       - name: Start Duckgres control-plane
