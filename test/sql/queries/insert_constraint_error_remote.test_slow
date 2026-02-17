@@ -31,3 +31,7 @@ statement error
 INSERT INTO remote.insert_constraint_error.t VALUES (1, 20);
 ----
 Constraint Error: PostHog: Update execution failed
+
+# Teardown: keep shared remote catalog clean for following integration tests.
+statement ok
+DROP SCHEMA IF EXISTS remote.insert_constraint_error CASCADE;
