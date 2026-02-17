@@ -73,6 +73,7 @@ if(${BUILD_UNITTESTS})
     add_library_unity(test_duckhog_cpp OBJECT
         test/cpp/test_create_view_rewriter.cpp
         test/cpp/test_ctas_rewriter.cpp
+        test/cpp/test_partition_alter.cpp
         test/cpp/test_rename_table.cpp
         test/cpp/test_delete_rewriter.cpp
         test/cpp/test_update_rewriter.cpp
