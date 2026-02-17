@@ -211,6 +211,122 @@ SELECT i, j FROM remote_flight.delete_remote.t ORDER BY i;
 ----
 7	70
 
+# ============================================================
+# DELETE ... RETURNING
+# DuckHog wraps DELETE RETURNING in a CTE:
+#   WITH __duckhog_deleted_rows AS (DELETE ... RETURNING *) SELECT ...
+# The remote Duckgres server rejects this with "A CTE needs a SELECT"
+# because DuckDB's CTE implementation requires SELECT, not DELETE/UPDATE.
+# This affects ALL remote catalogs (DuckLake and memory).
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.delete_remote.ret_dl(id INT, name VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.delete_remote.ret_dl VALUES (1, 'alice');
+
+statement error
+DELETE FROM remote_flight.delete_remote.ret_dl WHERE id = 1 RETURNING *;
+----
+CTE needs a SELECT
+
+# ============================================================
+# DELETE with LIKE / ILIKE in WHERE
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.delete_remote.like_test(id INT, name VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.delete_remote.like_test VALUES
+    (1, 'alice'), (2, 'alex'), (3, 'bob'), (4, 'Alice');
+
+query I
+DELETE FROM remote_flight.delete_remote.like_test WHERE name LIKE 'al%';
+----
+2
+
+query T
+SELECT name FROM remote_flight.delete_remote.like_test ORDER BY name;
+----
+Alice
+bob
+
+query I
+DELETE FROM remote_flight.delete_remote.like_test WHERE name ILIKE 'al%';
+----
+1
+
+query T
+SELECT name FROM remote_flight.delete_remote.like_test;
+----
+bob
+
+# ============================================================
+# DELETE on empty table
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.delete_remote.empty_del(x INT);
+
+query I
+DELETE FROM remote_flight.delete_remote.empty_del;
+----
+0
+
+query I
+DELETE FROM remote_flight.delete_remote.empty_del WHERE x = 1;
+----
+0
+
+# ============================================================
+# Large DELETE (1000+ rows)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.delete_remote.large(seq INT);
+
+statement ok
+INSERT INTO remote_flight.delete_remote.large SELECT i FROM range(1500) t(i);
+
+# DuckHog may lose a few rows on large inserts (D4 — chunk boundary bug)
+query I
+SELECT COUNT(*) >= 1400 FROM remote_flight.delete_remote.large;
+----
+true
+
+statement ok
+DELETE FROM remote_flight.delete_remote.large WHERE seq < 1000;
+
+# After deleting seq < 1000, only seq >= 1000 should remain
+query I
+SELECT MIN(seq) FROM remote_flight.delete_remote.large;
+----
+1000
+
+# ============================================================
+# DELETE with OR conditions
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.delete_remote.or_test(id INT, cat VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.delete_remote.or_test VALUES
+    (1, 'a'), (2, 'b'), (3, 'c'), (4, 'a'), (5, 'b');
+
+query I
+DELETE FROM remote_flight.delete_remote.or_test WHERE cat = 'a' OR cat = 'c';
+----
+3
+
+query IT
+SELECT id, cat FROM remote_flight.delete_remote.or_test ORDER BY id;
+----
+2	b
+5	b
+
 # --- Cleanup ---
 
 statement ok

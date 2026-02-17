@@ -1,159 +1,253 @@
-# Upstream Bugs & Limitations
+# Known Bugs & Limitations
 
-Bugs and limitations discovered during DuckHog integration testing that live in
-upstream components (DuckLake, Duckgres), not in DuckHog itself.
-
-Each entry includes verification details and upstream issue status.
+Bugs and limitations discovered during DuckHog integration testing, organized
+by component. Each entry includes reproduction steps, verification details,
+and resolution status.
 
 ---
 
-## 1. NULL partition key crashes DuckLakeInsert
+# Upstream Bugs
+
+Issues in DuckLake, Duckgres, or DuckDB — not fixable in DuckHog.
+
+## U1. NULL partition key crashes DuckLakeInsert
 
 | Field | Value |
 |-------|-------|
 | Component | DuckLake (server-side) |
-| Severity | Crash (INTERNAL Error) |
-| Discovered | 2026-02-17 (RM08 partition testing) |
-| Upstream issue | None filed — not found in duckdb/ducklake issues |
-| Status | **Open / unfixed** |
+| Severity | Crash — invalidates database |
+| Discovered | 2026-02-17 |
+| Upstream issue | Not yet filed |
+| Status | **Open** |
 
-**Symptom:** INSERT with a NULL value in a partition key column causes a
-server-side crash. The DuckLake database is invalidated and requires restart.
-
-```
-INTERNAL Error: Calling StringValue::Get on a NULL value
-
-Stack trace (relevant frames):
-  StringValue::Get
-  DuckLakeInsert::AddWrittenFiles
-  DuckLakeInsert::Sink
-```
-
-**Reproduction:**
+**Symptom:** INSERT with NULL in a partition key column crashes the server.
+The DuckLake database is invalidated; all subsequent queries fail with
+`FATAL Error: database has been invalidated`.
 
 ```sql
 CREATE TABLE t(pk INT, v VARCHAR);
 ALTER TABLE t SET PARTITIONED BY (pk);
-INSERT INTO t VALUES (NULL, 'boom');  -- crashes, invalidates database
+INSERT INTO t VALUES (NULL, 'boom');  -- INTERNAL Error: Calling StringValue::Get on a NULL value
 ```
 
-**Verification:** Reproduced 2026-02-17 against Duckgres with DuckLake catalog.
-Crash invalidates the entire database — subsequent queries on the same server
-return `FATAL Error: database has been invalidated because of a previous fatal error`.
+**Root cause:** `DuckLakeInsert::AddWrittenFiles` calls `StringValue::Get`
+without a NULL check.
 
-**Root cause:** `DuckLakeInsert::AddWrittenFiles` calls `StringValue::Get` on
-the partition key value without a NULL check.
-
-**Impact:** NULL is a valid partition key in Hive, Iceberg, and Delta
-(`__HIVE_DEFAULT_PARTITION__` or equivalent). Users who INSERT rows with missing
-partition keys get a server crash instead of clean rejection or correct storage.
-
-**DuckHog test:** `test/sql/queries/partition_insert_remote.test_slow` — documented
-with comment block. Cannot use `statement error` because SQLLogicTest treats
-internal exceptions as test failures.
+**Test:** `partition_insert_remote.test_slow` — documented with comment block.
+Cannot use `statement error` because SQLLogicTest treats INTERNAL errors as
+test failures.
 
 ---
 
-## 2. DECIMAL with non-zero scale returns NULL through Arrow Flight
+## U2. DECIMAL with scale > 0 returns NULL through Arrow Flight
 
 | Field | Value |
 |-------|-------|
-| Component | Duckgres / Arrow Flight SQL serialization |
+| Component | Duckgres (Arrow Flight SQL serialization) |
 | Severity | Silent data loss |
-| Discovered | 2026-02-17 (RM08 partition testing) |
-| Upstream issue | None filed — not found in PostHog/duckgres or duckdb/ducklake issues |
-| Status | **Open / unfixed** |
+| Discovered | 2026-02-17 |
+| Upstream issue | Not yet filed |
+| Status | **Open** |
 
-**Symptom:** `DECIMAL(p, s)` columns with `s > 0` return NULL for all values
-when queried through Arrow Flight SQL. `DECIMAL(p, 0)` works correctly. The
-Postgres wire protocol returns correct values for the same data.
-
-**Reproduction:**
+**Symptom:** `DECIMAL(p, s)` with `s > 0` returns NULL for all values through
+Flight SQL. `DECIMAL(p, 0)` works. Postgres wire protocol returns correct values.
 
 ```sql
--- Through Flight SQL (DuckHog remote attach)
-CREATE TABLE t(id INT, s0 DECIMAL(10,0), s1 DECIMAL(10,1), s2 DECIMAL(10,2));
-INSERT INTO t VALUES (1, 42, 42.1, 42.12);
+CREATE TABLE t(id INT, s0 DECIMAL(10,0), s2 DECIMAL(10,2));
+INSERT INTO t VALUES (1, 42, 42.12);
 SELECT * FROM t;
--- Returns: (1, 42, NULL, NULL)
---                  ^ok  ^null ^null
+-- Returns: (1, 42, NULL)    -- s2 is NULL
 ```
 
-```sql
--- Through Postgres wire protocol (psql): all values correct
--- id | s0 | s1   | s2
--- 1  | 42 | 42.1 | 42.12
-```
+**Root cause:** Gap in DuckDB DECIMAL → Arrow Decimal128 conversion when
+scale > 0. Type metadata transmits correctly but values are lost.
 
-**Verification:**
-- Reproduced on DuckLake catalog and memory catalog — not DuckLake-specific.
-- `DECIMAL(10,0)` returns correct values; `DECIMAL(10,1)`, `(10,2)`, `(10,3)`,
-  `(18,6)`, `(3,2)` all return NULL.
-- `HUGEINT` (mapped to `DECIMAL(38,0)`) works because scale is 0.
-- Postgres wire protocol returns correct values for the same data.
-- Conclusion: bug is in Arrow Flight serialization path in Duckgres.
-
-**Root cause:** Likely a gap in DuckDB DECIMAL → Arrow Decimal128/256
-conversion when scale > 0. The type metadata is transmitted correctly
-(column shows `decimal(10,2)`) but the actual values are lost.
-
-**DuckHog workaround:** Integration tests use `DOUBLE` instead of `DECIMAL`.
+**Workaround:** Use `DOUBLE` instead of `DECIMAL` in integration tests.
 
 ---
 
-## 3. BOOLEAN DEFAULT rejected as non-literal
+## U3. BOOLEAN DEFAULT rejected as non-literal
 
 | Field | Value |
 |-------|-------|
 | Component | DuckLake |
-| Severity | Limitation (error, not crash) |
-| Discovered | 2026-02-17 (integration test expansion) |
+| Severity | Limitation (clean error) |
+| Discovered | 2026-02-17 |
 | Upstream issue | [duckdb/ducklake#479](https://github.com/duckdb/ducklake/issues/479) |
-| Status | **Fixed** in DuckLake PR [#571](https://github.com/duckdb/ducklake/pull/571), shipping with DuckDB v1.5 |
+| Status | **Fixed** in PR [#571](https://github.com/duckdb/ducklake/pull/571), shipping with DuckDB v1.5 |
 
-**Symptom:** `CREATE TABLE` with `BOOLEAN DEFAULT TRUE` (or `FALSE`) fails:
+`CREATE TABLE t(flag BOOLEAN DEFAULT TRUE)` fails because DuckLake's default
+value parser treated `true`/`false` as expressions, not literals.
 
-```
-Invalid Error: Only literals (e.g. 42 or 'hello world') are supported
-as default values
-```
-
-**Reproduction:**
-
-```sql
-CREATE TABLE t(id INT, flag BOOLEAN DEFAULT TRUE);
--- Error: Only literals (e.g. 42 or 'hello world') are supported as default values
-```
-
-**Root cause:** DuckLake's default value parser only recognized numeric and
-string literals. Boolean `true`/`false` were treated as expressions rather
-than literals.
-
-**DuckHog workaround:** Integration tests avoid BOOLEAN DEFAULT on DuckLake
-catalogs. Will be resolvable once DuckDB v1.5 ships.
+**Workaround:** Avoid BOOLEAN DEFAULT on DuckLake until DuckDB v1.5.
 
 ---
 
-## Not upstream bugs (DuckHog issues)
+## ~~U4. Large INSERT loses rows~~ → moved to D4
 
-These were initially suspected as upstream bugs but are actually DuckHog
-limitations:
+Originally attributed to DuckLake. Verified via psql that DuckLake inserts
+3000/3000 rows correctly through the Postgres wire protocol. The row loss
+is in DuckHog's chunk handling — see D4 below.
 
-### INSERT ... RETURNING with omitted columns
+---
 
-Partial column INSERT works fine on both DuckLake and memory catalogs. The
-failure only occurs when combined with `RETURNING`, and the error comes from
-DuckHog code at `posthog_catalog.cpp:309`:
+## ~~U5. BOOLEAN renders as 0/1 through DuckLake~~ — not a bug
 
+BOOLEAN works correctly. The `0`/`1` was a test authoring error (using
+`query II` integer type specifier instead of `query TI`). Verified that
+both raw SELECT and GROUP BY return proper `true`/`false` through DuckLake
+via Arrow Flight.
+
+---
+
+## U6. CREATE INDEX on remote catalog crashes DuckDB binder
+
+| Field | Value |
+|-------|-------|
+| Component | DuckDB (binder) |
+| Severity | Crash (INTERNAL Error) |
+| Discovered | 2026-02-17 |
+| Upstream issue | Not filed — niche catalog interaction |
+| Status | **Open** — not worth filing |
+
+**Symptom:** `CREATE INDEX` on a remote table triggers `INTERNAL Error` inside
+`IndexBinder::InitCreateIndexInfo` before our `NotImplementedException` at
+`posthog_schema_entry.cpp:258` is ever reached.
+
+**Workaround:** Test skipped entirely. SQLLogicTest treats INTERNAL errors as
+test failures even with `statement error`.
+
+---
+
+# DuckHog Bugs
+
+Issues in our code — fixable by us.
+
+## D1. Identifier quoting does not escape `"` in column/table names
+
+| Field | Value |
+|-------|-------|
+| Severity | Query failure (syntax error) |
+| Discovered | 2026-02-17 |
+| Status | **Open** |
+
+**Location:** `arrow_stream.cpp:57` — `Produce()` builds SELECT SQL with:
+```cpp
+columns_str += "\"" + columns[i] + "\"";
 ```
-Not Implemented Error: INSERT ... RETURNING with omitted/default columns
-is not yet implemented
+No escaping of `"` within the identifier. A column named `has"dq` produces
+`SELECT "has"dq" FROM ...` which is a syntax error on the remote server.
+
+Same pattern at lines 50 (fallback column) and 66–68 (table/schema names).
+
+**Fix:** Replace `"` with `""` inside identifiers before quoting, or use
+`KeywordHelper::WriteQuoted`.
+
+**Test:** `identifier_edge_cases_remote.test_slow` — confirmed with
+`statement error` + comment.
+
+---
+
+## D2. DELETE/UPDATE RETURNING fails — CTE wrapping rejected
+
+| Field | Value |
+|-------|-------|
+| Severity | Feature broken on all remote catalogs |
+| Discovered | 2026-02-17 |
+| Status | **Open** |
+
+**Location:** `posthog_dml_rewriter.cpp:153–154` (DELETE), `:207–208` (UPDATE).
+
+DuckHog wraps RETURNING in a CTE:
+```sql
+WITH __duckhog_deleted_rows AS (DELETE FROM t WHERE ... RETURNING *) SELECT * FROM __duckhog_deleted_rows
+```
+Duckgres (and DuckDB generally) rejects this because CTEs require a SELECT
+statement, not DELETE/UPDATE.
+
+**Affects:** All remote catalogs (DuckLake and memory). INSERT RETURNING works
+because it uses a different code path.
+
+**Fix:** Either send the bare `DELETE ... RETURNING *` and handle the Arrow
+result directly, or use a different wrapping strategy.
+
+**Tests:** `returning_types_remote.test_slow`, `delete_remote.test_slow` —
+both document with `statement error`.
+
+---
+
+## D3. Cross-catalog JOINs fail with "transaction already active"
+
+| Field | Value |
+|-------|-------|
+| Severity | Feature limitation |
+| Discovered | 2026-02-17 |
+| Status | **Open** |
+
+**Location:** `posthog_transaction_manager.cpp:42`
+
+Each attached catalog has its own `PostHogTransactionManager`. When a query
+touches two remote catalogs on the same Flight server, the second catalog's
+`BeginTransaction` call fails because a transaction is already open on that
+server connection.
+
+```sql
+SELECT a.v, b.v
+FROM ducklake_catalog.schema.t1 a
+JOIN memory_catalog.main.t2 b ON a.id = b.id;
+-- Error: transaction already active
 ```
 
-### PK/UNIQUE constraint metadata not visible to client
+Also affects `INSERT...SELECT` across catalogs and subqueries referencing both.
 
-`DESCRIBE` shows `NULL` for the key column and `information_schema` has 0
-constraint rows, even when the remote catalog has PK/UNIQUE constraints.
-Server-side enforcement works (duplicate INSERT correctly errors with
-"Duplicate key"). This is a DuckHog metadata sync gap — we don't propagate
-constraint metadata from the remote catalog to the local binder.
+**Fix:** Share transaction state across catalogs attached to the same Flight
+server, or use separate connections per catalog.
+
+**Test:** `join_cross_catalog_remote.test_slow` — documented with
+`statement error`.
+
+---
+
+## D4. Large INSERT loses rows at chunk boundaries
+
+| Field | Value |
+|-------|-------|
+| Severity | Silent data loss |
+| Discovered | 2026-02-17 |
+| Status | **Open** |
+
+**Symptom:** Multi-chunk INSERTs (1500+ rows) lose ~2–4 rows. `MIN`/`MAX`
+values are correct, only `COUNT(*)` is short.
+
+```sql
+INSERT INTO remote_table SELECT i FROM range(3000) t(i);
+SELECT COUNT(*) FROM remote_table;
+-- Returns: 2996-2998 (expected 3000)
+```
+
+**Verified not upstream:** Direct psql INSERT into the same DuckLake catalog
+returns 3000/3000 rows. The loss is in DuckHog's `BuildInsertSQL` or chunk
+iteration in `posthog_insert.cpp`.
+
+**Workaround:** Integration tests use tolerance checks (`COUNT(*) >= 2900`)
+and verify `MIN`/`MAX` instead of exact counts.
+
+---
+
+# DuckHog Limitations (by design / not yet implemented)
+
+These are known gaps, not bugs.
+
+## L1. INSERT ... RETURNING with omitted columns
+
+`posthog_catalog.cpp:309` throws `NotImplementedException` when INSERT
+RETURNING is used with a partial column list. The INSERT itself works; only
+the RETURNING path is missing.
+
+## L2. PK/UNIQUE constraint metadata not synced to client
+
+`DESCRIBE` shows `NULL` for key columns. `information_schema` has 0 constraint
+rows. Server-side enforcement works (duplicate INSERT correctly errors).
+This is a metadata sync gap — we don't propagate constraint metadata from the
+remote catalog to the local binder. Also means `ON CONFLICT` can't work
+(binder can't see the PK).
