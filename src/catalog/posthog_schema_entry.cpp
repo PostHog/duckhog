@@ -143,6 +143,14 @@ string RenderAddFieldSQL(const AddFieldInfo &info) {
 	return sql;
 }
 
+string RenderRenameTableSQL(const RenameTableInfo &info) {
+	string sql = RenderAlterTablePrefix(info);
+	sql += " RENAME TO ";
+	sql += QuoteIdent(info.new_table_name);
+	sql += ";";
+	return sql;
+}
+
 string RenderAlterTableSQL(const AlterInfo &info) {
 	auto &alter_table_info = info.Cast<AlterTableInfo>();
 	switch (alter_table_info.alter_table_type) {
@@ -150,6 +158,8 @@ string RenderAlterTableSQL(const AlterInfo &info) {
 		return RenderAddColumnSQL(info.Cast<AddColumnInfo>());
 	case AlterTableType::ADD_FIELD:
 		return RenderAddFieldSQL(info.Cast<AddFieldInfo>());
+	case AlterTableType::RENAME_TABLE:
+		return RenderRenameTableSQL(info.Cast<RenameTableInfo>());
 	default:
 		return info.ToString();
 	}
@@ -315,7 +325,14 @@ void PostHogSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) 
 	auto &client = posthog_catalog_.GetFlightClient();
 	client.ExecuteUpdate(sql, remote_txn_id);
 
-	auto qualified = QualifyTable(remote_catalog, name, info.name);
+	// For RENAME, the table now lives at the new name on the remote server.
+	auto &alter_table_info = info.Cast<AlterTableInfo>();
+	string effective_table_name = info.name;
+	if (alter_table_info.alter_table_type == AlterTableType::RENAME_TABLE) {
+		effective_table_name = info.Cast<RenameTableInfo>().new_table_name;
+	}
+
+	auto qualified = QualifyTable(remote_catalog, name, effective_table_name);
 	auto arrow_schema = client.GetQuerySchema("SELECT * FROM " + qualified, remote_txn_id);
 
 	vector<string> column_names;
@@ -323,7 +340,7 @@ void PostHogSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) 
 	PopulateTableSchemaFromArrow(DBConfig::GetConfig(posthog_catalog_.GetDatabase()), arrow_schema, column_names,
 	                             column_types);
 
-	auto create_info = make_uniq<CreateTableInfo>(*this, info.name);
+	auto create_info = make_uniq<CreateTableInfo>(*this, effective_table_name);
 	for (idx_t i = 0; i < column_names.size(); i++) {
 		create_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
 	}
@@ -331,7 +348,7 @@ void PostHogSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) 
 
 	std::lock_guard<std::mutex> lock(tables_mutex_);
 	table_cache_.erase(info.name);
-	table_cache_[info.name] =
+	table_cache_[effective_table_name] =
 	    make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, std::move(arrow_schema));
 	tables_loaded_ = true;
 	tables_loaded_at_ = std::chrono::steady_clock::now();

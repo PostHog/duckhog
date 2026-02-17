@@ -1,0 +1,196 @@
+# name: test/sql/queries/rename_table_remote.test_slow
+# description: ALTER TABLE RENAME TO on remote table (RM07)
+# group: [queries]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.rename_rm07 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.rename_rm07;
+
+statement ok
+CREATE TABLE remote_flight.rename_rm07.t_old(i INT, j INT);
+
+statement ok
+INSERT INTO remote_flight.rename_rm07.t_old VALUES (1, 10), (2, 20), (3, 30);
+
+# --- Basic RENAME ---
+
+statement ok
+ALTER TABLE remote_flight.rename_rm07.t_old RENAME TO t_new;
+
+# --- Data survives rename ---
+
+query II
+SELECT i, j FROM remote_flight.rename_rm07.t_new ORDER BY i;
+----
+1	10
+2	20
+3	30
+
+# --- Query old name fails ---
+
+statement error
+SELECT * FROM remote_flight.rename_rm07.t_old;
+----
+does not exist
+
+# --- Rename back to original name ---
+
+statement ok
+ALTER TABLE remote_flight.rename_rm07.t_new RENAME TO t_old;
+
+query II
+SELECT i, j FROM remote_flight.rename_rm07.t_old ORDER BY i;
+----
+1	10
+2	20
+3	30
+
+# --- Rename with IF EXISTS ---
+
+statement ok
+ALTER TABLE IF EXISTS remote_flight.rename_rm07.t_old RENAME TO t_exists;
+
+query II
+SELECT i, j FROM remote_flight.rename_rm07.t_exists ORDER BY i;
+----
+1	10
+2	20
+3	30
+
+# --- IF EXISTS on non-existent table is no-op ---
+
+statement ok
+ALTER TABLE IF EXISTS remote_flight.rename_rm07.no_such_table RENAME TO whatever;
+
+# --- INSERT after rename ---
+
+statement ok
+INSERT INTO remote_flight.rename_rm07.t_exists VALUES (4, 40);
+
+query II
+SELECT i, j FROM remote_flight.rename_rm07.t_exists ORDER BY i;
+----
+1	10
+2	20
+3	30
+4	40
+
+# --- Rename non-existent table (without IF EXISTS) errors ---
+
+statement error
+ALTER TABLE remote_flight.rename_rm07.no_such_table RENAME TO whatever;
+----
+does not exist
+
+# --- Rename to existing table name errors ---
+
+statement ok
+CREATE TABLE remote_flight.rename_rm07.t_collision(x INT);
+
+statement error
+ALTER TABLE remote_flight.rename_rm07.t_exists RENAME TO t_collision;
+----
+already exists
+
+# --- Rename A→B, then create new table A (cache correctness) ---
+
+statement ok
+ALTER TABLE remote_flight.rename_rm07.t_exists RENAME TO t_moved;
+
+statement ok
+CREATE TABLE remote_flight.rename_rm07.t_exists(k INT);
+
+statement ok
+INSERT INTO remote_flight.rename_rm07.t_exists VALUES (99);
+
+query I
+SELECT k FROM remote_flight.rename_rm07.t_exists;
+----
+99
+
+query II
+SELECT i, j FROM remote_flight.rename_rm07.t_moved ORDER BY i;
+----
+1	10
+2	20
+3	30
+4	40
+
+# --- Successive renames A→B→C ---
+
+statement ok
+ALTER TABLE remote_flight.rename_rm07.t_moved RENAME TO t_step1;
+
+statement ok
+ALTER TABLE remote_flight.rename_rm07.t_step1 RENAME TO t_step2;
+
+query II
+SELECT i, j FROM remote_flight.rename_rm07.t_step2 ORDER BY i;
+----
+1	10
+2	20
+3	30
+4	40
+
+# --- UPDATE after rename ---
+
+statement ok
+UPDATE remote_flight.rename_rm07.t_step2 SET j = 999 WHERE i = 1;
+
+query II
+SELECT i, j FROM remote_flight.rename_rm07.t_step2 ORDER BY i;
+----
+1	999
+2	20
+3	30
+4	40
+
+# --- DELETE after rename ---
+
+query I
+DELETE FROM remote_flight.rename_rm07.t_step2 WHERE i = 4;
+----
+1
+
+query II
+SELECT i, j FROM remote_flight.rename_rm07.t_step2 ORDER BY i;
+----
+1	999
+2	20
+3	30
+
+# --- Multiple column types survive rename ---
+
+statement ok
+CREATE TABLE remote_flight.rename_rm07.t_types(a INT, b VARCHAR, c BOOLEAN, d DOUBLE);
+
+statement ok
+INSERT INTO remote_flight.rename_rm07.t_types VALUES (1, 'hello', true, 3.14);
+
+statement ok
+ALTER TABLE remote_flight.rename_rm07.t_types RENAME TO t_types_renamed;
+
+query ITIR
+SELECT a, b, c, d FROM remote_flight.rename_rm07.t_types_renamed;
+----
+1	hello	1	3.14
+
+# --- Cleanup ---
+
+statement ok
+DROP SCHEMA remote_flight.rename_rm07 CASCADE;
