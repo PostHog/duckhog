@@ -1,6 +1,6 @@
 # SQL Roadmap Suite Plan (DuckHog-Only, DuckLake-Referenced)
 
-Last updated: `2026-02-16`
+Last updated: `2026-02-17`
 
 ## Goal
 
@@ -50,7 +50,6 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- [`rm07_rename_table_remote.test_slow`](sql/roadmap/rm07_rename_table_remote.test_slow) — [#30](https://github.com/PostHog/duckhog/issues/30)
 - [`rm08_partition_insert_remote.test_slow`](sql/roadmap/rm08_partition_insert_remote.test_slow) — [#31](https://github.com/PostHog/duckhog/issues/31)
 - [`rm09_merge_remote.test_slow`](sql/roadmap/rm09_merge_remote.test_slow) — [#32](https://github.com/PostHog/duckhog/issues/32)
 - [`rm10_time_travel_remote.test_slow`](sql/roadmap/rm10_time_travel_remote.test_slow) — [#33](https://github.com/PostHog/duckhog/issues/33)
@@ -78,6 +77,7 @@ Graduated targets (now part of normal integration suite):
 - [`truncate_remote.test_slow`](sql/queries/truncate_remote.test_slow) (RM04) — desugared to DELETE by DuckDB's grammar
 - [`ctas_remote.test_slow`](sql/queries/ctas_remote.test_slow) (RM05)
 - [`create_view_remote.test_slow`](sql/queries/create_view_remote.test_slow) (RM06)
+- [`rename_table_remote.test_slow`](sql/queries/rename_table_remote.test_slow) (RM07)
 
 ## Design Rules
 
