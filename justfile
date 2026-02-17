@@ -116,12 +116,52 @@ shell: build
 verify: build
     ./build/release/duckdb -c "SELECT extension_name, loaded, extension_version FROM duckdb_extensions() WHERE extension_name = 'duckhog';"
 
-# === Issues ===
+# === Github ===
 
 # Claim a GitHub issue: assign to yourself and label status:in-progress
-[group('dev')]
+[group('github')]
 claim issue:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    issue_json=$(gh issue view {{issue}} --json assignees,labels,state)
+    state=$(echo "$issue_json" | jq -r '.state')
+    if [ "$state" != "OPEN" ]; then
+        echo "ERROR: Issue #{{issue}} is $state, not OPEN" >&2
+        exit 1
+    fi
+    if echo "$issue_json" | jq -e '.assignees | length > 0' > /dev/null; then
+        echo "ERROR: Issue #{{issue}} already has assignees:" >&2
+        echo "$issue_json" | jq -r '.assignees[].login' >&2
+        exit 1
+    fi
+    if echo "$issue_json" | jq -e '[.labels[].name] | any(. == "status:in-progress")' > /dev/null; then
+        echo "ERROR: Issue #{{issue}} already has label status:in-progress" >&2
+        exit 1
+    fi
     gh issue edit {{issue}} --add-assignee @me --add-label status:in-progress
+
+# List open issues grouped by claimed/unclaimed
+[group('github')]
+list-issues:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    issues_json=$(gh issue list --state open --limit 200 --json number,title,assignees,labels)
+    claimed=$(echo "$issues_json" | jq '[.[] | select(.assignees | length > 0)]')
+    unclaimed=$(echo "$issues_json" | jq '[.[] | select(.assignees | length == 0)]')
+    fmt='(["#","TITLE","ASSIGNEES","LABELS"] | @tsv), (.[] | [("#" + (.number|tostring)), .title, ([.assignees[].login] | join(",")), ([.labels[].name] | join(","))] | @tsv)'
+    echo "=== Claimed ==="
+    if [ "$(echo "$claimed" | jq 'length')" -eq 0 ]; then
+        echo "(none)"
+    else
+        echo "$claimed" | jq -r "$fmt" | column -t -s $'\t'
+    fi
+    echo ""
+    echo "=== Unclaimed ==="
+    if [ "$(echo "$unclaimed" | jq 'length')" -eq 0 ]; then
+        echo "(none)"
+    else
+        echo "$unclaimed" | jq -r "$fmt" | column -t -s $'\t'
+    fi
 
 # === Setup ===
 
