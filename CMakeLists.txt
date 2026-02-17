@@ -73,6 +73,7 @@ if(${BUILD_UNITTESTS})
     add_library_unity(test_duckhog_cpp OBJECT
         test/cpp/test_ctas_rewriter.cpp
         test/cpp/test_delete_rewriter.cpp
+        test/cpp/test_update_rewriter.cpp
     )
     target_include_directories(test_duckhog_cpp PRIVATE src/include src
         ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/catch

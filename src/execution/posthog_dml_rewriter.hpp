@@ -19,6 +19,8 @@ struct PostHogRewrittenUpdateSQL {
 	bool has_returning_clause = false;
 };
 
+PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(const std::string &query, const std::string &attached_catalog,
+                                                 const std::string &remote_catalog);
 PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(ClientContext &context, const std::string &attached_catalog,
                                                  const std::string &remote_catalog);
 
