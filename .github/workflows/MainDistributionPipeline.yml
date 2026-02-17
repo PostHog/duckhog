@@ -131,6 +131,7 @@ jobs:
       FLIGHT_PORT: 8815
       DUCKHOG_USER: postgres
       DUCKHOG_PASSWORD: postgres
+      DUCKGRES_ROOT: ${{ github.workspace }}/duckgres
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,10 +145,11 @@ jobs:
       - name: Download DuckDB CLI
         run: |
           wget -q https://github.com/duckdb/duckdb/releases/download/v1.4.4/duckdb_cli-linux-amd64.zip
-          unzip -oq duckdb_cli-linux-amd64.zip
-          chmod +x duckdb
+          rm -rf /tmp/duckdb-cli
+          mkdir -p /tmp/duckdb-cli
+          unzip -oq duckdb_cli-linux-amd64.zip -d /tmp/duckdb-cli
           mkdir -p build/release
-          mv duckdb build/release/
+          install -m 0755 /tmp/duckdb-cli/duckdb build/release/duckdb
 
       - name: Download extension artifact
         uses: actions/download-artifact@v4
@@ -157,7 +159,7 @@ jobs:
 
       - name: Start Duckgres control-plane
         run: |
-          DUCKGRES_ROOT=$GITHUB_WORKSPACE/duckgres ./scripts/test-servers.sh start --background --seed
+          ./scripts/test-servers.sh start --background --seed
 
       - name: Run SQLLogicTests
         run: |
