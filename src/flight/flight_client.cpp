@@ -39,18 +39,20 @@ int64_t ElapsedMillis(const SteadyClock::time_point &started_at) {
 
 class SessionTokenCaptureMiddleware : public arrow::flight::ClientMiddleware {
 public:
-	explicit SessionTokenCaptureMiddleware(std::string *session_token) : session_token_(session_token) {
+	SessionTokenCaptureMiddleware(std::string *session_token, std::mutex *session_token_mutex)
+	    : session_token_(session_token), session_token_mutex_(session_token_mutex) {
 	}
 
 	void SendingHeaders(arrow::flight::AddCallHeaders * /*outgoing_headers*/) override {
 	}
 
 	void ReceivedHeaders(const arrow::flight::CallHeaders &incoming_headers) override {
-		if (!session_token_) {
+		if (!session_token_ || !session_token_mutex_) {
 			return;
 		}
 		auto token = ExtractSessionToken(incoming_headers);
 		if (!token.empty()) {
+			std::lock_guard<std::mutex> lock(*session_token_mutex_);
 			*session_token_ = std::move(token);
 		}
 	}
@@ -60,20 +62,23 @@ public:
 
 private:
 	std::string *session_token_;
+	std::mutex *session_token_mutex_;
 };
 
 class SessionTokenCaptureFactory : public arrow::flight::ClientMiddlewareFactory {
 public:
-	explicit SessionTokenCaptureFactory(std::string *session_token) : session_token_(session_token) {
+	SessionTokenCaptureFactory(std::string *session_token, std::mutex *session_token_mutex)
+	    : session_token_(session_token), session_token_mutex_(session_token_mutex) {
 	}
 
 	void StartCall(const arrow::flight::CallInfo & /*info*/,
 	               std::unique_ptr<arrow::flight::ClientMiddleware> *middleware) override {
-		*middleware = std::make_unique<SessionTokenCaptureMiddleware>(session_token_);
+		*middleware = std::make_unique<SessionTokenCaptureMiddleware>(session_token_, session_token_mutex_);
 	}
 
 private:
 	std::string *session_token_;
+	std::mutex *session_token_mutex_;
 };
 
 std::string Base64Encode(const std::string &input) {
@@ -174,7 +179,8 @@ PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std:
 
 	// Secure by default: verify server certificates unless explicitly overridden.
 	options.disable_server_verification = tls_skip_verify;
-	options.middleware.emplace_back(std::make_shared<SessionTokenCaptureFactory>(&session_token_));
+	options.middleware.emplace_back(
+	    std::make_shared<SessionTokenCaptureFactory>(&session_token_, &session_token_mutex_));
 
 	// Connect to the Flight server
 	auto client_result = arrow::flight::FlightClient::Connect(location, options);
@@ -195,14 +201,20 @@ PostHogFlightClient::~PostHogFlightClient() {
 	BestEffortCloseSessionLocked();
 }
 
+std::string PostHogFlightClient::GetSessionTokenSnapshot() const {
+	std::lock_guard<std::mutex> lock(session_token_mutex_);
+	return session_token_;
+}
+
 bool PostHogFlightClient::ShouldRetryMetadataWithFreshSession(const arrow::Status &status) const {
-	if (session_token_.empty()) {
+	if (GetSessionTokenSnapshot().empty()) {
 		return false;
 	}
 	return IsSessionTokenRetryableStatus(status);
 }
 
 void PostHogFlightClient::InvalidateSessionTokenLocked(const char *reason, const arrow::Status *status) {
+	std::lock_guard<std::mutex> token_lock(session_token_mutex_);
 	if (session_token_.empty()) {
 		return;
 	}
@@ -214,12 +226,19 @@ void PostHogFlightClient::InvalidateSessionTokenLocked(const char *reason, const
 	session_token_.clear();
 }
 
+void PostHogFlightClient::InvalidateSessionTokenIfRetryableLocked(const char *reason, const arrow::Status &status) {
+	if (!IsSessionTokenRetryableStatus(status)) {
+		return;
+	}
+	InvalidateSessionTokenLocked(reason, &status);
+}
+
 void PostHogFlightClient::BestEffortCloseSessionLocked() {
 	if (!sql_client_) {
 		return;
 	}
 
-	if (!session_token_.empty()) {
+	if (!GetSessionTokenSnapshot().empty()) {
 		auto close_result = sql_client_->CloseSession(GetCallOptions(), arrow::flight::CloseSessionRequest());
 		if (!close_result.ok()) {
 			POSTHOG_LOG_DEBUG("Flight CloseSession skipped: %s", close_result.status().ToString().c_str());
@@ -292,13 +311,14 @@ arrow::Status PostHogFlightClient::Ping() {
 
 arrow::flight::FlightCallOptions PostHogFlightClient::GetCallOptions() const {
 	arrow::flight::FlightCallOptions options;
+	auto session_token = GetSessionTokenSnapshot();
 
 	// Add HTTP Basic credentials (username/password) for each request.
 	if (!user_.empty() && !password_.empty()) {
 		options.headers.emplace_back("authorization", "Basic " + Base64Encode(user_ + ":" + password_));
 	}
-	if (!session_token_.empty()) {
-		options.headers.emplace_back(kSessionHeader, session_token_);
+	if (!session_token.empty()) {
+		options.headers.emplace_back(kSessionHeader, session_token);
 	}
 
 	// Control new allocations Arrow performs while decoding.
@@ -329,6 +349,7 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
 		info_result = sql_client_->Execute(GetCallOptions(), sql);
 	}
 	if (!info_result.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("execute query", info_result.status());
 		throw std::runtime_error("PostHog: Query execution failed: " + info_result.status().ToString());
 	}
 
@@ -342,6 +363,7 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
 		// Get the result stream for this endpoint
 		auto stream_result = sql_client_->DoGet(GetCallOptions(), endpoint.ticket);
 		if (!stream_result.ok()) {
+			InvalidateSessionTokenIfRetryableLocked("execute query fetch results", stream_result.status());
 			throw std::runtime_error("PostHog: Failed to fetch results: " + stream_result.status().ToString());
 		}
 
@@ -351,6 +373,7 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
 		while (true) {
 			auto chunk_result = stream->Next();
 			if (!chunk_result.ok()) {
+				InvalidateSessionTokenIfRetryableLocked("execute query read batch", chunk_result.status());
 				throw std::runtime_error("PostHog: Failed to read result batch: " + chunk_result.status().ToString());
 			}
 
@@ -407,6 +430,7 @@ int64_t PostHogFlightClient::ExecuteUpdate(const std::string &sql, const std::op
 		result = sql_client_->ExecuteUpdate(call_options, sql);
 	}
 	if (!result.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("execute update", result.status());
 		ThrowExecuteUpdateError(result.status());
 	}
 
@@ -429,11 +453,12 @@ PostHogFlightClient::ExecuteQueryStream(const std::string &sql, const std::optio
 		info_result = sql_client_->Execute(GetCallOptions(), sql);
 	}
 	if (!info_result.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("execute query stream", info_result.status());
 		throw std::runtime_error("PostHog: Query execution failed: " + info_result.status().ToString());
 	}
 
 	return std::make_unique<PostHogFlightQueryStream>(*sql_client_, client_mutex_, GetCallOptions(),
-	                                                  std::move(*info_result));
+	                                                  std::move(*info_result), &session_token_, &session_token_mutex_);
 }
 
 std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::string &sql,
@@ -492,6 +517,7 @@ TransactionId PostHogFlightClient::BeginTransaction() {
 	auto call_options = GetCallOptions();
 	auto result = sql_client_->BeginTransaction(call_options);
 	if (!result.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("begin transaction", result.status());
 		throw std::runtime_error("PostHog: BeginTransaction failed: " + result.status().ToString());
 	}
 	return result->transaction_id();
@@ -508,6 +534,7 @@ void PostHogFlightClient::CommitTransaction(const TransactionId &txn_id) {
 	arrow::flight::sql::Transaction txn(txn_id);
 	auto status = sql_client_->Commit(call_options, txn);
 	if (!status.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("commit transaction", status);
 		throw std::runtime_error("PostHog: CommitTransaction failed: " + status.ToString());
 	}
 }
@@ -523,6 +550,7 @@ void PostHogFlightClient::RollbackTransaction(const TransactionId &txn_id) {
 	arrow::flight::sql::Transaction txn(txn_id);
 	auto status = sql_client_->Rollback(call_options, txn);
 	if (!status.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("rollback transaction", status);
 		throw std::runtime_error("PostHog: RollbackTransaction failed: " + status.ToString());
 	}
 }
@@ -948,8 +976,18 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 
 PostHogFlightQueryStream::PostHogFlightQueryStream(arrow::flight::sql::FlightSqlClient &client,
                                                    std::mutex &client_mutex, arrow::flight::FlightCallOptions options,
-                                                   std::unique_ptr<arrow::flight::FlightInfo> info)
-    : client_(client), client_mutex_(client_mutex), options_(std::move(options)), info_(std::move(info)) {
+                                                   std::unique_ptr<arrow::flight::FlightInfo> info,
+                                                   std::string *session_token, std::mutex *session_token_mutex)
+    : client_(client), client_mutex_(client_mutex), options_(std::move(options)), info_(std::move(info)),
+      session_token_(session_token), session_token_mutex_(session_token_mutex) {
+}
+
+void PostHogFlightQueryStream::InvalidateSessionTokenIfRetryable(const arrow::Status &status) {
+	if (!session_token_ || !session_token_mutex_ || !IsSessionTokenRetryableStatus(status)) {
+		return;
+	}
+	std::lock_guard<std::mutex> lock(*session_token_mutex_);
+	session_token_->clear();
 }
 
 arrow::Status PostHogFlightQueryStream::OpenReader() {
@@ -965,6 +1003,7 @@ arrow::Status PostHogFlightQueryStream::OpenReader() {
 	std::lock_guard<std::mutex> lock(client_mutex_);
 	auto stream_result = client_.DoGet(options_, info_->endpoints()[endpoint_index_].ticket);
 	if (!stream_result.ok()) {
+		InvalidateSessionTokenIfRetryable(stream_result.status());
 		return stream_result.status();
 	}
 	reader_ = std::move(*stream_result);
@@ -1006,6 +1045,7 @@ arrow::Result<arrow::flight::FlightStreamChunk> PostHogFlightQueryStream::Next()
 		}
 		auto chunk_result = reader_->Next();
 		if (!chunk_result.ok()) {
+			InvalidateSessionTokenIfRetryable(chunk_result.status());
 			return chunk_result.status();
 		}
 		auto chunk = *chunk_result;

@@ -34,7 +34,8 @@ struct PostHogDbSchemaInfo {
 class PostHogFlightQueryStream {
 public:
 	PostHogFlightQueryStream(arrow::flight::sql::FlightSqlClient &client, std::mutex &client_mutex,
-	                         arrow::flight::FlightCallOptions options, std::unique_ptr<arrow::flight::FlightInfo> info);
+	                         arrow::flight::FlightCallOptions options, std::unique_ptr<arrow::flight::FlightInfo> info,
+	                         std::string *session_token, std::mutex *session_token_mutex);
 
 	arrow::Result<std::shared_ptr<arrow::Schema>> GetSchema();
 	arrow::Result<arrow::flight::FlightStreamChunk> Next();
@@ -47,8 +48,11 @@ private:
 	std::unique_ptr<arrow::flight::FlightStreamReader> reader_;
 	size_t endpoint_index_ = 0;
 	std::shared_ptr<arrow::Schema> schema_;
+	std::string *session_token_ = nullptr;
+	std::mutex *session_token_mutex_ = nullptr;
 
 	arrow::Status OpenReader();
+	void InvalidateSessionTokenIfRetryable(const arrow::Status &status);
 };
 
 class PostHogFlightClient {
@@ -141,6 +145,7 @@ private:
 	std::string user_;
 	std::string password_;
 	std::string session_token_;
+	mutable std::mutex session_token_mutex_;
 	bool authenticated_ = false;
 
 	// Arrow Flight clients
@@ -151,8 +156,10 @@ private:
 
 	// Get call options with authentication headers
 	arrow::flight::FlightCallOptions GetCallOptions() const;
+	std::string GetSessionTokenSnapshot() const;
 	bool ShouldRetryMetadataWithFreshSession(const arrow::Status &status) const;
 	void InvalidateSessionTokenLocked(const char *reason, const arrow::Status *status = nullptr);
+	void InvalidateSessionTokenIfRetryableLocked(const char *reason, const arrow::Status &status);
 	void BestEffortCloseSessionLocked();
 };
 
