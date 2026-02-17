@@ -71,6 +71,7 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME}
 # C++ unit tests (compiled into DuckDB's unittest binary via ALL_OBJECT_FILES)
 if(${BUILD_UNITTESTS})
     add_library_unity(test_duckhog_cpp OBJECT
+        test/cpp/test_create_view_rewriter.cpp
         test/cpp/test_ctas_rewriter.cpp
         test/cpp/test_delete_rewriter.cpp
         test/cpp/test_update_rewriter.cpp
