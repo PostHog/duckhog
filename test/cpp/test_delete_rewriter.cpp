@@ -371,3 +371,81 @@ TEST_CASE("Delete rewriter - many AND conditions", "[duckhog][dml-rewriter][dele
 	REQUIRE(result.non_returning_sql.find("ducklake") != string::npos);
 	REQUIRE(result.non_returning_sql.find("c49") != string::npos);
 }
+
+// --- TRUNCATE (desugared to DELETE by DuckDB parser) ---
+
+TEST_CASE("Delete rewriter - TRUNCATE TABLE basic", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE remote_flight.myschema.t", ATTACHED, REMOTE);
+
+	REQUIRE(result.non_returning_sql == "DELETE FROM ducklake.myschema.t");
+	REQUIRE_FALSE(result.has_returning_clause);
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE without TABLE keyword", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE remote_flight.myschema.t", ATTACHED, REMOTE);
+
+	REQUIRE(result.non_returning_sql == "DELETE FROM ducklake.myschema.t");
+	REQUIRE_FALSE(result.has_returning_clause);
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE catalog rewrite", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE remote_flight.s.t", ATTACHED, REMOTE);
+
+	REQUIRE(result.non_returning_sql.find("remote_flight") == string::npos);
+	REQUIRE(result.non_returning_sql.find("ducklake") != string::npos);
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE bare table name", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE t", ATTACHED, REMOTE);
+
+	REQUIRE(result.non_returning_sql == "DELETE FROM t");
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE produces no WHERE clause", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE remote_flight.s.t", ATTACHED, REMOTE);
+
+	REQUIRE(result.non_returning_sql.find("WHERE") == string::npos);
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE has no returning clause", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE remote_flight.s.t", ATTACHED, REMOTE);
+
+	REQUIRE_FALSE(result.has_returning_clause);
+	// returning_sql is still populated (CTE wrapper over DELETE) for consistency
+	REQUIRE(result.returning_sql.find("__duckhog_deleted_rows") != string::npos);
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE with quoted identifiers", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE remote_flight.\"my schema\".\"my table\"", ATTACHED, REMOTE);
+
+	REQUIRE(result.non_returning_sql.find("remote_flight") == string::npos);
+	REQUIRE(result.non_returning_sql.find("ducklake") != string::npos);
+	REQUIRE(result.non_returning_sql.find("my schema") != string::npos);
+	REQUIRE(result.non_returning_sql.find("my table") != string::npos);
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE external catalog throws", "[duckhog][dml-rewriter][delete][truncate]") {
+	REQUIRE_THROWS_AS(RewriteRemoteDeleteSQL("TRUNCATE TABLE some_other_catalog.s.t", ATTACHED, REMOTE),
+	                  BinderException);
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE trailing semicolon stripped", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE remote_flight.s.t;", ATTACHED, REMOTE);
+
+	REQUIRE(result.non_returning_sql.back() != ';');
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE case insensitive catalog", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE REMOTE_FLIGHT.myschema.t", ATTACHED, REMOTE);
+
+	REQUIRE(result.non_returning_sql.find("REMOTE_FLIGHT") == string::npos);
+	REQUIRE(result.non_returning_sql.find("remote_flight") == string::npos);
+	REQUIRE(result.non_returning_sql.find("ducklake") != string::npos);
+}
+
+TEST_CASE("Delete rewriter - TRUNCATE with alias", "[duckhog][dml-rewriter][delete][truncate]") {
+	auto result = RewriteRemoteDeleteSQL("TRUNCATE TABLE remote_flight.s.t AS x", ATTACHED, REMOTE);
+
+	REQUIRE(result.non_returning_sql.find("remote_flight") == string::npos);
+	REQUIRE(result.non_returning_sql.find("ducklake") != string::npos);
+}

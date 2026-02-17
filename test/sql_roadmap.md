@@ -50,7 +50,6 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- [`rm04_truncate_remote.test_slow`](sql/roadmap/rm04_truncate_remote.test_slow) — [#27](https://github.com/PostHog/duckhog/issues/27)
 - [`rm05_ctas_remote.test_slow`](sql/roadmap/rm05_ctas_remote.test_slow) — [#28](https://github.com/PostHog/duckhog/issues/28)
 - [`rm06_create_view_remote.test_slow`](sql/roadmap/rm06_create_view_remote.test_slow) — [#29](https://github.com/PostHog/duckhog/issues/29)
 - [`rm07_rename_table_remote.test_slow`](sql/roadmap/rm07_rename_table_remote.test_slow) — [#30](https://github.com/PostHog/duckhog/issues/30)
@@ -78,6 +77,7 @@ Graduated targets (now part of normal integration suite):
 - [`insert_default_values_remote.test_slow`](sql/queries/insert_default_values_remote.test_slow) (RM18)
 - [`insert_returning_remote.test_slow`](sql/queries/insert_returning_remote.test_slow) (RM15)
 - [`delete_remote.test_slow`](sql/queries/delete_remote.test_slow) (RM03)
+- [`truncate_remote.test_slow`](sql/queries/truncate_remote.test_slow) (RM04) — desugared to DELETE by DuckDB's grammar
 
 ## Design Rules
 
