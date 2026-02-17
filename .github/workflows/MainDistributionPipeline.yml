@@ -142,14 +142,9 @@ jobs:
           repository: PostHog/duckgres
           path: duckgres
 
-      - name: Download DuckDB CLI
+      - name: Build unittest runner
         run: |
-          wget -q https://github.com/duckdb/duckdb/releases/download/v1.4.4/duckdb_cli-linux-amd64.zip
-          rm -rf /tmp/duckdb-cli
-          mkdir -p /tmp/duckdb-cli
-          unzip -oq duckdb_cli-linux-amd64.zip -d /tmp/duckdb-cli
-          mkdir -p build/release
-          install -m 0755 /tmp/duckdb-cli/duckdb build/release/duckdb
+          GEN=ninja make release
 
       - name: Download extension artifact
         uses: actions/download-artifact@v4
@@ -164,16 +159,10 @@ jobs:
       - name: Run SQLLogicTests
         run: |
           eval "$(./scripts/test-servers.sh env)"
-          EXT_PATH="build/release/extension/duckhog/duckhog.duckdb_extension"
-
-          # Run basic_select tests
-          ./build/release/duckdb -unsigned -cmd "LOAD '$EXT_PATH';" < test/sql/queries/basic_select.test_slow
-
-          # Run tables tests
-          ./build/release/duckdb -unsigned -cmd "LOAD '$EXT_PATH';" < test/sql/queries/tables.test_slow
-
-          # Run projection tests
-          ./build/release/duckdb -unsigned -cmd "LOAD '$EXT_PATH';" < test/sql/queries/projection.test_slow
+          ./build/release/test/unittest \
+            "test/sql/queries/basic_select.test_slow" \
+            "test/sql/queries/tables.test_slow" \
+            "test/sql/queries/projection.test_slow"
 
       - name: Stop Duckgres control-plane
         if: always()
