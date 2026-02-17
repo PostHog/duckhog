@@ -46,7 +46,7 @@ gh api --paginate "/repos/owner/repo/issues?state=open&per_page=100" | jq -s '
 
 5. Apply gate behavior:
 - `CREATE`: create issue and continue task against the created issue.
-- `CLAIM`: assign actor and set labels, then continue task against the claimed issue.
+- `CLAIM`: ensure actor assignment and labels, then continue task against the claimed issue. If the issue is already assigned to `ACTOR`, skip re-assigning.
 - `ABORT_IN_PROGRESS`: stop task and hand off only when the matched issue is in progress and not assigned to the current actor.
 - `ABORT_UNCERTAIN`: stop task and request human triage.
 6. When creating the PR for the task, reference the issue in the PR description using a closing keyword (for example: `Closes #$ISSUE`).
@@ -87,7 +87,7 @@ Ownership rule:
 - Create issue:
   - `gh api -X POST "/repos/$REPO/issues" -f "title=$TASK_TITLE" -F "body=@$TASK_BODY_FILE"`
 - Claim issue:
-  - `gh api -X POST "/repos/$REPO/issues/$ISSUE/assignees" -f "assignees[]=$ACTOR"`
+  - `gh api "/repos/$REPO/issues/$ISSUE" --jq '.assignees[]?.login' | grep -Fxq "$ACTOR" || gh api -X POST "/repos/$REPO/issues/$ISSUE/assignees" -f "assignees[]=$ACTOR"`
   - `gh api -X POST "/repos/$REPO/issues/$ISSUE/labels" -f "labels[]=status:in-progress" || true`
   - `gh api -X DELETE "/repos/$REPO/issues/$ISSUE/labels/status:todo" >/dev/null 2>&1 || true`
 
