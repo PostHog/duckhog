@@ -1,0 +1,33 @@
+# name: test/sql/unit/connection/auth.test
+# description: Authentication parameter validation
+# group: [connection]
+
+require duckhog
+
+# Missing user/password should fail
+statement error
+ATTACH 'hog:memory?user=' AS remote;
+----
+Missing username
+
+statement error
+ATTACH 'hog:memory?user=postgres&flight_server=grpc+tls://127.0.0.1:8815' AS remote;
+----
+Missing password
+
+# Missing username/password with explicit database name should also fail
+statement error
+ATTACH 'hog:test_db?password=postgres&flight_server=grpc+tls://127.0.0.1:1' AS remote;
+----
+Missing username
+
+statement error
+ATTACH 'hog:test_db?user=postgres&flight_server=grpc+tls://127.0.0.1:1' AS remote;
+----
+Missing password
+
+# Invalid TLS verification override value should fail fast
+statement error
+ATTACH 'hog:test_db?user=postgres&password=postgres&flight_server=grpc+tls://127.0.0.1:1&tls_skip_verify=maybe' AS remote;
+----
+Invalid value for tls_skip_verify

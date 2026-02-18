@@ -1,0 +1,380 @@
+# name: test/sql/integration/select_types_remote.test_slow
+# description: Type roundtrip verification through Arrow Flight
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.type_test CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.type_test;
+
+# ============================================================
+# INTEGER types — boundary values
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.type_test.integers(
+    ti TINYINT,
+    si SMALLINT,
+    i INTEGER,
+    bi BIGINT
+);
+
+statement ok
+INSERT INTO remote_flight.type_test.integers VALUES
+    (-128, -32768, -2147483648, -9223372036854775808),
+    (127, 32767, 2147483647, 9223372036854775807),
+    (0, 0, 0, 0),
+    (NULL, NULL, NULL, NULL);
+
+query IIII
+SELECT ti, si, i, bi FROM remote_flight.type_test.integers ORDER BY ti NULLS LAST;
+----
+-128	-32768	-2147483648	-9223372036854775808
+0	0	0	0
+127	32767	2147483647	9223372036854775807
+NULL	NULL	NULL	NULL
+
+# ============================================================
+# Unsigned integer types
+# ============================================================
+
+# Note: DuckLake may not support unsigned types natively.
+# Testing on memory catalog to verify Arrow Flight roundtrip.
+
+statement ok
+ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_u;
+
+statement ok
+DROP TABLE IF EXISTS remote_u_memory.unsigned_test;
+
+statement ok
+CREATE TABLE remote_u_memory.unsigned_test(
+    uti UTINYINT,
+    usi USMALLINT,
+    ui UINTEGER,
+    ubi UBIGINT
+);
+
+statement ok
+INSERT INTO remote_u_memory.unsigned_test VALUES
+    (0, 0, 0, 0),
+    (255, 65535, 4294967295, 18446744073709551615),
+    (NULL, NULL, NULL, NULL);
+
+query IIII
+SELECT uti, usi, ui, ubi FROM remote_u_memory.unsigned_test ORDER BY uti NULLS LAST;
+----
+0	0	0	0
+255	65535	4294967295	18446744073709551615
+NULL	NULL	NULL	NULL
+
+# ============================================================
+# FLOAT / DOUBLE — edge values
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.type_test.floats(f FLOAT, d DOUBLE);
+
+statement ok
+INSERT INTO remote_flight.type_test.floats VALUES
+    (0.0, 0.0),
+    (-0.0, -0.0),
+    (3.4028235e+38, 1.7976931348623157e+308),
+    (-3.4028235e+38, -1.7976931348623157e+308),
+    (1.1754944e-38, 2.2250738585072014e-308),
+    (NULL, NULL);
+
+query I
+SELECT COUNT(*) FROM remote_flight.type_test.floats;
+----
+6
+
+# Verify non-NULL values survived roundtrip
+query I
+SELECT COUNT(*) FROM remote_flight.type_test.floats WHERE f IS NOT NULL;
+----
+5
+
+# Verify extremes
+query R
+SELECT MAX(d) FROM remote_flight.type_test.floats;
+----
+1.7976931348623157e+308
+
+query R
+SELECT MIN(d) FROM remote_flight.type_test.floats WHERE d < 0;
+----
+-1.7976931348623157e+308
+
+# --- NaN and Infinity ---
+# Note: DuckLake may reject these. Testing behavior.
+
+statement ok
+CREATE TABLE remote_flight.type_test.special_floats(label VARCHAR, d DOUBLE);
+
+statement ok
+INSERT INTO remote_flight.type_test.special_floats VALUES ('nan', 'NaN'::DOUBLE);
+
+query TR
+SELECT label, d FROM remote_flight.type_test.special_floats WHERE label = 'nan';
+----
+nan	nan
+
+statement ok
+INSERT INTO remote_flight.type_test.special_floats VALUES ('inf', 'Infinity'::DOUBLE);
+
+query TR
+SELECT label, d FROM remote_flight.type_test.special_floats WHERE label = 'inf';
+----
+inf	inf
+
+statement ok
+INSERT INTO remote_flight.type_test.special_floats VALUES ('neginf', '-Infinity'::DOUBLE);
+
+query TR
+SELECT label, d FROM remote_flight.type_test.special_floats WHERE label = 'neginf';
+----
+neginf	-inf
+
+# ============================================================
+# BOOLEAN
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.type_test.bools(b BOOLEAN);
+
+statement ok
+INSERT INTO remote_flight.type_test.bools VALUES (true), (false), (NULL);
+
+query T
+SELECT b FROM remote_flight.type_test.bools ORDER BY b NULLS LAST;
+----
+false
+true
+NULL
+
+# ============================================================
+# VARCHAR — edge cases
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.type_test.strings(v VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.type_test.strings VALUES
+    (''),
+    ('a'),
+    ('hello world'),
+    ('unicode: 日本語 中文 العربية'),
+    ('emoji: 🦆🔥💯'),
+    ('quotes: "double" and ''single'''),
+    ('backslash: \\path\\to\\file'),
+    ('newline:
+embedded'),
+    ('tab:	here'),
+    (NULL);
+
+query I
+SELECT COUNT(*) FROM remote_flight.type_test.strings;
+----
+10
+
+query T
+SELECT v FROM remote_flight.type_test.strings WHERE v = '';
+----
+(empty)
+
+query T
+SELECT v FROM remote_flight.type_test.strings WHERE v LIKE 'emoji%';
+----
+emoji: 🦆🔥💯
+
+query T
+SELECT v FROM remote_flight.type_test.strings WHERE v LIKE 'quotes%';
+----
+quotes: "double" and 'single'
+
+query T
+SELECT v FROM remote_flight.type_test.strings WHERE v LIKE 'backslash%';
+----
+backslash: \\path\\to\\file
+
+# --- Very long string ---
+
+statement ok
+INSERT INTO remote_flight.type_test.strings VALUES (REPEAT('x', 10000));
+
+query I
+SELECT LENGTH(v) FROM remote_flight.type_test.strings WHERE LENGTH(v) > 1000;
+----
+10000
+
+# ============================================================
+# DATE
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.type_test.dates(d DATE);
+
+statement ok
+INSERT INTO remote_flight.type_test.dates VALUES
+    ('1970-01-01'),
+    ('2024-02-29'),
+    ('2024-12-31'),
+    ('0001-01-01'),
+    (NULL);
+
+query T
+SELECT d FROM remote_flight.type_test.dates ORDER BY d NULLS LAST;
+----
+0001-01-01
+1970-01-01
+2024-02-29
+2024-12-31
+NULL
+
+# ============================================================
+# TIMESTAMP
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.type_test.timestamps(ts TIMESTAMP);
+
+statement ok
+INSERT INTO remote_flight.type_test.timestamps VALUES
+    ('1970-01-01 00:00:00'),
+    ('2024-06-15 12:30:45'),
+    ('2024-06-15 12:30:45.123456'),
+    (NULL);
+
+query T
+SELECT ts FROM remote_flight.type_test.timestamps ORDER BY ts NULLS LAST;
+----
+1970-01-01 00:00:00
+2024-06-15 12:30:45
+2024-06-15 12:30:45.123456
+NULL
+
+# --- Microsecond precision preserved ---
+
+query T
+SELECT ts FROM remote_flight.type_test.timestamps WHERE ts = '2024-06-15 12:30:45.123456';
+----
+2024-06-15 12:30:45.123456
+
+# ============================================================
+# HUGEINT (mapped to DECIMAL(38,0) through Flight)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.type_test.huge(h HUGEINT);
+
+statement ok
+INSERT INTO remote_flight.type_test.huge VALUES
+    (0),
+    (999999999999999999),
+    (-999999999999999999),
+    (NULL);
+
+# Note: HUGEINT may be mapped to DECIMAL(38,0) through Flight.
+# Verify values survive roundtrip regardless of type mapping.
+
+query I
+SELECT COUNT(*) FROM remote_flight.type_test.huge;
+----
+4
+
+query I
+SELECT COUNT(*) FROM remote_flight.type_test.huge WHERE h IS NOT NULL;
+----
+3
+
+# ============================================================
+# DECIMAL — known broken (scale > 0 returns NULL)
+# See docs/DUCKLAKE_BUGS.md #2
+# ============================================================
+
+# DECIMAL(p, 0) works
+statement ok
+CREATE TABLE remote_flight.type_test.dec_zero_scale(d DECIMAL(10, 0));
+
+statement ok
+INSERT INTO remote_flight.type_test.dec_zero_scale VALUES (42), (0), (-99), (NULL);
+
+query I
+SELECT d FROM remote_flight.type_test.dec_zero_scale ORDER BY d NULLS LAST;
+----
+-99
+0
+42
+NULL
+
+# DECIMAL(p, s>0) — values come back as NULL through Flight
+# This is a Duckgres Arrow Flight serialization bug.
+# Postgres wire protocol returns correct values.
+# Uncomment when fixed:
+#
+# statement ok
+# CREATE TABLE remote_flight.type_test.dec_scale(d DECIMAL(10, 2));
+#
+# statement ok
+# INSERT INTO remote_flight.type_test.dec_scale VALUES (99.99), (0.01), (-123.45), (NULL);
+#
+# query R
+# SELECT d FROM remote_flight.type_test.dec_scale ORDER BY d NULLS LAST;
+# ----
+# -123.45
+# 0.01
+# 99.99
+# NULL
+
+# ============================================================
+# NULL for every type
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.type_test.all_nulls(
+    ti TINYINT,
+    si SMALLINT,
+    i INTEGER,
+    bi BIGINT,
+    f FLOAT,
+    d DOUBLE,
+    b BOOLEAN,
+    v VARCHAR,
+    dt DATE,
+    ts TIMESTAMP
+);
+
+statement ok
+INSERT INTO remote_flight.type_test.all_nulls VALUES
+    (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+
+query IIIIRRTTTT
+SELECT * FROM remote_flight.type_test.all_nulls;
+----
+NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.type_test CASCADE;
+
+statement ok
+DROP TABLE IF EXISTS remote_u_memory.unsigned_test;

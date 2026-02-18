@@ -1,0 +1,126 @@
+# name: test/sql/integration/insert_returning_explicit_columns_remote.test_slow
+# description: INSERT ... RETURNING with explicit column lists on remote DuckLake table
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm22 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm22;
+
+# ============================================================
+# Basic explicit column INSERT + RETURNING
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm22.t(i INT, j INT, v VARCHAR);
+
+query IIT
+INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (1, 2, 'a') RETURNING *;
+----
+1	2	a
+
+# --- Reversed column order ---
+
+query IIT
+INSERT INTO remote_flight.roadmap_rm22.t(j, i, v) VALUES (30, 20, 'b') RETURNING i, j, v;
+----
+20	30	b
+
+# ============================================================
+# Multiple rows with explicit columns
+# ============================================================
+
+query IIT
+INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (10, 100, 'x'), (20, 200, 'y'), (30, 300, 'z') RETURNING *;
+----
+10	100	x
+20	200	y
+30	300	z
+
+# ============================================================
+# RETURNING subset of columns
+# ============================================================
+
+query T
+INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (50, 500, 'fifty') RETURNING v;
+----
+fifty
+
+query I
+INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (60, 600, 'sixty') RETURNING j;
+----
+600
+
+# ============================================================
+# RETURNING with expression on explicit-column insert
+# ============================================================
+
+query I
+INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (7, 70, 'seven') RETURNING i + j;
+----
+77
+
+# ============================================================
+# Verify all data persisted correctly
+# ============================================================
+
+query IIT
+SELECT i, j, v FROM remote_flight.roadmap_rm22.t ORDER BY i, j, v;
+----
+1	2	a
+7	70	seven
+10	100	x
+20	30	b
+20	200	y
+30	300	z
+50	500	fifty
+60	600	sixty
+
+query I
+SELECT COUNT(*) FROM remote_flight.roadmap_rm22.t;
+----
+8
+
+# ============================================================
+# Explicit columns with all columns specified in different orders
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm22.reorder(a INT, b VARCHAR, c INT);
+
+query IIT
+INSERT INTO remote_flight.roadmap_rm22.reorder(c, a, b) VALUES (30, 10, 'mid') RETURNING *;
+----
+10	mid	30
+
+query IIT
+INSERT INTO remote_flight.roadmap_rm22.reorder(b, c, a) VALUES ('rev', 60, 40) RETURNING *;
+----
+40	rev	60
+
+query IIT
+SELECT a, b, c FROM remote_flight.roadmap_rm22.reorder ORDER BY a;
+----
+10	mid	30
+40	rev	60
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.roadmap_rm22 CASCADE;

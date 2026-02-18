@@ -1,0 +1,589 @@
+# name: test/sql/integration/select_remote.test_slow
+# description: SELECT query patterns on remote DuckLake tables
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.select_test CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.select_test;
+
+# --- Seed data ---
+
+statement ok
+CREATE TABLE remote_flight.select_test.t(id INT, name VARCHAR, score DOUBLE, active BOOLEAN);
+
+statement ok
+INSERT INTO remote_flight.select_test.t VALUES
+    (1, 'alice', 95.5, true),
+    (2, 'bob', 82.0, true),
+    (3, 'carol', 78.3, false),
+    (4, 'dave', 91.0, true),
+    (5, 'eve', NULL, false),
+    (6, NULL, 65.0, true),
+    (7, 'grace', 95.5, true),
+    (8, 'heidi', 50.0, false);
+
+# ============================================================
+# WHERE clause operators
+# ============================================================
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE id = 1;
+----
+1	alice
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE id <> 1 ORDER BY id LIMIT 2;
+----
+2	bob
+3	carol
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE score > 90 ORDER BY id;
+----
+1	alice
+4	dave
+7	grace
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE score >= 95.5 ORDER BY id;
+----
+1	alice
+7	grace
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE score < 70 ORDER BY id;
+----
+6	NULL
+8	heidi
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE score <= 78.3 ORDER BY id;
+----
+3	carol
+6	NULL
+8	heidi
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE score IS NULL;
+----
+5	eve
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE score IS NOT NULL ORDER BY id LIMIT 2;
+----
+1	alice
+2	bob
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE id BETWEEN 3 AND 5 ORDER BY id;
+----
+3	carol
+4	dave
+5	eve
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE id IN (1, 4, 7) ORDER BY id;
+----
+1	alice
+4	dave
+7	grace
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE name LIKE 'a%';
+----
+1	alice
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE name ILIKE 'A%';
+----
+1	alice
+
+# --- AND / OR ---
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE score > 80 AND active = true ORDER BY id;
+----
+1	alice
+2	bob
+4	dave
+7	grace
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE score > 95 OR active = false ORDER BY id;
+----
+1	alice
+3	carol
+5	eve
+7	grace
+8	heidi
+
+# ============================================================
+# ORDER BY
+# ============================================================
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t ORDER BY name ASC NULLS FIRST LIMIT 3;
+----
+6	NULL
+1	alice
+2	bob
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t ORDER BY name DESC NULLS LAST LIMIT 3;
+----
+8	heidi
+7	grace
+5	eve
+
+query IR
+SELECT id, score FROM remote_flight.select_test.t ORDER BY score ASC NULLS LAST;
+----
+8	50.0
+6	65.0
+3	78.3
+2	82.0
+4	91.0
+1	95.5
+7	95.5
+5	NULL
+
+# --- ORDER BY multiple columns ---
+
+query IRT
+SELECT id, score, name FROM remote_flight.select_test.t ORDER BY score DESC NULLS LAST, name ASC NULLS FIRST;
+----
+1	95.5	alice
+7	95.5	grace
+4	91.0	dave
+2	82.0	bob
+3	78.3	carol
+6	65.0	NULL
+8	50.0	heidi
+5	NULL	eve
+
+# ============================================================
+# LIMIT / OFFSET
+# ============================================================
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t ORDER BY id LIMIT 3;
+----
+1	alice
+2	bob
+3	carol
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t ORDER BY id LIMIT 3 OFFSET 3;
+----
+4	dave
+5	eve
+6	NULL
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t ORDER BY id LIMIT 100;
+----
+1	alice
+2	bob
+3	carol
+4	dave
+5	eve
+6	NULL
+7	grace
+8	heidi
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t ORDER BY id LIMIT 2 OFFSET 7;
+----
+8	heidi
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t ORDER BY id OFFSET 100;
+----
+
+# ============================================================
+# GROUP BY / HAVING
+# ============================================================
+
+query TI
+SELECT active, COUNT(*) FROM remote_flight.select_test.t GROUP BY active ORDER BY active;
+----
+false	3
+true	5
+
+query TR
+SELECT active, AVG(score) FROM remote_flight.select_test.t WHERE score IS NOT NULL GROUP BY active ORDER BY active;
+----
+false	64.15
+true	85.8
+
+query TR
+SELECT active, SUM(score) FROM remote_flight.select_test.t GROUP BY active HAVING SUM(score) > 200 ORDER BY active;
+----
+true	429.0
+
+# ============================================================
+# DISTINCT
+# ============================================================
+
+query R
+SELECT DISTINCT score FROM remote_flight.select_test.t WHERE score IS NOT NULL ORDER BY score;
+----
+50.0
+65.0
+78.3
+82.0
+91.0
+95.5
+
+query I
+SELECT COUNT(DISTINCT score) FROM remote_flight.select_test.t;
+----
+6
+
+query I
+SELECT COUNT(DISTINCT active) FROM remote_flight.select_test.t;
+----
+2
+
+# ============================================================
+# Aggregate functions
+# ============================================================
+
+query R
+SELECT SUM(score) FROM remote_flight.select_test.t;
+----
+557.3
+
+query R
+SELECT AVG(score) FROM remote_flight.select_test.t;
+----
+79.61428571428572
+
+query R
+SELECT MIN(score) FROM remote_flight.select_test.t;
+----
+50.0
+
+query R
+SELECT MAX(score) FROM remote_flight.select_test.t;
+----
+95.5
+
+query I
+SELECT COUNT(*) FROM remote_flight.select_test.t;
+----
+8
+
+query I
+SELECT COUNT(score) FROM remote_flight.select_test.t;
+----
+7
+
+query I
+SELECT COUNT(name) FROM remote_flight.select_test.t;
+----
+7
+
+# ============================================================
+# CASE WHEN / COALESCE / NULLIF
+# ============================================================
+
+query IT
+SELECT id, CASE WHEN score >= 90 THEN 'A' WHEN score >= 80 THEN 'B' WHEN score >= 70 THEN 'C' ELSE 'F' END AS grade
+FROM remote_flight.select_test.t WHERE score IS NOT NULL ORDER BY id;
+----
+1	A
+2	B
+3	C
+4	A
+6	F
+7	A
+8	F
+
+query IT
+SELECT id, COALESCE(name, 'UNKNOWN') AS display_name FROM remote_flight.select_test.t ORDER BY id;
+----
+1	alice
+2	bob
+3	carol
+4	dave
+5	eve
+6	UNKNOWN
+7	grace
+8	heidi
+
+query IR
+SELECT id, NULLIF(score, 95.5) FROM remote_flight.select_test.t ORDER BY id;
+----
+1	NULL
+2	82.0
+3	78.3
+4	91.0
+5	NULL
+6	65.0
+7	NULL
+8	50.0
+
+# ============================================================
+# Window functions
+# ============================================================
+
+query IIR
+SELECT id, ROW_NUMBER() OVER (ORDER BY score DESC NULLS LAST) AS rn, score
+FROM remote_flight.select_test.t ORDER BY rn;
+----
+1	1	95.5
+7	2	95.5
+4	3	91.0
+2	4	82.0
+3	5	78.3
+6	6	65.0
+8	7	50.0
+5	8	NULL
+
+query ITI
+SELECT id, name, RANK() OVER (ORDER BY score DESC NULLS LAST) AS rnk
+FROM remote_flight.select_test.t ORDER BY rnk, id;
+----
+1	alice	1
+7	grace	1
+4	dave	3
+2	bob	4
+3	carol	5
+6	NULL	6
+8	heidi	7
+5	eve	8
+
+# --- LAG / LEAD ---
+
+query IRI
+SELECT id, score, LAG(id) OVER (ORDER BY id) AS prev_id
+FROM remote_flight.select_test.t ORDER BY id;
+----
+1	95.5	NULL
+2	82.0	1
+3	78.3	2
+4	91.0	3
+5	NULL	4
+6	65.0	5
+7	95.5	6
+8	50.0	7
+
+query IRI
+SELECT id, score, LEAD(id) OVER (ORDER BY id) AS next_id
+FROM remote_flight.select_test.t ORDER BY id;
+----
+1	95.5	2
+2	82.0	3
+3	78.3	4
+4	91.0	5
+5	NULL	6
+6	65.0	7
+7	95.5	8
+8	50.0	NULL
+
+# ============================================================
+# UNION / UNION ALL
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.select_test.t2(id INT, name VARCHAR, score DOUBLE, active BOOLEAN);
+
+statement ok
+INSERT INTO remote_flight.select_test.t2 VALUES
+    (1, 'alice', 95.5, true),
+    (9, 'ivan', 88.0, true);
+
+query I
+SELECT id FROM remote_flight.select_test.t WHERE id <= 2
+UNION
+SELECT id FROM remote_flight.select_test.t2
+ORDER BY id;
+----
+1
+2
+9
+
+query I
+SELECT id FROM remote_flight.select_test.t WHERE id = 1
+UNION ALL
+SELECT id FROM remote_flight.select_test.t2 WHERE id = 1
+ORDER BY id;
+----
+1
+1
+
+# ============================================================
+# CTE (WITH ... AS)
+# ============================================================
+
+query IT
+WITH high_scorers AS (
+    SELECT id, name FROM remote_flight.select_test.t WHERE score >= 90
+)
+SELECT * FROM high_scorers ORDER BY id;
+----
+1	alice
+4	dave
+7	grace
+
+query I
+WITH stats AS (
+    SELECT AVG(score) AS avg_score FROM remote_flight.select_test.t
+)
+SELECT t.id FROM remote_flight.select_test.t t, stats WHERE t.score > stats.avg_score ORDER BY t.id;
+----
+1
+2
+4
+7
+
+# ============================================================
+# Subqueries
+# ============================================================
+
+# --- Subquery in WHERE (IN) ---
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t
+WHERE id IN (SELECT id FROM remote_flight.select_test.t2)
+ORDER BY id;
+----
+1	alice
+
+# --- Subquery in WHERE (EXISTS) ---
+
+query IT
+SELECT id, name FROM remote_flight.select_test.t t1
+WHERE EXISTS (SELECT 1 FROM remote_flight.select_test.t2 t2 WHERE t2.id = t1.id)
+ORDER BY id;
+----
+1	alice
+
+# --- Scalar subquery in SELECT ---
+
+query IR
+SELECT id, (SELECT AVG(score) FROM remote_flight.select_test.t) AS avg_all
+FROM remote_flight.select_test.t WHERE id <= 2 ORDER BY id;
+----
+1	79.61428571428572
+2	79.61428571428572
+
+# ============================================================
+# JOINs between remote tables
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.select_test.departments(dept_id INT, dept_name VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.select_test.departments VALUES (1, 'Engineering'), (2, 'Sales');
+
+statement ok
+CREATE TABLE remote_flight.select_test.employees(emp_id INT, name VARCHAR, dept_id INT);
+
+statement ok
+INSERT INTO remote_flight.select_test.employees VALUES
+    (10, 'alice', 1), (20, 'bob', 1), (30, 'carol', 2), (40, 'dave', NULL);
+
+# --- INNER JOIN ---
+
+query ITT
+SELECT e.emp_id, e.name, d.dept_name
+FROM remote_flight.select_test.employees e
+INNER JOIN remote_flight.select_test.departments d ON e.dept_id = d.dept_id
+ORDER BY e.emp_id;
+----
+10	alice	Engineering
+20	bob	Engineering
+30	carol	Sales
+
+# --- LEFT JOIN ---
+
+query ITT
+SELECT e.emp_id, e.name, d.dept_name
+FROM remote_flight.select_test.employees e
+LEFT JOIN remote_flight.select_test.departments d ON e.dept_id = d.dept_id
+ORDER BY e.emp_id;
+----
+10	alice	Engineering
+20	bob	Engineering
+30	carol	Sales
+40	dave	NULL
+
+# --- RIGHT JOIN ---
+
+query ITT
+SELECT e.name, d.dept_id, d.dept_name
+FROM remote_flight.select_test.employees e
+RIGHT JOIN remote_flight.select_test.departments d ON e.dept_id = d.dept_id
+ORDER BY d.dept_id, e.name NULLS LAST;
+----
+alice	1	Engineering
+bob	1	Engineering
+carol	2	Sales
+
+# --- FULL OUTER JOIN ---
+
+statement ok
+CREATE TABLE remote_flight.select_test.dept2(dept_id INT, dept_name VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.select_test.dept2 VALUES (1, 'Engineering'), (3, 'Marketing');
+
+query ITT
+SELECT e.name, d.dept_id, d.dept_name
+FROM remote_flight.select_test.employees e
+FULL OUTER JOIN remote_flight.select_test.dept2 d ON e.dept_id = d.dept_id
+ORDER BY e.name NULLS LAST, d.dept_id NULLS LAST;
+----
+alice	1	Engineering
+bob	1	Engineering
+carol	NULL	NULL
+dave	NULL	NULL
+NULL	3	Marketing
+
+# --- CROSS JOIN ---
+
+query IT
+SELECT e.emp_id, d.dept_name
+FROM (SELECT emp_id FROM remote_flight.select_test.employees WHERE emp_id <= 20) e
+CROSS JOIN remote_flight.select_test.departments d
+ORDER BY e.emp_id, d.dept_name;
+----
+10	Engineering
+10	Sales
+20	Engineering
+20	Sales
+
+# --- Self-join ---
+
+query ITIT
+SELECT a.id, a.name, b.id, b.name
+FROM remote_flight.select_test.t a
+JOIN remote_flight.select_test.t b ON a.score = b.score AND a.id < b.id
+ORDER BY a.id;
+----
+1	alice	7	grace
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.select_test CASCADE;
