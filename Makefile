@@ -11,6 +11,15 @@ EXT_FLAGS += -DMAIN_BRANCH_VERSIONING=0
 # Include the Makefile from extension-ci-tools
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
+.PHONY: format format-fix
+# Keep formatter scoped to repo source/tests to avoid traversing local venvs
+# (e.g. test/integration/.venv site-packages).
+format:
+	python3 duckdb/scripts/format.py --all --noconfirm --directories src test/sql test/cpp
+
+format-fix:
+	python3 duckdb/scripts/format.py --all --fix --noconfirm --directories src test/sql test/cpp
+
 .PHONY: release_unittest
 release_unittest: ${EXTENSION_CONFIG_STEP}
 	mkdir -p build/release
