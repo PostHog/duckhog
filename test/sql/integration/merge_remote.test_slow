@@ -1,6 +1,6 @@
-# name: test/sql/queries/merge_remote.test_slow
+# name: test/sql/integration/merge_remote.test_slow
 # description: MERGE INTO on remote DuckLake tables
-# group: [queries]
+# group: [integration]
 
 require duckhog
 

@@ -87,8 +87,7 @@ void RewriteTableRefCatalog(TableRef &table_ref, const string &attached_catalog,
 		auto &base_ref = table_ref.Cast<BaseTableRef>();
 		if (!CatalogIsUnset(base_ref.catalog_name) && !StringUtil::CIEquals(base_ref.catalog_name, attached_catalog) &&
 		    !StringUtil::CIEquals(base_ref.catalog_name, remote_catalog)) {
-			throw BinderException(
-			    "PostHog: explicit references to external catalogs are not supported in remote DML");
+			throw BinderException("PostHog: explicit references to external catalogs are not supported in remote DML");
 		}
 		if (StringUtil::CIEquals(base_ref.catalog_name, attached_catalog)) {
 			base_ref.catalog_name = remote_catalog;
