@@ -191,9 +191,9 @@ jobs:
         run: |
           DUCKDB_GIT_VERSION="$DUCKDB_GIT_SHA" make set_duckdb_version
 
-      - name: Build release (ccache-backed)
+      - name: Build release unittest (ccache-backed)
         run: |
-          CCACHE_DIR="${GITHUB_WORKSPACE}/ccache_dir" make release
+          CCACHE_DIR="${GITHUB_WORKSPACE}/ccache_dir" make release_unittest
 
       - name: Download extension artifact
         uses: actions/download-artifact@v4
