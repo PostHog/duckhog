@@ -1,6 +1,6 @@
 # name: test/sql/unit/errors/connection_errors.test
 # description: Connection errors when Flight SQL server is unavailable
-# group: [unit]
+# group: [errors]
 
 require duckhog
 

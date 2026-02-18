@@ -1,6 +1,6 @@
 # name: test/sql/unit/connection/auth.test
 # description: Authentication parameter validation
-# group: [unit]
+# group: [connection]
 
 require duckhog
 

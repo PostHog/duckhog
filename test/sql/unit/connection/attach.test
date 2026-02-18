@@ -1,6 +1,6 @@
 # name: test/sql/unit/connection/attach.test
 # description: Test ATTACH statement parsing and connection error handling
-# group: [unit]
+# group: [connection]
 
 require duckhog
 
