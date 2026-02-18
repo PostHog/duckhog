@@ -40,6 +40,11 @@ optional_ptr<SchemaCatalogEntry> PostHogStubCatalog::LookupSchema(CatalogTransac
 	                       database_name_, database_name_, database_name_);
 }
 
+// Defense-in-depth: LookupSchema() always throws before any of these DML
+// plan overrides are reached, so the user sees the schema-level error first.
+// These overrides exist as a safety net in case the schema lookup path is
+// ever changed to not throw (e.g., supporting ON_ENTRY_NOT_FOUND).
+
 PhysicalOperator &PostHogStubCatalog::PlanInsert(ClientContext &context, PhysicalPlanGenerator &planner,
                                                  LogicalInsert &op, optional_ptr<PhysicalOperator> plan) {
 	throw NotImplementedException("PostHog: Cannot insert into stub catalog '%s'. Use '%s_<catalog>' instead.",
@@ -67,6 +72,12 @@ PhysicalOperator &PostHogStubCatalog::PlanUpdate(ClientContext &context, Physica
 PhysicalOperator &PostHogStubCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner,
                                                  LogicalUpdate &op) {
 	throw NotImplementedException("PostHog: Cannot update stub catalog '%s'. Use '%s_<catalog>' instead.",
+	                              database_name_, database_name_);
+}
+
+PhysicalOperator &PostHogStubCatalog::PlanMergeInto(ClientContext &context, PhysicalPlanGenerator &planner,
+                                                    LogicalMergeInto &op, PhysicalOperator &plan) {
+	throw NotImplementedException("PostHog: Cannot merge into stub catalog '%s'. Use '%s_<catalog>' instead.",
 	                              database_name_, database_name_);
 }
 

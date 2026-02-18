@@ -40,6 +40,7 @@ set(EXTENSION_SOURCES
     src/execution/posthog_delete.cpp
     src/execution/posthog_dml_rewriter.cpp
     src/execution/posthog_insert.cpp
+    src/execution/posthog_merge.cpp
     src/execution/posthog_sql_utils.cpp
     src/execution/posthog_update.cpp
     src/utils/arrow_value.cpp
@@ -76,6 +77,7 @@ if(${BUILD_UNITTESTS})
         test/cpp/test_partition_alter.cpp
         test/cpp/test_rename_table.cpp
         test/cpp/test_delete_rewriter.cpp
+        test/cpp/test_merge_rewriter.cpp
         test/cpp/test_update_rewriter.cpp
     )
     target_include_directories(test_duckhog_cpp PRIVATE src/include src

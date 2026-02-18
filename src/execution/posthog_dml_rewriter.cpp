@@ -21,6 +21,7 @@
 #include "duckdb/parser/parsed_expression_iterator.hpp"
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/parser/statement/delete_statement.hpp"
+#include "duckdb/parser/statement/merge_into_statement.hpp"
 #include "duckdb/parser/statement/update_statement.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
 #include "duckdb/parser/tokens.hpp"
@@ -208,6 +209,77 @@ PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(const string &query, const stri
 	                       " RETURNING *) SELECT * FROM __duckhog_updated_rows";
 
 	return result;
+}
+
+PostHogRewrittenMergeSQL RewriteRemoteMergeSQL(const string &query, const string &attached_catalog,
+                                               const string &remote_catalog) {
+	Parser parser;
+	parser.ParseQuery(query);
+
+	MergeIntoStatement *merge_stmt = nullptr;
+	for (auto &statement : parser.statements) {
+		if (statement->type != StatementType::MERGE_INTO_STATEMENT) {
+			throw NotImplementedException("PostHog: mixed statement batches are not supported for remote MERGE");
+		}
+		if (merge_stmt) {
+			throw NotImplementedException("PostHog: expected exactly one MERGE statement in query batch");
+		}
+		merge_stmt = &statement->Cast<MergeIntoStatement>();
+	}
+	if (!merge_stmt) {
+		throw NotImplementedException("PostHog: no MERGE statement found in query batch");
+	}
+
+	auto rewritten_stmt_holder = merge_stmt->Copy();
+	auto &rewritten = rewritten_stmt_holder->Cast<MergeIntoStatement>();
+
+	// Rewrite target and source table refs
+	RewriteTableRef(rewritten.target, attached_catalog, remote_catalog);
+	RewriteTableRef(rewritten.source, attached_catalog, remote_catalog);
+
+	// Rewrite ON join condition
+	RewriteExpression(rewritten.join_condition, attached_catalog, remote_catalog);
+
+	// Rewrite expressions inside each action
+	for (auto &[condition_type, action_list] : rewritten.actions) {
+		for (auto &action : action_list) {
+			// Rewrite action condition (AND clause)
+			RewriteExpression(action->condition, attached_catalog, remote_catalog);
+			// Rewrite UPDATE SET expressions
+			if (action->update_info) {
+				for (auto &expr : action->update_info->expressions) {
+					RewriteExpression(expr, attached_catalog, remote_catalog);
+				}
+				RewriteExpression(action->update_info->condition, attached_catalog, remote_catalog);
+			}
+			// Rewrite INSERT expressions
+			for (auto &expr : action->expressions) {
+				RewriteExpression(expr, attached_catalog, remote_catalog);
+			}
+		}
+	}
+
+	// Rewrite RETURNING expressions
+	for (auto &expr : rewritten.returning_list) {
+		RewriteExpression(expr, attached_catalog, remote_catalog);
+	}
+
+	PostHogRewrittenMergeSQL result;
+	result.has_returning_clause = !rewritten.returning_list.empty();
+
+	rewritten.returning_list.clear();
+	result.non_returning_sql = rewritten.ToString();
+	RemoveTrailingSemicolon(result.non_returning_sql);
+
+	result.returning_sql = "WITH __duckhog_merged_rows AS (" + result.non_returning_sql +
+	                       " RETURNING *) SELECT * FROM __duckhog_merged_rows";
+
+	return result;
+}
+
+PostHogRewrittenMergeSQL RewriteRemoteMergeSQL(ClientContext &context, const string &attached_catalog,
+                                               const string &remote_catalog) {
+	return RewriteRemoteMergeSQL(context.GetCurrentQuery(), attached_catalog, remote_catalog);
 }
 
 string BuildRemoteCreateTableSQL(const CreateTableInfo &info, const string &attached_catalog,
