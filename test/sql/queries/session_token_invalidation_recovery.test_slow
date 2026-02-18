@@ -15,6 +15,9 @@ require-env DUCKHOG_PASSWORD
 # Guarded test mode:
 # - start duckgres with DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=1s
 # - set DUCKHOG_TOKEN_EXPIRY_TEST=1
+# NOTE: This test is intentionally brittle/slow. It depends on short token TTL
+# timing and a heavy local CPU query to force expiry before the next remote RPC.
+# If TTL/env or local performance changes, pass/fail behavior can flip.
 require-env DUCKGRES_FLIGHT_SESSION_TOKEN_TTL
 
 require-env DUCKHOG_TOKEN_EXPIRY_TEST
