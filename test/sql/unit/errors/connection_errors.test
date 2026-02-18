@@ -1,0 +1,15 @@
+# name: test/sql/unit/errors/connection_errors.test
+# description: Connection errors when Flight SQL server is unavailable
+# group: [unit]
+
+require duckhog
+
+# Attach succeeds even if endpoint is unreachable; operations that require
+# a live server should fail with a connection error.
+statement ok
+ATTACH 'hog:memory?user=postgres&password=postgres&flight_server=grpc+tls://127.0.0.1:1' AS remote;
+
+statement error
+CREATE SCHEMA remote.main;
+----
+Not connected to remote server

@@ -68,16 +68,16 @@ Non-test-file targets:
 - DML rewriter CTE support (UPDATE/DELETE) — [#45](https://github.com/PostHog/duckhog/issues/45)
 
 Graduated targets (now part of normal integration suite):
-- [`insert_remote.test_slow`](sql/queries/insert_remote.test_slow) (RM01)
-- [`update_remote.test_slow`](sql/queries/update_remote.test_slow) (RM02)
-- [`insert_default_values_remote.test_slow`](sql/queries/insert_default_values_remote.test_slow) (RM18)
-- [`insert_returning_remote.test_slow`](sql/queries/insert_returning_remote.test_slow) (RM15)
-- [`delete_remote.test_slow`](sql/queries/delete_remote.test_slow) (RM03)
-- [`truncate_remote.test_slow`](sql/queries/truncate_remote.test_slow) (RM04) — desugared to DELETE by DuckDB's grammar
-- [`ctas_remote.test_slow`](sql/queries/ctas_remote.test_slow) (RM05)
-- [`create_view_remote.test_slow`](sql/queries/create_view_remote.test_slow) (RM06)
-- [`rename_table_remote.test_slow`](sql/queries/rename_table_remote.test_slow) (RM07)
-- [`partition_insert_remote.test_slow`](sql/queries/partition_insert_remote.test_slow) (RM08)
+- [`insert_remote.test_slow`](sql/integration/insert_remote.test_slow) (RM01)
+- [`update_remote.test_slow`](sql/integration/update_remote.test_slow) (RM02)
+- [`insert_default_values_remote.test_slow`](sql/integration/insert_default_values_remote.test_slow) (RM18)
+- [`insert_returning_remote.test_slow`](sql/integration/insert_returning_remote.test_slow) (RM15)
+- [`delete_remote.test_slow`](sql/integration/delete_remote.test_slow) (RM03)
+- [`truncate_remote.test_slow`](sql/integration/truncate_remote.test_slow) (RM04) — desugared to DELETE by DuckDB's grammar
+- [`ctas_remote.test_slow`](sql/integration/ctas_remote.test_slow) (RM05)
+- [`create_view_remote.test_slow`](sql/integration/create_view_remote.test_slow) (RM06)
+- [`rename_table_remote.test_slow`](sql/integration/rename_table_remote.test_slow) (RM07)
+- [`partition_insert_remote.test_slow`](sql/integration/partition_insert_remote.test_slow) (RM08)
 
 ## Design Rules
 

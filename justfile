@@ -38,18 +38,18 @@ deep-clean:
 # Run unit tests (no server required)
 [group('test')]
 test-unit: build
-    ./build/release/test/unittest "[duckhog],test/sql/*" "~test/sql/queries/*" "~test/sql/roadmap/*"
+    ./build/release/test/unittest "[duckhog],test/sql/unit/*"
 
 # Run integration tests (requires running test servers)
 [group('test')]
 test-integration:
-    ./build/release/test/unittest "test/sql/queries/*"
+    ./build/release/test/unittest "test/sql/integration/*"
 
 # Run full local suite (unit + integration with automatic setup/teardown).
 # Expects duckgres at ../duckgres by default (override with DUCKGRES_ROOT).
 [group('test')]
 test-all: build _require-duckgres
-    ./test/run_full_suite.sh "test/*" "~test/sql/roadmap/*"
+    ./test/run_full_suite.sh "test/*" "~test/sql/roadmap/*,~test/sql/token/*"
 
 # Run default extension-ci-tools test target
 [group('test')]

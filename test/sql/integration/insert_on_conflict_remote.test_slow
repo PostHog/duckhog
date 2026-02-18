@@ -1,0 +1,127 @@
+# name: test/sql/integration/insert_on_conflict_remote.test_slow
+# description: INSERT ... ON CONFLICT DO NOTHING on remote table
+# group: [integration]
+
+#
+# ON CONFLICT requires UNIQUE/PRIMARY KEY constraints visible to the local
+# binder. DuckLake does not support PK/UNIQUE at all, and even with the
+# memory catalog the constraint metadata is not synced to the client.
+# These tests document the current error behavior.
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+# DuckLake attach
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+# Memory attach
+statement ok
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_mem;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.roadmap_rm16 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.roadmap_rm16;
+
+# ============================================================
+# DuckLake: ON CONFLICT errors (no PK/UNIQUE support)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm16.no_pk(i INT, v INT);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm16.no_pk VALUES (1, 10);
+
+statement error
+INSERT INTO remote_flight.roadmap_rm16.no_pk VALUES (1, 20) ON CONFLICT DO NOTHING;
+----
+UNIQUE/PRIMARY KEY constraints
+
+# --- Data unchanged ---
+
+query I
+SELECT COUNT(*) FROM remote_flight.roadmap_rm16.no_pk;
+----
+1
+
+query II
+SELECT i, v FROM remote_flight.roadmap_rm16.no_pk;
+----
+1	10
+
+# ============================================================
+# Memory catalog: PK exists server-side but not visible to binder
+# ============================================================
+# The remote server has the PK but the DuckHog extension doesn't
+# sync constraint metadata, so the client-side binder rejects
+# ON CONFLICT because it can't see any UNIQUE/PK constraint.
+
+statement ok
+DROP SCHEMA IF EXISTS remote_mem.on_conflict CASCADE;
+
+statement ok
+CREATE SCHEMA remote_mem.on_conflict;
+
+statement ok
+CREATE TABLE remote_mem.on_conflict.with_pk(id INT PRIMARY KEY, v VARCHAR);
+
+statement ok
+INSERT INTO remote_mem.on_conflict.with_pk VALUES (1, 'first');
+
+# --- ON CONFLICT fails: binder can't see remote PK ---
+
+statement error
+INSERT INTO remote_mem.on_conflict.with_pk VALUES (1, 'duplicate') ON CONFLICT DO NOTHING;
+----
+no UNIQUE/PRIMARY KEY constraints
+
+# --- Regular duplicate INSERT fails with constraint error (server-side check) ---
+
+statement error
+INSERT INTO remote_mem.on_conflict.with_pk VALUES (1, 'duplicate');
+----
+Constraint Error
+
+# --- Non-duplicate INSERT still works ---
+
+statement ok
+INSERT INTO remote_mem.on_conflict.with_pk VALUES (2, 'second');
+
+query IT
+SELECT id, v FROM remote_mem.on_conflict.with_pk ORDER BY id;
+----
+1	first
+2	second
+
+# ============================================================
+# Verify connection still good after errors
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm16.no_pk VALUES (2, 20);
+
+query II
+SELECT i, v FROM remote_flight.roadmap_rm16.no_pk ORDER BY i;
+----
+1	10
+2	20
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.roadmap_rm16 CASCADE;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_mem.on_conflict CASCADE;

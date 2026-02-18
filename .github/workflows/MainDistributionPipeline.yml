@@ -231,14 +231,30 @@ jobs:
         run: |
           ./scripts/test-servers.sh start --background --seed
 
-      - name: Run SQLLogicTests
+      - name: Run Integration Tests
+        run: |
+          eval "$(./scripts/test-servers.sh env)"
+          ./build/release/test/unittest "test/sql/integration/*"
+
+      - name: Stop Duckgres control-plane
+        if: always()
+        run: ./scripts/test-servers.sh stop
+
+      - name: Start Duckgres control-plane (token expiry mode)
+        env:
+          DUCKGRES_FLIGHT_SESSION_TOKEN_TTL: 100ms
+        run: |
+          ./scripts/test-servers.sh start --background --seed
+
+      - name: Run session token invalidation recovery SQLLogicTest
+        env:
+          DUCKHOG_TOKEN_EXPIRY_TEST: 1
+          DUCKGRES_FLIGHT_SESSION_TOKEN_TTL: 100ms
         run: |
           eval "$(./scripts/test-servers.sh env)"
           ./build/release/test/unittest \
-            "test/sql/queries/basic_select.test_slow" \
-            "test/sql/queries/tables.test_slow" \
-            "test/sql/queries/projection.test_slow"
+            "test/sql/token/session_token_invalidation_recovery.test_slow"
 
-      - name: Stop Duckgres control-plane
+      - name: Stop Duckgres control-plane (token expiry mode)
         if: always()
         run: ./scripts/test-servers.sh stop
