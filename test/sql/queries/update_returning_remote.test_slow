@@ -30,4 +30,4 @@ INSERT INTO remote_flight.update_returning_remote.t VALUES (1, 10), (2, 20), (3,
 statement error
 UPDATE remote_flight.update_returning_remote.t SET j = j + 5 WHERE i = 1 RETURNING i;
 ----
-UPDATE ... RETURNING is not yet supported by this Flight backend
+UPDATE ... RETURNING is not yet supported

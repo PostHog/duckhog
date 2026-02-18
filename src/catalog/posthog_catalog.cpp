@@ -460,8 +460,8 @@ PhysicalOperator &PostHogCatalog::PlanUpdate(ClientContext &context, PhysicalPla
 		throw CatalogException("PostHog: Not connected to remote server.");
 	}
 	if (op.return_chunk) {
-		throw NotImplementedException(
-		    "PostHog: UPDATE ... RETURNING is not yet supported (D2: CTE wrapping rejected by remote server)");
+		// Blocked by D2: CTE wrapping rejected by remote server
+		throw NotImplementedException("PostHog: UPDATE ... RETURNING is not yet supported");
 	}
 
 	auto rewritten = RewriteRemoteUpdateSQL(context, database_name_, remote_catalog_);

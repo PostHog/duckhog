@@ -58,7 +58,7 @@ void RewriteColumnRef(ColumnRefExpression &colref, const string &attached_catalo
 		return;
 	}
 	if (!StringUtil::CIEquals(catalog, remote_catalog)) {
-		throw BinderException("PostHog: explicit references to external catalogs are not supported in remote UPDATE");
+		throw BinderException("PostHog: explicit references to external catalogs are not supported in remote DML");
 	}
 }
 
@@ -88,7 +88,7 @@ void RewriteTableRefCatalog(TableRef &table_ref, const string &attached_catalog,
 		if (!CatalogIsUnset(base_ref.catalog_name) && !StringUtil::CIEquals(base_ref.catalog_name, attached_catalog) &&
 		    !StringUtil::CIEquals(base_ref.catalog_name, remote_catalog)) {
 			throw BinderException(
-			    "PostHog: explicit references to external catalogs are not supported in remote UPDATE");
+			    "PostHog: explicit references to external catalogs are not supported in remote DML");
 		}
 		if (StringUtil::CIEquals(base_ref.catalog_name, attached_catalog)) {
 			base_ref.catalog_name = remote_catalog;
@@ -241,7 +241,7 @@ PostHogRewrittenMergeSQL RewriteRemoteMergeSQL(const string &query, const string
 	RewriteExpression(rewritten.join_condition, attached_catalog, remote_catalog);
 
 	// Rewrite expressions inside each action
-	for (auto &[condition_type, action_list] : rewritten.actions) {
+	for (auto &[_, action_list] : rewritten.actions) {
 		for (auto &action : action_list) {
 			// Rewrite action condition (AND clause)
 			RewriteExpression(action->condition, attached_catalog, remote_catalog);

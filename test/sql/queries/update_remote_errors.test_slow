@@ -39,16 +39,16 @@ INSERT INTO local_mem.main.side VALUES (1, 99);
 statement error
 UPDATE remote_flight.update_remote_errors.t SET j = 1 FROM local_mem.main.side s;
 ----
-explicit references to external catalogs are not supported in remote UPDATE
+explicit references to external catalogs are not supported in remote DML
 
 statement error
 UPDATE remote_flight.update_remote_errors.t SET j = local_mem.main.side.j FROM local_mem.main.side;
 ----
-explicit references to external catalogs are not supported in remote UPDATE
+explicit references to external catalogs are not supported in remote DML
 
 statement error
 UPDATE remote_flight.update_remote_errors.t AS tgt
 SET j = j + 1
 WHERE EXISTS (SELECT 1 FROM local_mem.main.side s WHERE s.i = tgt.i);
 ----
-explicit references to external catalogs are not supported in remote UPDATE
+explicit references to external catalogs are not supported in remote DML
