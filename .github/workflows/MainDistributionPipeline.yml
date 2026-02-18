@@ -159,6 +159,8 @@ jobs:
         run: |
           sudo apt-get update -y -qq
           sudo apt-get install -y -qq ninja-build ccache gcc-x86-64-linux-gnu g++-x86-64-linux-gnu
+          sudo ln -sf /usr/bin/x86_64-linux-gnu-gcc /usr/local/bin/x64-linux-gnu-gcc
+          sudo ln -sf /usr/bin/x86_64-linux-gnu-g++ /usr/local/bin/x64-linux-gnu-g++
           mkdir -p ccache_dir
 
       - name: Restore ccache from stable build
