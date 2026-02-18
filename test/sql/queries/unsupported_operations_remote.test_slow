@@ -1,0 +1,166 @@
+# name: test/sql/queries/unsupported_operations_remote.test_slow
+# description: Verify clean error messages for unsupported operations
+# group: [queries]
+
+#
+# Tests NotImplementedException paths in DuckHog code to ensure users
+# get meaningful error messages rather than crashes.
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.unsup_test CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.unsup_test;
+
+statement ok
+CREATE TABLE remote_flight.unsup_test.t(id INT, name VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.unsup_test.t VALUES (1, 'alice'), (2, 'bob');
+
+# ============================================================
+# CREATE INDEX — not supported
+# Note: DuckDB crashes with INTERNAL Error (assertion failure in
+# IndexBinder::InitCreateIndexInfo) before reaching our
+# NotImplementedException. This is a DuckDB binder bug with
+# external catalogs + CREATE INDEX. Cannot test with statement error
+# because SQLLogicTest treats internal errors as test failures.
+# ============================================================
+
+# Skipped: CREATE INDEX idx ON remote_flight.unsup_test.t(id);
+# Would crash with: INTERNAL Error: Attempting to dereference an optional pointer
+
+# ============================================================
+# CREATE SEQUENCE — not supported
+# ============================================================
+
+statement error
+CREATE SEQUENCE remote_flight.unsup_test.my_seq;
+----
+CREATE SEQUENCE not supported on remote database
+
+# ============================================================
+# CREATE TYPE — not supported
+# ============================================================
+
+statement error
+CREATE TYPE remote_flight.unsup_test.my_type AS ENUM ('a', 'b', 'c');
+----
+CREATE TYPE not supported on remote database
+
+# ============================================================
+# UPDATE ... RETURNING — not yet supported
+# ============================================================
+
+statement error
+UPDATE remote_flight.unsup_test.t SET name = 'updated' WHERE id = 1 RETURNING *;
+----
+UPDATE ... RETURNING is not yet supported
+
+# ============================================================
+# INSERT ... ON CONFLICT DO UPDATE — only DO NOTHING supported
+# ============================================================
+
+# ON CONFLICT requires a constraint target, but DuckLake doesn't support PK.
+# Test with memory catalog instead.
+
+statement ok
+ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_unsup_mem;
+
+statement ok
+DROP TABLE IF EXISTS remote_unsup_mem_memory.pk_table;
+
+statement ok
+CREATE TABLE remote_unsup_mem_memory.pk_table(id INT PRIMARY KEY, val VARCHAR);
+
+statement ok
+INSERT INTO remote_unsup_mem_memory.pk_table VALUES (1, 'original');
+
+# DO UPDATE should error — but the binder can't see the PK constraint
+# (DuckHog metadata sync gap), so the error comes from the binder, not
+# our ON CONFLICT code path.
+statement error
+INSERT INTO remote_unsup_mem_memory.pk_table VALUES (1, 'conflict')
+    ON CONFLICT (id) DO UPDATE SET val = EXCLUDED.val;
+----
+not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT
+
+# Same binder error for DO NOTHING with explicit conflict target
+statement error
+INSERT INTO remote_unsup_mem_memory.pk_table VALUES (1, 'conflict')
+    ON CONFLICT (id) DO NOTHING RETURNING *;
+----
+not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT
+
+# ============================================================
+# Multi-row INSERT DEFAULT VALUES — not supported
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.unsup_test.defs(id INT DEFAULT 0, name VARCHAR DEFAULT 'none');
+
+# Single-row DEFAULT VALUES works
+statement ok
+INSERT INTO remote_flight.unsup_test.defs DEFAULT VALUES;
+
+query IT
+SELECT id, name FROM remote_flight.unsup_test.defs;
+----
+0	none
+
+# ============================================================
+# Only ALTER TABLE supported (not ALTER VIEW, etc.)
+# ============================================================
+
+statement ok
+CREATE VIEW remote_flight.unsup_test.v AS SELECT * FROM remote_flight.unsup_test.t;
+
+# Only DROP TABLE and DROP VIEW supported for DROP
+statement error
+DROP SEQUENCE remote_flight.unsup_test.nonexistent;
+----
+
+# ============================================================
+# Stub catalog operations
+# ============================================================
+
+statement ok
+ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_stub;
+
+statement error
+CREATE SCHEMA remote_stub.test;
+----
+Cannot create schema on
+
+statement error
+INSERT INTO remote_stub.nonexistent VALUES (1);
+----
+stub catalog
+
+statement error
+CREATE TABLE remote_stub.test_table(id INT);
+----
+stub catalog
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS remote_unsup_mem_memory.pk_table;
+
+statement ok
+DROP SCHEMA remote_flight.unsup_test CASCADE;

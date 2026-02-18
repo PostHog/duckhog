@@ -1,0 +1,241 @@
+# name: test/sql/queries/returning_types_remote.test_slow
+# description: RETURNING clause with various data types
+# group: [queries]
+
+#
+# Tests ArrowScalarToValue in arrow_value.cpp which only handles:
+# INT, BIGINT, SMALLINT, TINYINT, unsigned variants, DOUBLE, FLOAT, BOOLEAN, VARCHAR
+# Types not in the switch statement will throw NotImplementedException.
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.ret_types CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.ret_types;
+
+# ============================================================
+# INTEGER types — all should work (supported by ArrowScalarToValue)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.ret_types.int_types(ti TINYINT, si SMALLINT, i INTEGER, bi BIGINT);
+
+query IIII
+INSERT INTO remote_flight.ret_types.int_types VALUES (42, 1000, 100000, 9999999999) RETURNING *;
+----
+42	1000	100000	9999999999
+
+query IIII
+INSERT INTO remote_flight.ret_types.int_types VALUES (-128, -32768, -2147483648, -9223372036854775808) RETURNING *;
+----
+-128	-32768	-2147483648	-9223372036854775808
+
+query IIII
+INSERT INTO remote_flight.ret_types.int_types VALUES (NULL, NULL, NULL, NULL) RETURNING *;
+----
+NULL	NULL	NULL	NULL
+
+# ============================================================
+# FLOAT / DOUBLE — should work
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.ret_types.float_types(f FLOAT, d DOUBLE);
+
+query RR
+INSERT INTO remote_flight.ret_types.float_types VALUES (3.14, 2.718281828) RETURNING *;
+----
+3.14	2.718281828
+
+query RR
+INSERT INTO remote_flight.ret_types.float_types VALUES (NULL, NULL) RETURNING *;
+----
+NULL	NULL
+
+# ============================================================
+# BOOLEAN — should work
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.ret_types.bool_type(b BOOLEAN);
+
+query I
+INSERT INTO remote_flight.ret_types.bool_type VALUES (true) RETURNING *;
+----
+true
+
+query I
+INSERT INTO remote_flight.ret_types.bool_type VALUES (false) RETURNING *;
+----
+false
+
+query I
+INSERT INTO remote_flight.ret_types.bool_type VALUES (NULL) RETURNING *;
+----
+NULL
+
+# ============================================================
+# VARCHAR — should work
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.ret_types.varchar_type(v VARCHAR);
+
+query T
+INSERT INTO remote_flight.ret_types.varchar_type VALUES ('hello') RETURNING *;
+----
+hello
+
+query T
+INSERT INTO remote_flight.ret_types.varchar_type VALUES ('') RETURNING *;
+----
+(empty)
+
+query T
+INSERT INTO remote_flight.ret_types.varchar_type VALUES (NULL) RETURNING *;
+----
+NULL
+
+query T
+INSERT INTO remote_flight.ret_types.varchar_type VALUES ('unicode: 日本語 🦆') RETURNING *;
+----
+unicode: 日本語 🦆
+
+# ============================================================
+# Multi-column RETURNING with mixed supported types
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.ret_types.mixed(id INT, name VARCHAR, score DOUBLE, active BOOLEAN);
+
+query ITRI
+INSERT INTO remote_flight.ret_types.mixed VALUES (1, 'alice', 95.5, true) RETURNING *;
+----
+1	alice	95.5	true
+
+query ITRI
+INSERT INTO remote_flight.ret_types.mixed VALUES (2, NULL, NULL, false) RETURNING *;
+----
+2	NULL	NULL	false
+
+# --- RETURNING specific columns ---
+
+query IT
+INSERT INTO remote_flight.ret_types.mixed VALUES (3, 'carol', 88.0, true) RETURNING id, name;
+----
+3	carol
+
+# --- RETURNING with expression ---
+
+query II
+INSERT INTO remote_flight.ret_types.mixed VALUES (4, 'dave', 70.0, false) RETURNING id, id * 10 AS id_times_ten;
+----
+4	40
+
+# ============================================================
+# DATE type — INSERT RETURNING
+# Note: Despite ArrowScalarToValue not explicitly handling DATE,
+# DuckDB's INSERT RETURNING path may use a different code path
+# (direct Arrow scan rather than scalar extraction).
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.ret_types.date_type(d DATE);
+
+statement ok
+INSERT INTO remote_flight.ret_types.date_type VALUES ('2024-01-15');
+
+query T
+SELECT d FROM remote_flight.ret_types.date_type;
+----
+2024-01-15
+
+query T
+INSERT INTO remote_flight.ret_types.date_type VALUES ('2024-06-15') RETURNING *;
+----
+2024-06-15
+
+# ============================================================
+# TIMESTAMP type — INSERT RETURNING
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.ret_types.ts_type(ts TIMESTAMP);
+
+statement ok
+INSERT INTO remote_flight.ret_types.ts_type VALUES ('2024-01-15 10:30:00');
+
+query T
+SELECT ts FROM remote_flight.ret_types.ts_type;
+----
+2024-01-15 10:30:00
+
+query T
+INSERT INTO remote_flight.ret_types.ts_type VALUES ('2024-06-15 12:00:00') RETURNING *;
+----
+2024-06-15 12:00:00
+
+# ============================================================
+# DELETE RETURNING — broken on all remote catalogs
+# DuckHog wraps DELETE RETURNING in a CTE:
+#   WITH __duckhog_deleted_rows AS (DELETE ... RETURNING *) SELECT ...
+# Duckgres rejects this because DuckDB CTEs require SELECT, not DELETE.
+# This is a DuckHog/Duckgres limitation.
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.ret_types.del_ret(id INT, name VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.ret_types.del_ret VALUES (1, 'alice');
+
+statement error
+DELETE FROM remote_flight.ret_types.del_ret WHERE id = 1 RETURNING *;
+----
+CTE needs a SELECT
+
+# ============================================================
+# Unsigned integer types via memory catalog
+# ============================================================
+
+statement ok
+ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_ret_mem;
+
+statement ok
+DROP TABLE IF EXISTS remote_ret_mem_memory.unsigned_ret;
+
+statement ok
+CREATE TABLE remote_ret_mem_memory.unsigned_ret(uti UTINYINT, usi USMALLINT, ui UINTEGER, ubi UBIGINT);
+
+query IIII
+INSERT INTO remote_ret_mem_memory.unsigned_ret VALUES (255, 65535, 4294967295, 18446744073709551615) RETURNING *;
+----
+255	65535	4294967295	18446744073709551615
+
+query IIII
+INSERT INTO remote_ret_mem_memory.unsigned_ret VALUES (0, 0, 0, 0) RETURNING *;
+----
+0	0	0	0
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS remote_ret_mem_memory.unsigned_ret;
+
+statement ok
+DROP SCHEMA remote_flight.ret_types CASCADE;

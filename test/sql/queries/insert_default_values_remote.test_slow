@@ -21,18 +21,191 @@ DROP SCHEMA IF EXISTS remote_flight.roadmap_rm18 CASCADE;
 statement ok
 CREATE SCHEMA remote_flight.roadmap_rm18;
 
+# ============================================================
+# Basic DEFAULT VALUES
+# ============================================================
+
 statement ok
 CREATE TABLE remote_flight.roadmap_rm18.t(i INT DEFAULT 42, v VARCHAR DEFAULT 'default-value');
 
 statement ok
 INSERT INTO remote_flight.roadmap_rm18.t DEFAULT VALUES;
 
-query I
-SELECT i FROM remote_flight.roadmap_rm18.t;
+query IT
+SELECT i, v FROM remote_flight.roadmap_rm18.t;
 ----
-42
+42	default-value
+
+# ============================================================
+# Multiple DEFAULT VALUES inserts accumulate
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm18.t DEFAULT VALUES;
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm18.t DEFAULT VALUES;
+
+query I
+SELECT COUNT(*) FROM remote_flight.roadmap_rm18.t;
+----
+3
+
+# All rows should have the same default values
+query I
+SELECT COUNT(DISTINCT i) FROM remote_flight.roadmap_rm18.t;
+----
+1
+
+query I
+SELECT COUNT(DISTINCT v) FROM remote_flight.roadmap_rm18.t;
+----
+1
+
+# ============================================================
+# DEFAULT VALUES with no defaults defined (should be NULL)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm18.no_defaults(a INT, b VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm18.no_defaults DEFAULT VALUES;
+
+query IT
+SELECT a, b FROM remote_flight.roadmap_rm18.no_defaults;
+----
+NULL	NULL
+
+# ============================================================
+# DEFAULT VALUES with mixed defaults and no-defaults
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm18.mixed(
+    id INT,
+    name VARCHAR DEFAULT 'unnamed',
+    score INT DEFAULT 100,
+    extra VARCHAR
+);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm18.mixed DEFAULT VALUES;
+
+query ITIT
+SELECT id, name, score, extra FROM remote_flight.roadmap_rm18.mixed;
+----
+NULL	unnamed	100	NULL
+
+# ============================================================
+# DEFAULT VALUES with various default types
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm18.typed_defaults(
+    amount DOUBLE DEFAULT 99.9,
+    label VARCHAR DEFAULT 'default_label',
+    count INT DEFAULT 7
+);
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm18.typed_defaults DEFAULT VALUES;
+
+query R
+SELECT amount FROM remote_flight.roadmap_rm18.typed_defaults;
+----
+99.9
 
 query T
-SELECT v FROM remote_flight.roadmap_rm18.t;
+SELECT label FROM remote_flight.roadmap_rm18.typed_defaults;
 ----
-default-value
+default_label
+
+query I
+SELECT count FROM remote_flight.roadmap_rm18.typed_defaults;
+----
+7
+
+# ============================================================
+# DEFAULT VALUES + RETURNING — not yet implemented
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm18.ret(x INT DEFAULT 7, y VARCHAR DEFAULT 'seven');
+
+# DEFAULT VALUES + RETURNING is not yet supported in the DuckHog extension
+statement error
+INSERT INTO remote_flight.roadmap_rm18.ret DEFAULT VALUES RETURNING *;
+----
+INSERT ... RETURNING with omitted/default columns is not yet implemented
+
+# --- Plain DEFAULT VALUES still works ---
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm18.ret DEFAULT VALUES;
+
+query IT
+SELECT x, y FROM remote_flight.roadmap_rm18.ret;
+----
+7	seven
+
+# ============================================================
+# DEFAULT VALUES in transaction with ROLLBACK
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.roadmap_rm18.txn(x INT DEFAULT 1);
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm18.txn DEFAULT VALUES;
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT COUNT(*) FROM remote_flight.roadmap_rm18.txn;
+----
+0
+
+# ============================================================
+# DEFAULT VALUES in transaction with COMMIT
+# ============================================================
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm18.txn DEFAULT VALUES;
+
+statement ok
+COMMIT;
+
+query I
+SELECT x FROM remote_flight.roadmap_rm18.txn;
+----
+1
+
+# ============================================================
+# Mix DEFAULT VALUES with regular INSERT
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm18.t VALUES (99, 'explicit');
+
+query IT
+SELECT i, v FROM remote_flight.roadmap_rm18.t ORDER BY i;
+----
+42	default-value
+42	default-value
+42	default-value
+99	explicit
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.roadmap_rm18 CASCADE;
