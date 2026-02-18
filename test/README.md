@@ -17,7 +17,7 @@ just test-all
 # Run integration tests only (manual server lifecycle)
 ./scripts/test-servers.sh start --background --seed
 eval "$(./scripts/test-servers.sh env)"
-./build/release/test/unittest "test/sql/queries/*"
+./build/release/test/unittest "test/sql/integration/*"
 ./scripts/test-servers.sh stop
 
 # Run roadmap suite (non-gating, intentionally separate from make test/CI)
@@ -36,13 +36,13 @@ Unit tests (`.test` files) run without external dependencies:
 
 ```bash
 # Run only unit tests (exclude .test_slow)
-./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test" "test/sql/errors/*.test"
+./build/release/test/unittest "[duckhog],test/sql/unit/*"
 
 # Run specific test file
-./build/release/test/unittest "test/sql/duckhog.test"
+./build/release/test/unittest "test/sql/unit/duckhog.test"
 
 # Run tests matching a pattern
-./build/release/test/unittest "test/sql/connection/*"
+./build/release/test/unittest "test/sql/unit/connection/*"
 ```
 
 ### Integration Tests
@@ -55,7 +55,7 @@ Integration tests (`.test_slow` files) require a running Duckgres control-plane 
 
 # Step 2 (in another terminal): Run integration tests
 eval "$(./scripts/test-servers.sh env)"
-./build/release/test/unittest "test/sql/queries/*"
+./build/release/test/unittest "test/sql/integration/*"
 ```
 
 `test-servers.sh` always waits for PG readiness and auto-detects supported
@@ -72,7 +72,25 @@ exporting `DUCKGRES_MAX_WORKERS` before `start`).
 
 # Run tests
 eval "$(./scripts/test-servers.sh env)"
-./build/release/test/unittest "test/sql/queries/*"
+./build/release/test/unittest "test/sql/integration/*"
+
+# Stop server when done
+./scripts/test-servers.sh stop
+```
+
+### Token Regression Tests (Dedicated)
+
+Token lifecycle regression tests are under `test/sql/token/` and require
+dedicated server config (`DUCKGRES_FLIGHT_SESSION_TOKEN_TTL`).
+
+```bash
+# Start server in token-expiry mode
+DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=100ms ./scripts/test-servers.sh start --background --seed
+
+# Run token regression tests
+eval "$(./scripts/test-servers.sh env)"
+DUCKHOG_TOKEN_EXPIRY_TEST=1 DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=100ms \
+  ./build/release/test/unittest "test/sql/token/*"
 
 # Stop server when done
 ./scripts/test-servers.sh stop
@@ -109,10 +127,10 @@ Artifacts are written to `test/integration/roadmap/<timestamp>/`:
 
 ```bash
 # Using unittest
-./build/release/test/unittest "test/sql/queries/basic_select.test_slow"
+./build/release/test/unittest "test/sql/integration/basic_select.test_slow"
 
 # Using DuckDB CLI directly
-./build/release/duckdb -unsigned -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';" < test/sql/queries/basic_select.test_slow
+./build/release/duckdb -unsigned -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';" < test/sql/integration/basic_select.test_slow
 ```
 
 ## Test Structure
@@ -125,17 +143,20 @@ test/
 │   ├── duckgres.log             # Duckgres runtime logs
 │   └── duckgres_server          # Built duckgres binary used by harness
 └── sql/
-    ├── duckhog.test             # Extension loading tests
-    ├── connection/
-    │   ├── attach.test          # Connection string parsing tests
-    │   ├── auth.test            # Authentication parameter validation
-    ├── errors/
-    │   └── connection_errors.test  # Error message verification
-    ├── queries/
-        ├── basic_select.test_slow   # Basic queries (requires server)
-        ├── arrow_types.test_slow    # Arrow type/encoding coverage (requires server)
-        ├── tables.test_slow         # Schema/table operations
-        └── projection.test_slow     # Column projection tests
+    ├── unit/
+    │   ├── duckhog.test             # Extension loading tests
+    │   ├── connection/
+    │   │   ├── attach.test          # Connection string parsing tests
+    │   │   └── auth.test            # Authentication parameter validation
+    │   └── errors/
+    │       └── connection_errors.test  # Error message verification
+    ├── integration/
+    │   ├── basic_select.test_slow   # Basic queries (requires server)
+    │   ├── arrow_types.test_slow    # Arrow type/encoding coverage (requires server)
+    │   ├── tables.test_slow         # Schema/table operations
+    │   └── projection.test_slow     # Column projection tests
+    ├── token/
+    │   └── session_token_invalidation_recovery.test_slow
     └── roadmap/
         └── rm*.test_slow            # Non-gating DuckLake-aligned roadmap targets
 ```
@@ -165,9 +186,9 @@ The `test/configs/flight.json` file defines environment variables:
 ### SQLLogicTest Format
 
 ```sql
-# name: test/sql/queries/my_test.test_slow
+# name: test/sql/integration/my_test.test_slow
 # description: Description of what this tests
-# group: [queries]
+# group: [integration]
 
 require duckhog
 
@@ -198,7 +219,7 @@ See [SQLLogicTest documentation](https://duckdb.org/dev/testing) for more detail
 
 Integration tests run automatically in GitHub Actions:
 1. Build extension
-2. Start Duckgres control-plane Flight listener (separate step)
-3. Run SQLLogicTests against the server
+2. Run default integration suite (`test/sql/integration/*`)
+3. Run token regression suite (`test/sql/token/*`) with token-expiry mode enabled
 
 Roadmap suite is not part of CI pass/fail gating by design.

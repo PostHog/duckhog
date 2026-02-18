@@ -1,0 +1,217 @@
+# name: test/sql/integration/alter_column_remote.test_slow
+# description: ALTER TABLE column operations on remote DuckLake tables
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.alter_col CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.alter_col;
+
+# ============================================================
+# ADD COLUMN — basic
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.alter_col.t(id INT, name VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.alter_col.t VALUES (1, 'alice'), (2, 'bob');
+
+statement ok
+ALTER TABLE remote_flight.alter_col.t ADD COLUMN score DOUBLE;
+
+# Existing rows should have NULL for new column
+query ITR
+SELECT id, name, score FROM remote_flight.alter_col.t ORDER BY id;
+----
+1	alice	NULL
+2	bob	NULL
+
+# INSERT with new column works
+statement ok
+INSERT INTO remote_flight.alter_col.t VALUES (3, 'carol', 95.5);
+
+query ITR
+SELECT id, name, score FROM remote_flight.alter_col.t ORDER BY id;
+----
+1	alice	NULL
+2	bob	NULL
+3	carol	95.5
+
+# ============================================================
+# ADD COLUMN with DEFAULT
+# ============================================================
+
+statement ok
+ALTER TABLE remote_flight.alter_col.t ADD COLUMN status VARCHAR DEFAULT 'active';
+
+query ITRT
+SELECT id, name, score, status FROM remote_flight.alter_col.t ORDER BY id;
+----
+1	alice	NULL	active
+2	bob	NULL	active
+3	carol	95.5	active
+
+statement ok
+INSERT INTO remote_flight.alter_col.t VALUES (4, 'dave', 88.0, 'inactive');
+
+query ITRT
+SELECT id, name, score, status FROM remote_flight.alter_col.t WHERE id = 4;
+----
+4	dave	88.0	inactive
+
+# ============================================================
+# ADD COLUMN with numeric DEFAULT
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.alter_col.t2(id INT);
+
+statement ok
+INSERT INTO remote_flight.alter_col.t2 VALUES (1), (2);
+
+statement ok
+ALTER TABLE remote_flight.alter_col.t2 ADD COLUMN priority INT DEFAULT 0;
+
+query II
+SELECT id, priority FROM remote_flight.alter_col.t2 ORDER BY id;
+----
+1	0
+2	0
+
+# ============================================================
+# DROP COLUMN
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.alter_col.drop_test(a INT, b VARCHAR, c DOUBLE);
+
+statement ok
+INSERT INTO remote_flight.alter_col.drop_test VALUES (1, 'x', 10.0), (2, 'y', 20.0);
+
+statement ok
+ALTER TABLE remote_flight.alter_col.drop_test DROP COLUMN b;
+
+query IR
+SELECT a, c FROM remote_flight.alter_col.drop_test ORDER BY a;
+----
+1	10.0
+2	20.0
+
+# Verify INSERT works after DROP COLUMN
+statement ok
+INSERT INTO remote_flight.alter_col.drop_test VALUES (3, 30.0);
+
+query IR
+SELECT a, c FROM remote_flight.alter_col.drop_test ORDER BY a;
+----
+1	10.0
+2	20.0
+3	30.0
+
+# ============================================================
+# RENAME COLUMN
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.alter_col.rename_test(old_name INT, other INT);
+
+statement ok
+INSERT INTO remote_flight.alter_col.rename_test VALUES (1, 10), (2, 20);
+
+statement ok
+ALTER TABLE remote_flight.alter_col.rename_test RENAME COLUMN old_name TO new_name;
+
+query II
+SELECT new_name, other FROM remote_flight.alter_col.rename_test ORDER BY new_name;
+----
+1	10
+2	20
+
+# Old column name should fail
+statement error
+SELECT old_name FROM remote_flight.alter_col.rename_test;
+----
+old_name
+
+# INSERT with new column name works
+statement ok
+INSERT INTO remote_flight.alter_col.rename_test VALUES (3, 30);
+
+query II
+SELECT new_name, other FROM remote_flight.alter_col.rename_test ORDER BY new_name;
+----
+1	10
+2	20
+3	30
+
+# ============================================================
+# ALTER COLUMN TYPE
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.alter_col.type_test(id INT, val VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.alter_col.type_test VALUES (1, '100'), (2, '200');
+
+# Try changing VARCHAR to INT — DuckLake may or may not support this
+statement error
+ALTER TABLE remote_flight.alter_col.type_test ALTER COLUMN val TYPE INTEGER;
+----
+
+# ============================================================
+# Multiple ALTERs in sequence
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.alter_col.multi(id INT);
+
+statement ok
+INSERT INTO remote_flight.alter_col.multi VALUES (1), (2);
+
+statement ok
+ALTER TABLE remote_flight.alter_col.multi ADD COLUMN a VARCHAR;
+
+statement ok
+ALTER TABLE remote_flight.alter_col.multi ADD COLUMN b INT DEFAULT 0;
+
+statement ok
+ALTER TABLE remote_flight.alter_col.multi ADD COLUMN c DOUBLE;
+
+query ITIR
+SELECT id, a, b, c FROM remote_flight.alter_col.multi ORDER BY id;
+----
+1	NULL	0	NULL
+2	NULL	0	NULL
+
+statement ok
+INSERT INTO remote_flight.alter_col.multi VALUES (3, 'hello', 42, 3.14);
+
+query ITIR
+SELECT id, a, b, c FROM remote_flight.alter_col.multi ORDER BY id;
+----
+1	NULL	0	NULL
+2	NULL	0	NULL
+3	hello	42	3.14
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.alter_col CASCADE;

@@ -134,8 +134,10 @@ jobs:
         run: gh workflow run rerun.yml -F run_id=${{ github.run_id }}
 
   integration-tests:
-    name: Integration Tests (DuckLake Pattern)
-    runs-on: ubuntu-latest
+    name: Integration Tests
+    runs-on:
+      - self-hosted
+      - depot-ubuntu-24.04-64
     continue-on-error: true
     needs:
       - duckdb-stable-build-main
@@ -146,9 +148,25 @@ jobs:
       FLIGHT_PORT: 8815
       DUCKHOG_USER: postgres
       DUCKHOG_PASSWORD: postgres
+      DUCKGRES_ROOT: ${{ github.workspace }}/duckgres
+      GEN: ninja
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      VCPKG_TARGET_TRIPLET: x64-linux-release
+      VCPKG_HOST_TRIPLET: x64-linux-release
+      VCPKG_OVERLAY_PORTS: ${{ github.workspace }}/extension-ci-tools/vcpkg_ports
+      VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/extension-ci-tools/toolchains
+      USE_MERGED_VCPKG_MANIFEST: '1'
+      AWS_ACCESS_KEY_ID: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_RW_AWS_ACCESS_KEY_ID || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_RO_AWS_ACCESS_KEY_ID || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_RW_AWS_SECRET_ACCESS_KEY || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_RO_AWS_SECRET_ACCESS_KEY || '' }}
+      AWS_DEFAULT_REGION: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_AWS_DEFAULT_REGION || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_AWS_DEFAULT_REGION || '' }}
+      AWS_ENDPOINT_URL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VCPKG_CACHING_AWS_ENDPOINT_URL || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.VCPKG_CACHING_AWS_ENDPOINT_URL || '' }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      VCPKG_BINARY_SOURCES: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,readwrite;http,https://vcpkg-cache.duckdb.org,read' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read' || 'clear;http,https://vcpkg-cache.duckdb.org,read' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Checkout duckgres
         uses: actions/checkout@v4
@@ -156,38 +174,87 @@ jobs:
           repository: PostHog/duckgres
           path: duckgres
 
-      - name: Download DuckDB CLI
+      - name: Install build tooling
         run: |
-          wget -q https://github.com/duckdb/duckdb/releases/download/v1.4.4/duckdb_cli-linux-amd64.zip
-          unzip -oq duckdb_cli-linux-amd64.zip
-          chmod +x duckdb
-          mkdir -p build/release
-          mv duckdb build/release/
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq ninja-build ccache gcc-x86-64-linux-gnu g++-x86-64-linux-gnu binutils-x86-64-linux-gnu
+          for tool in gcc g++ ar ranlib nm strip objdump objcopy ld; do
+            src="/usr/bin/x86_64-linux-gnu-$tool"
+            dst="/usr/local/bin/x64-linux-gnu-$tool"
+            if [ -x "$src" ]; then
+              sudo ln -sf "$src" "$dst"
+            fi
+          done
+          mkdir -p ccache_dir
+
+      - name: Restore ccache from stable build
+        uses: actions/cache/restore@v4
+        with:
+          path: ./ccache_dir
+          key: ccache-integration-unittest-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-extension-distribution-linux_amd64-v1.4.4
+
+      - name: Setup vcpkg
+        run: |
+          BASELINE="$(python3 - <<'PY'
+          import json
+          with open("vcpkg-configuration.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+          print(data["default-registry"]["baseline"])
+          PY
+          )"
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          cd vcpkg
+          git checkout "$BASELINE"
+          ./bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Resolve DuckDB SHA from submodule pin
+        run: |
+          echo "DUCKDB_GIT_SHA=$(git -C duckdb rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Set DuckDB version by SHA
+        run: |
+          DUCKDB_GIT_VERSION="$DUCKDB_GIT_SHA" make set_duckdb_version
+
+      - name: Build release unittest (ccache-backed)
+        run: |
+          CCACHE_DIR="${GITHUB_WORKSPACE}/ccache_dir" make release_unittest
 
       - name: Download extension artifact
         uses: actions/download-artifact@v4
         with:
-          name: duckdb-stable-linux-amd64-extension-duckhog
+          name: duckhog-v1.4.4-extension-linux_amd64
           path: build/release/extension/duckhog/
 
       - name: Start Duckgres control-plane
         run: |
-          DUCKGRES_ROOT=$GITHUB_WORKSPACE/duckgres ./scripts/test-servers.sh start --background --seed
+          ./scripts/test-servers.sh start --background --seed
 
-      - name: Run SQLLogicTests
+      - name: Run Integration Tests
         run: |
           eval "$(./scripts/test-servers.sh env)"
-          EXT_PATH="build/release/extension/duckhog/duckhog.duckdb_extension"
-
-          # Run basic_select tests
-          ./build/release/duckdb -unsigned -cmd "LOAD '$EXT_PATH';" < test/sql/queries/basic_select.test_slow
-
-          # Run tables tests
-          ./build/release/duckdb -unsigned -cmd "LOAD '$EXT_PATH';" < test/sql/queries/tables.test_slow
-
-          # Run projection tests
-          ./build/release/duckdb -unsigned -cmd "LOAD '$EXT_PATH';" < test/sql/queries/projection.test_slow
+          ./build/release/test/unittest "test/sql/integration/*"
 
       - name: Stop Duckgres control-plane
+        if: always()
+        run: ./scripts/test-servers.sh stop
+
+      - name: Start Duckgres control-plane (token expiry mode)
+        env:
+          DUCKGRES_FLIGHT_SESSION_TOKEN_TTL: 100ms
+        run: |
+          ./scripts/test-servers.sh start --background --seed
+
+      - name: Run session token invalidation recovery SQLLogicTest
+        env:
+          DUCKHOG_TOKEN_EXPIRY_TEST: 1
+          DUCKGRES_FLIGHT_SESSION_TOKEN_TTL: 100ms
+        run: |
+          eval "$(./scripts/test-servers.sh env)"
+          ./build/release/test/unittest \
+            "test/sql/token/session_token_invalidation_recovery.test_slow"
+
+      - name: Stop Duckgres control-plane (token expiry mode)
         if: always()
         run: ./scripts/test-servers.sh stop

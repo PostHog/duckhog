@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "flight/flight_client.hpp"
+#include "flight/session_token_utils.hpp"
 #include "utils/posthog_logger.hpp"
 
 #include "duckdb/common/exception.hpp"
@@ -15,6 +16,7 @@
 #include <arrow/api.h>
 #include <arrow/device.h>
 #include <arrow/flight/api.h>
+#include <arrow/flight/client_middleware.h>
 #include <arrow/flight/sql/api.h>
 #include <arrow/io/memory.h>
 #include <arrow/ipc/dictionary.h>
@@ -22,17 +24,62 @@
 #include <arrow/ipc/reader.h>
 #include <chrono>
 #include <iostream>
-#include <string_view>
 #include <stdexcept>
+#include <string_view>
 
 namespace duckdb {
 
 namespace {
 using SteadyClock = std::chrono::steady_clock;
+constexpr const char *kSessionHeader = "x-duckgres-session";
 
 int64_t ElapsedMillis(const SteadyClock::time_point &started_at) {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - started_at).count();
 }
+
+class SessionTokenCaptureMiddleware : public arrow::flight::ClientMiddleware {
+public:
+	SessionTokenCaptureMiddleware(std::string *session_token, std::mutex *session_token_mutex)
+	    : session_token_(session_token), session_token_mutex_(session_token_mutex) {
+	}
+
+	void SendingHeaders(arrow::flight::AddCallHeaders * /*outgoing_headers*/) override {
+	}
+
+	void ReceivedHeaders(const arrow::flight::CallHeaders &incoming_headers) override {
+		if (!session_token_ || !session_token_mutex_) {
+			return;
+		}
+		auto token = ExtractSessionToken(incoming_headers);
+		if (!token.empty()) {
+			std::lock_guard<std::mutex> lock(*session_token_mutex_);
+			*session_token_ = std::move(token);
+		}
+	}
+
+	void CallCompleted(const arrow::Status & /*status*/) override {
+	}
+
+private:
+	std::string *session_token_;
+	std::mutex *session_token_mutex_;
+};
+
+class SessionTokenCaptureFactory : public arrow::flight::ClientMiddlewareFactory {
+public:
+	SessionTokenCaptureFactory(std::string *session_token, std::mutex *session_token_mutex)
+	    : session_token_(session_token), session_token_mutex_(session_token_mutex) {
+	}
+
+	void StartCall(const arrow::flight::CallInfo & /*info*/,
+	               std::unique_ptr<arrow::flight::ClientMiddleware> *middleware) override {
+		*middleware = std::make_unique<SessionTokenCaptureMiddleware>(session_token_, session_token_mutex_);
+	}
+
+private:
+	std::string *session_token_;
+	std::mutex *session_token_mutex_;
+};
 
 std::string Base64Encode(const std::string &input) {
 	static const char kBase64Alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -132,6 +179,8 @@ PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std:
 
 	// Secure by default: verify server certificates unless explicitly overridden.
 	options.disable_server_verification = tls_skip_verify;
+	options.middleware.emplace_back(
+	    std::make_shared<SessionTokenCaptureFactory>(&session_token_, &session_token_mutex_));
 
 	// Connect to the Flight server
 	auto client_result = arrow::flight::FlightClient::Connect(location, options);
@@ -145,6 +194,61 @@ PostHogFlightClient::PostHogFlightClient(const std::string &endpoint, const std:
 
 	// Wrap in SQL client for Flight SQL protocol support
 	sql_client_ = std::make_unique<arrow::flight::sql::FlightSqlClient>(std::move(flight_client));
+}
+
+PostHogFlightClient::~PostHogFlightClient() {
+	std::lock_guard<std::mutex> lock(client_mutex_);
+	BestEffortCloseSessionLocked();
+}
+
+std::string PostHogFlightClient::GetSessionTokenSnapshot() const {
+	std::lock_guard<std::mutex> lock(session_token_mutex_);
+	return session_token_;
+}
+
+bool PostHogFlightClient::ShouldRetryMetadataWithFreshSession(const arrow::Status &status) const {
+	if (GetSessionTokenSnapshot().empty()) {
+		return false;
+	}
+	return IsSessionTokenRetryableStatus(status);
+}
+
+void PostHogFlightClient::InvalidateSessionTokenLocked(const char *reason, const arrow::Status *status) {
+	std::lock_guard<std::mutex> token_lock(session_token_mutex_);
+	if (session_token_.empty()) {
+		return;
+	}
+	if (status) {
+		POSTHOG_LOG_WARN("Invalidating Flight session token (%s): %s", reason, status->ToString().c_str());
+	} else {
+		POSTHOG_LOG_DEBUG("Invalidating Flight session token (%s)", reason);
+	}
+	session_token_.clear();
+}
+
+void PostHogFlightClient::InvalidateSessionTokenIfRetryableLocked(const char *reason, const arrow::Status &status) {
+	if (!IsSessionTokenRetryableStatus(status)) {
+		return;
+	}
+	InvalidateSessionTokenLocked(reason, &status);
+}
+
+void PostHogFlightClient::BestEffortCloseSessionLocked() {
+	if (!sql_client_) {
+		return;
+	}
+
+	if (!GetSessionTokenSnapshot().empty()) {
+		auto close_result = sql_client_->CloseSession(GetCallOptions(), arrow::flight::CloseSessionRequest());
+		if (!close_result.ok()) {
+			POSTHOG_LOG_DEBUG("Flight CloseSession skipped: %s", close_result.status().ToString().c_str());
+		}
+	}
+
+	auto close_status = sql_client_->Close();
+	if (!close_status.ok()) {
+		POSTHOG_LOG_DEBUG("Flight client close skipped: %s", close_status.ToString().c_str());
+	}
 }
 
 void PostHogFlightClient::Authenticate() {
@@ -164,46 +268,57 @@ arrow::Status PostHogFlightClient::Ping() {
 		return arrow::Status::Invalid("SQL client not initialized");
 	}
 
-	auto call_options = GetCallOptions();
-	// Prefer a metadata RPC that our servers/tests already implement (GetDbSchemas),
-	// since some Flight SQL servers may not implement SqlInfo.
-	auto info_result = sql_client_->GetDbSchemas(call_options, nullptr, nullptr);
-	if (!info_result.ok()) {
-		return info_result.status();
-	}
+	auto run_ping = [&]() -> arrow::Status {
+		// Prefer a metadata RPC that our servers/tests already implement (GetDbSchemas),
+		// since some Flight SQL servers may not implement SqlInfo.
+		auto info_result = sql_client_->GetDbSchemas(GetCallOptions(), nullptr, nullptr);
+		if (!info_result.ok()) {
+			return info_result.status();
+		}
 
-	auto info = std::move(*info_result);
-	if (!info || info->endpoints().empty()) {
+		auto info = std::move(*info_result);
+		if (!info || info->endpoints().empty()) {
+			return arrow::Status::OK();
+		}
+
+		// Drain the stream so server-side readers are fully released on single-conn
+		// sessions where one open result stream can block subsequent statements.
+		auto stream_result = sql_client_->DoGet(GetCallOptions(), info->endpoints()[0].ticket);
+		if (!stream_result.ok()) {
+			return stream_result.status();
+		}
+		auto stream = std::move(*stream_result);
+		while (true) {
+			auto chunk_result = stream->Next();
+			if (!chunk_result.ok()) {
+				return chunk_result.status();
+			}
+			const auto &chunk = *chunk_result;
+			if (!chunk.data) {
+				break;
+			}
+		}
 		return arrow::Status::OK();
-	}
+	};
 
-	// Drain the stream so server-side readers are fully released on single-conn
-	// sessions where one open result stream can block subsequent statements.
-	auto stream_result = sql_client_->DoGet(call_options, info->endpoints()[0].ticket);
-	if (!stream_result.ok()) {
-		return stream_result.status();
+	auto status = run_ping();
+	if (status.ok() || !ShouldRetryMetadataWithFreshSession(status)) {
+		return status;
 	}
-	auto stream = std::move(*stream_result);
-	while (true) {
-		auto chunk_result = stream->Next();
-		if (!chunk_result.ok()) {
-			return chunk_result.status();
-		}
-		const auto &chunk = *chunk_result;
-		if (!chunk.data) {
-			break;
-		}
-	}
-
-	return arrow::Status::OK();
+	InvalidateSessionTokenLocked("metadata ping retry", &status);
+	return run_ping();
 }
 
 arrow::flight::FlightCallOptions PostHogFlightClient::GetCallOptions() const {
 	arrow::flight::FlightCallOptions options;
+	auto session_token = GetSessionTokenSnapshot();
 
 	// Add HTTP Basic credentials (username/password) for each request.
 	if (!user_.empty() && !password_.empty()) {
 		options.headers.emplace_back("authorization", "Basic " + Base64Encode(user_ + ":" + password_));
+	}
+	if (!session_token.empty()) {
+		options.headers.emplace_back(kSessionHeader, session_token);
 	}
 
 	// Control new allocations Arrow performs while decoding.
@@ -225,17 +340,16 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
 	}
 
-	auto call_options = GetCallOptions();
-
 	// Execute the query via Flight SQL Execute RPC
 	arrow::Result<std::unique_ptr<arrow::flight::FlightInfo>> info_result;
 	if (txn_id.has_value()) {
 		arrow::flight::sql::Transaction txn(*txn_id);
-		info_result = sql_client_->Execute(call_options, sql, txn);
+		info_result = sql_client_->Execute(GetCallOptions(), sql, txn);
 	} else {
-		info_result = sql_client_->Execute(call_options, sql);
+		info_result = sql_client_->Execute(GetCallOptions(), sql);
 	}
 	if (!info_result.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("execute query", info_result.status());
 		throw std::runtime_error("PostHog: Query execution failed: " + info_result.status().ToString());
 	}
 
@@ -247,8 +361,9 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
 
 	for (const auto &endpoint : flight_info->endpoints()) {
 		// Get the result stream for this endpoint
-		auto stream_result = sql_client_->DoGet(call_options, endpoint.ticket);
+		auto stream_result = sql_client_->DoGet(GetCallOptions(), endpoint.ticket);
 		if (!stream_result.ok()) {
+			InvalidateSessionTokenIfRetryableLocked("execute query fetch results", stream_result.status());
 			throw std::runtime_error("PostHog: Failed to fetch results: " + stream_result.status().ToString());
 		}
 
@@ -258,6 +373,7 @@ std::shared_ptr<arrow::Table> PostHogFlightClient::ExecuteQuery(const std::strin
 		while (true) {
 			auto chunk_result = stream->Next();
 			if (!chunk_result.ok()) {
+				InvalidateSessionTokenIfRetryableLocked("execute query read batch", chunk_result.status());
 				throw std::runtime_error("PostHog: Failed to read result batch: " + chunk_result.status().ToString());
 			}
 
@@ -314,6 +430,7 @@ int64_t PostHogFlightClient::ExecuteUpdate(const std::string &sql, const std::op
 		result = sql_client_->ExecuteUpdate(call_options, sql);
 	}
 	if (!result.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("execute update", result.status());
 		ThrowExecuteUpdateError(result.status());
 	}
 
@@ -328,21 +445,20 @@ PostHogFlightClient::ExecuteQueryStream(const std::string &sql, const std::optio
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
 	}
 
-	auto call_options = GetCallOptions();
-
 	arrow::Result<std::unique_ptr<arrow::flight::FlightInfo>> info_result;
 	if (txn_id.has_value()) {
 		arrow::flight::sql::Transaction txn(*txn_id);
-		info_result = sql_client_->Execute(call_options, sql, txn);
+		info_result = sql_client_->Execute(GetCallOptions(), sql, txn);
 	} else {
-		info_result = sql_client_->Execute(call_options, sql);
+		info_result = sql_client_->Execute(GetCallOptions(), sql);
 	}
 	if (!info_result.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("execute query stream", info_result.status());
 		throw std::runtime_error("PostHog: Query execution failed: " + info_result.status().ToString());
 	}
 
-	return std::make_unique<PostHogFlightQueryStream>(*sql_client_, client_mutex_, call_options,
-	                                                  std::move(*info_result));
+	return std::make_unique<PostHogFlightQueryStream>(*sql_client_, client_mutex_, GetCallOptions(),
+	                                                  std::move(*info_result), &session_token_, &session_token_mutex_);
 }
 
 std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::string &sql,
@@ -353,34 +469,42 @@ std::shared_ptr<arrow::Schema> PostHogFlightClient::GetQuerySchema(const std::st
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
 	}
 
-	auto call_options = GetCallOptions();
+	auto run_once = [&]() -> arrow::Result<std::shared_ptr<arrow::Schema>> {
+		// Use Prepare to get schema without full execution.
+		arrow::Result<std::shared_ptr<arrow::flight::sql::PreparedStatement>> prepared_result;
+		if (txn_id.has_value()) {
+			arrow::flight::sql::Transaction txn(*txn_id);
+			prepared_result = sql_client_->Prepare(GetCallOptions(), sql, txn);
+		} else {
+			prepared_result = sql_client_->Prepare(GetCallOptions(), sql);
+		}
+		if (!prepared_result.ok()) {
+			return prepared_result.status();
+		}
 
-	// Use Prepare to get schema without full execution
-	arrow::Result<std::shared_ptr<arrow::flight::sql::PreparedStatement>> prepared_result;
-	if (txn_id.has_value()) {
-		arrow::flight::sql::Transaction txn(*txn_id);
-		prepared_result = sql_client_->Prepare(call_options, sql, txn);
-	} else {
-		prepared_result = sql_client_->Prepare(call_options, sql);
-	}
-	if (!prepared_result.ok()) {
-		throw std::runtime_error("PostHog: Failed to prepare query: " + prepared_result.status().ToString());
-	}
+		auto prepared_statement = std::move(*prepared_result);
+		auto schema = prepared_statement->dataset_schema();
 
-	auto prepared_statement = std::move(*prepared_result);
+		// Important: explicitly Close() with call options. Arrow's PreparedStatement destructor
+		// calls Close() with default FlightCallOptions (no headers), which breaks when the server
+		// requires Authorization for ClosePreparedStatement.
+		auto close_status = prepared_statement->Close(GetCallOptions());
+		if (!close_status.ok()) {
+			POSTHOG_LOG_WARN("Failed to close prepared statement after schema inference: %s",
+			                 close_status.ToString().c_str());
+		}
+		return schema;
+	};
 
-	// Get the result schema from the dataset schema.
-	//
-	// Important: explicitly Close() with call options. Arrow's PreparedStatement destructor
-	// calls Close() with default FlightCallOptions (no headers), which breaks when the server
-	// requires Authorization for ClosePreparedStatement.
-	auto schema = prepared_statement->dataset_schema();
-	auto close_status = prepared_statement->Close(call_options);
-	if (!close_status.ok()) {
-		std::cerr << "[PostHog] Warning: Failed to close prepared statement after schema inference: "
-		          << close_status.ToString() << '\n';
+	auto schema_result = run_once();
+	if (!schema_result.ok() && ShouldRetryMetadataWithFreshSession(schema_result.status())) {
+		InvalidateSessionTokenLocked("query schema retry", &schema_result.status());
+		schema_result = run_once();
 	}
-	return schema;
+	if (!schema_result.ok()) {
+		throw std::runtime_error("PostHog: Failed to prepare query: " + schema_result.status().ToString());
+	}
+	return *schema_result;
 }
 
 TransactionId PostHogFlightClient::BeginTransaction() {
@@ -393,6 +517,7 @@ TransactionId PostHogFlightClient::BeginTransaction() {
 	auto call_options = GetCallOptions();
 	auto result = sql_client_->BeginTransaction(call_options);
 	if (!result.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("begin transaction", result.status());
 		throw std::runtime_error("PostHog: BeginTransaction failed: " + result.status().ToString());
 	}
 	return result->transaction_id();
@@ -409,6 +534,7 @@ void PostHogFlightClient::CommitTransaction(const TransactionId &txn_id) {
 	arrow::flight::sql::Transaction txn(txn_id);
 	auto status = sql_client_->Commit(call_options, txn);
 	if (!status.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("commit transaction", status);
 		throw std::runtime_error("PostHog: CommitTransaction failed: " + status.ToString());
 	}
 }
@@ -424,6 +550,7 @@ void PostHogFlightClient::RollbackTransaction(const TransactionId &txn_id) {
 	arrow::flight::sql::Transaction txn(txn_id);
 	auto status = sql_client_->Rollback(call_options, txn);
 	if (!status.ok()) {
+		InvalidateSessionTokenIfRetryableLocked("rollback transaction", status);
 		throw std::runtime_error("PostHog: RollbackTransaction failed: " + status.ToString());
 	}
 }
@@ -435,87 +562,94 @@ std::vector<PostHogDbSchemaInfo> PostHogFlightClient::ListDbSchemas(const std::s
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
 	}
 
-	auto call_options = GetCallOptions();
+	auto run_once = [&]() -> arrow::Result<std::vector<PostHogDbSchemaInfo>> {
+		// GetDbSchemas returns information about schemas/catalogs.
+		// Parameters: options, catalog (nullptr = all), db_schema_filter_pattern (nullptr = all)
+		auto info_result = sql_client_->GetDbSchemas(GetCallOptions(), catalog.empty() ? nullptr : &catalog, nullptr);
+		if (!info_result.ok()) {
+			return info_result.status();
+		}
 
-	// GetDbSchemas returns information about schemas/catalogs
-	// Parameters: options, catalog (nullptr = all), db_schema_filter_pattern (nullptr = all)
-	auto info_result = sql_client_->GetDbSchemas(call_options, catalog.empty() ? nullptr : &catalog, nullptr);
-	if (!info_result.ok()) {
-		throw std::runtime_error("PostHog: Failed to list db schemas: " + info_result.status().ToString());
-	}
+		std::vector<PostHogDbSchemaInfo> schemas;
+		auto flight_info = std::move(*info_result);
+		if (flight_info->endpoints().empty()) {
+			return schemas;
+		}
 
-	std::vector<PostHogDbSchemaInfo> schemas;
-	auto flight_info = std::move(*info_result);
+		// Fetch the schema list.
+		auto stream_result = sql_client_->DoGet(GetCallOptions(), flight_info->endpoints()[0].ticket);
+		if (!stream_result.ok()) {
+			return stream_result.status();
+		}
 
-	if (flight_info->endpoints().empty()) {
+		auto stream = std::move(*stream_result);
+		while (true) {
+			auto chunk_result = stream->Next();
+			if (!chunk_result.ok()) {
+				return chunk_result.status();
+			}
+
+			const auto &chunk = *chunk_result;
+			if (!chunk.data) {
+				break;
+			}
+
+			auto catalog_col = chunk.data->GetColumnByName("catalog_name");
+
+			// RecordBatch::GetColumnByName returns Array, not ChunkedArray.
+			auto schema_col = chunk.data->GetColumnByName("db_schema_name");
+			if (!schema_col) {
+				schema_col = chunk.data->GetColumnByName("schema_name");
+			}
+			if (!schema_col) {
+				continue;
+			}
+
+			auto read_string = [&](const std::shared_ptr<arrow::Array> &array, int64_t row) -> std::string {
+				if (!array) {
+					return "";
+				}
+				switch (array->type_id()) {
+				case arrow::Type::STRING: {
+					auto str_array = std::static_pointer_cast<arrow::StringArray>(array);
+					return str_array->IsNull(row) ? "" : std::string(str_array->GetView(row));
+				}
+				case arrow::Type::LARGE_STRING: {
+					auto str_array = std::static_pointer_cast<arrow::LargeStringArray>(array);
+					return str_array->IsNull(row) ? "" : std::string(str_array->GetView(row));
+				}
+				default:
+					throw std::runtime_error("PostHog: Unexpected string column type: " + array->type()->ToString());
+				}
+			};
+
+			for (int64_t i = 0; i < chunk.data->num_rows(); i++) {
+				if (schema_col->IsNull(i)) {
+					continue;
+				}
+				PostHogDbSchemaInfo entry;
+				entry.catalog_name = read_string(catalog_col, i);
+				entry.schema_name = read_string(schema_col, i);
+
+				if (!catalog.empty() && catalog_col && entry.catalog_name != catalog) {
+					continue;
+				}
+				schemas.push_back(std::move(entry));
+			}
+		}
+
 		return schemas;
+	};
+
+	auto result = run_once();
+	if (!result.ok() && ShouldRetryMetadataWithFreshSession(result.status())) {
+		InvalidateSessionTokenLocked("list db schemas retry", &result.status());
+		result = run_once();
 	}
-
-	// Fetch the schema list
-	auto stream_result = sql_client_->DoGet(call_options, flight_info->endpoints()[0].ticket);
-	if (!stream_result.ok()) {
-		throw std::runtime_error("PostHog: Failed to fetch schema list: " + stream_result.status().ToString());
+	if (!result.ok()) {
+		throw std::runtime_error("PostHog: Failed to list db schemas: " + result.status().ToString());
 	}
-
-	auto stream = std::move(*stream_result);
-
-	while (true) {
-		auto chunk_result = stream->Next();
-		if (!chunk_result.ok()) {
-			throw std::runtime_error("PostHog: Failed to read schema list: " + chunk_result.status().ToString());
-		}
-
-		const auto &chunk = *chunk_result;
-		if (!chunk.data) {
-			break;
-		}
-
-		auto catalog_col = chunk.data->GetColumnByName("catalog_name");
-
-		// RecordBatch::GetColumnByName returns Array, not ChunkedArray
-		auto schema_col = chunk.data->GetColumnByName("db_schema_name");
-		if (!schema_col) {
-			schema_col = chunk.data->GetColumnByName("schema_name");
-		}
-
-		if (!schema_col) {
-			continue;
-		}
-
-		auto read_string = [&](const std::shared_ptr<arrow::Array> &array, int64_t row) -> std::string {
-			if (!array) {
-				return "";
-			}
-			switch (array->type_id()) {
-			case arrow::Type::STRING: {
-				auto str_array = std::static_pointer_cast<arrow::StringArray>(array);
-				return str_array->IsNull(row) ? "" : std::string(str_array->GetView(row));
-			}
-			case arrow::Type::LARGE_STRING: {
-				auto str_array = std::static_pointer_cast<arrow::LargeStringArray>(array);
-				return str_array->IsNull(row) ? "" : std::string(str_array->GetView(row));
-			}
-			default:
-				throw std::runtime_error("PostHog: Unexpected string column type: " + array->type()->ToString());
-			}
-		};
-
-		for (int64_t i = 0; i < chunk.data->num_rows(); i++) {
-			if (schema_col->IsNull(i)) {
-				continue;
-			}
-			PostHogDbSchemaInfo entry;
-			entry.catalog_name = read_string(catalog_col, i);
-			entry.schema_name = read_string(schema_col, i);
-
-			if (!catalog.empty() && catalog_col && entry.catalog_name != catalog) {
-				continue;
-			}
-			schemas.push_back(std::move(entry));
-		}
-	}
-
-	return schemas;
+	return *result;
 }
 
 std::vector<std::string> PostHogFlightClient::ListTables(const std::string &catalog, const std::string &schema) {
@@ -527,64 +661,64 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
 	}
 
-	auto call_options = GetCallOptions();
+	auto run_once = [&]() -> arrow::Result<std::vector<std::string>> {
+		// GetTables returns information about tables.
+		// Parameters: catalog, schema_filter_pattern, table_name_filter_pattern, include_schema, table_types
+		auto get_tables_started_at = SteadyClock::now();
+		auto info_result = sql_client_->GetTables(GetCallOptions(), catalog.empty() ? nullptr : &catalog, &schema,
+		                                          nullptr, false, nullptr);
+		if (!info_result.ok()) {
+			return info_result.status();
+		}
+		POSTHOG_LOG_DEBUG("Flight ListTables GetTables RPC completed in %lld ms",
+		                  static_cast<long long>(ElapsedMillis(get_tables_started_at)));
 
-	// GetTables returns information about tables
-	// Parameters: catalog, schema_filter_pattern, table_name_filter_pattern, include_schema, table_types
-	auto get_tables_started_at = SteadyClock::now();
-	auto info_result =
-	    sql_client_->GetTables(call_options, catalog.empty() ? nullptr : &catalog, &schema, nullptr, false, nullptr);
-	if (!info_result.ok()) {
-		throw std::runtime_error("PostHog: Failed to list tables: " + info_result.status().ToString());
-	}
-	POSTHOG_LOG_DEBUG("Flight ListTables GetTables RPC completed in %lld ms",
-	                  static_cast<long long>(ElapsedMillis(get_tables_started_at)));
-
-	std::vector<std::string> tables;
-	auto flight_info = std::move(*info_result);
-	POSTHOG_LOG_DEBUG("Flight ListTables endpoints=%zu", flight_info->endpoints().size());
-
-	if (flight_info->endpoints().empty()) {
-		POSTHOG_LOG_DEBUG("Flight ListTables finished with 0 endpoints in %lld ms",
-		                  static_cast<long long>(ElapsedMillis(op_started_at)));
-		return tables;
-	}
-
-	// Fetch the table list
-	auto do_get_started_at = SteadyClock::now();
-	auto stream_result = sql_client_->DoGet(call_options, flight_info->endpoints()[0].ticket);
-	if (!stream_result.ok()) {
-		throw std::runtime_error("PostHog: Failed to fetch table list: " + stream_result.status().ToString());
-	}
-	POSTHOG_LOG_DEBUG("Flight ListTables DoGet opened in %lld ms",
-	                  static_cast<long long>(ElapsedMillis(do_get_started_at)));
-
-	auto stream = std::move(*stream_result);
-	size_t chunk_count = 0;
-	size_t row_count = 0;
-
-	while (true) {
-		auto next_started_at = SteadyClock::now();
-		auto chunk_result = stream->Next();
-		if (!chunk_result.ok()) {
-			throw std::runtime_error("PostHog: Failed to read table list: " + chunk_result.status().ToString());
+		std::vector<std::string> tables;
+		auto flight_info = std::move(*info_result);
+		POSTHOG_LOG_DEBUG("Flight ListTables endpoints=%zu", flight_info->endpoints().size());
+		if (flight_info->endpoints().empty()) {
+			POSTHOG_LOG_DEBUG("Flight ListTables finished with 0 endpoints in %lld ms",
+			                  static_cast<long long>(ElapsedMillis(op_started_at)));
+			return tables;
 		}
 
-		const auto &chunk = *chunk_result;
-		if (!chunk.data) {
-			POSTHOG_LOG_DEBUG("Flight ListTables stream drained (chunks=%zu rows=%zu) in %lld ms", chunk_count,
-			                  row_count, static_cast<long long>(ElapsedMillis(op_started_at)));
-			break;
+		// Fetch the table list.
+		auto do_get_started_at = SteadyClock::now();
+		auto stream_result = sql_client_->DoGet(GetCallOptions(), flight_info->endpoints()[0].ticket);
+		if (!stream_result.ok()) {
+			return stream_result.status();
 		}
-		chunk_count++;
-		row_count += static_cast<size_t>(chunk.data->num_rows());
-		POSTHOG_LOG_DEBUG("Flight ListTables chunk #%zu rows=%lld next_ms=%lld", chunk_count,
-		                  static_cast<long long>(chunk.data->num_rows()),
-		                  static_cast<long long>(ElapsedMillis(next_started_at)));
+		POSTHOG_LOG_DEBUG("Flight ListTables DoGet opened in %lld ms",
+		                  static_cast<long long>(ElapsedMillis(do_get_started_at)));
 
-		auto catalog_col = chunk.data->GetColumnByName("catalog_name");
-		auto table_col = chunk.data->GetColumnByName("table_name");
-		if (table_col) {
+		auto stream = std::move(*stream_result);
+		size_t chunk_count = 0;
+		size_t row_count = 0;
+		while (true) {
+			auto next_started_at = SteadyClock::now();
+			auto chunk_result = stream->Next();
+			if (!chunk_result.ok()) {
+				return chunk_result.status();
+			}
+
+			const auto &chunk = *chunk_result;
+			if (!chunk.data) {
+				POSTHOG_LOG_DEBUG("Flight ListTables stream drained (chunks=%zu rows=%zu) in %lld ms", chunk_count,
+				                  row_count, static_cast<long long>(ElapsedMillis(op_started_at)));
+				break;
+			}
+			chunk_count++;
+			row_count += static_cast<size_t>(chunk.data->num_rows());
+			POSTHOG_LOG_DEBUG("Flight ListTables chunk #%zu rows=%lld next_ms=%lld", chunk_count,
+			                  static_cast<long long>(chunk.data->num_rows()),
+			                  static_cast<long long>(ElapsedMillis(next_started_at)));
+
+			auto catalog_col = chunk.data->GetColumnByName("catalog_name");
+			auto table_col = chunk.data->GetColumnByName("table_name");
+			if (!table_col) {
+				continue;
+			}
+
 			auto row_matches_catalog = [&](int64_t row) -> bool {
 				if (catalog.empty() || !catalog_col) {
 					return true;
@@ -632,11 +766,22 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 				                         table_col->type()->ToString());
 			}
 		}
+
+		return tables;
+	};
+
+	auto result = run_once();
+	if (!result.ok() && ShouldRetryMetadataWithFreshSession(result.status())) {
+		InvalidateSessionTokenLocked("list tables retry", &result.status());
+		result = run_once();
+	}
+	if (!result.ok()) {
+		throw std::runtime_error("PostHog: Failed to list tables: " + result.status().ToString());
 	}
 
-	POSTHOG_LOG_DEBUG("Flight ListTables done tables=%zu total_ms=%lld", tables.size(),
+	POSTHOG_LOG_DEBUG("Flight ListTables done tables=%zu total_ms=%lld", result->size(),
 	                  static_cast<long long>(ElapsedMillis(op_started_at)));
-	return tables;
+	return *result;
 }
 
 std::shared_ptr<arrow::Schema>
@@ -650,180 +795,199 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
 	}
 
-	auto call_options = GetCallOptions();
+	auto run_once = [&]() -> arrow::Result<std::shared_ptr<arrow::Schema>> {
+		// GetTables with include_schema=true returns serialized schema in the result.
+		auto get_tables_started_at = SteadyClock::now();
+		auto info_result = sql_client_->GetTables(GetCallOptions(), catalog.empty() ? nullptr : &catalog, &schema,
+		                                          &table, true, nullptr);
+		if (!info_result.ok()) {
+			return info_result.status();
+		}
+		POSTHOG_LOG_DEBUG("Flight GetTableSchema GetTables RPC completed in %lld ms",
+		                  static_cast<long long>(ElapsedMillis(get_tables_started_at)));
 
-	// GetTables with include_schema=true returns serialized schema in the result
-	auto get_tables_started_at = SteadyClock::now();
-	auto info_result =
-	    sql_client_->GetTables(call_options, catalog.empty() ? nullptr : &catalog, &schema, &table, true, nullptr);
-	if (!info_result.ok()) {
-		throw std::runtime_error("PostHog: Failed to get table schema: " + info_result.status().ToString());
-	}
-	POSTHOG_LOG_DEBUG("Flight GetTableSchema GetTables RPC completed in %lld ms",
-	                  static_cast<long long>(ElapsedMillis(get_tables_started_at)));
+		auto flight_info = std::move(*info_result);
+		POSTHOG_LOG_DEBUG("Flight GetTableSchema endpoints=%zu", flight_info->endpoints().size());
+		if (flight_info->endpoints().empty()) {
+			throw std::runtime_error("PostHog: Table not found(endpoint empty): " + schema + "." + table);
+		}
 
-	auto flight_info = std::move(*info_result);
-	POSTHOG_LOG_DEBUG("Flight GetTableSchema endpoints=%zu", flight_info->endpoints().size());
+		// Fetch the table metadata.
+		auto do_get_started_at = SteadyClock::now();
+		auto stream_result = sql_client_->DoGet(GetCallOptions(), flight_info->endpoints()[0].ticket);
+		if (!stream_result.ok()) {
+			return stream_result.status();
+		}
+		POSTHOG_LOG_DEBUG("Flight GetTableSchema DoGet opened in %lld ms",
+		                  static_cast<long long>(ElapsedMillis(do_get_started_at)));
 
-	if (flight_info->endpoints().empty()) {
-		throw std::runtime_error("PostHog: Table not found(endpoint empty): " + schema + "." + table);
-	}
+		auto stream = std::move(*stream_result);
+		auto next_started_at = SteadyClock::now();
+		auto chunk_result = stream->Next();
+		if (!chunk_result.ok()) {
+			return chunk_result.status();
+		}
+		POSTHOG_LOG_DEBUG("Flight GetTableSchema first chunk read in %lld ms",
+		                  static_cast<long long>(ElapsedMillis(next_started_at)));
 
-	// Fetch the table metadata
-	auto do_get_started_at = SteadyClock::now();
-	auto stream_result = sql_client_->DoGet(call_options, flight_info->endpoints()[0].ticket);
-	if (!stream_result.ok()) {
-		throw std::runtime_error("PostHog: Failed to fetch table metadata: " + stream_result.status().ToString());
-	}
-	POSTHOG_LOG_DEBUG("Flight GetTableSchema DoGet opened in %lld ms",
-	                  static_cast<long long>(ElapsedMillis(do_get_started_at)));
+		const auto &chunk = *chunk_result;
+		if (!chunk.data || chunk.data->num_rows() == 0) {
+			throw std::runtime_error("PostHog: Table not found(no data): " + schema + "." + table);
+		}
+		POSTHOG_LOG_DEBUG("Flight GetTableSchema first chunk rows=%lld",
+		                  static_cast<long long>(chunk.data->num_rows()));
 
-	auto stream = std::move(*stream_result);
-	auto next_started_at = SteadyClock::now();
-	auto chunk_result = stream->Next();
-	if (!chunk_result.ok()) {
-		throw std::runtime_error("PostHog: Failed to read table metadata: " + chunk_result.status().ToString());
-	}
-	POSTHOG_LOG_DEBUG("Flight GetTableSchema first chunk read in %lld ms",
-	                  static_cast<long long>(ElapsedMillis(next_started_at)));
+		// The table_schema column contains the IPC-serialized Arrow schema.
+		// RecordBatch::GetColumnByName returns Array, not ChunkedArray.
+		auto schema_col = chunk.data->GetColumnByName("table_schema");
+		if (!schema_col) {
+			throw std::runtime_error("PostHog: Server did not return table schema for: " + schema + "." + table);
+		}
 
-	const auto &chunk = *chunk_result;
-	if (!chunk.data || chunk.data->num_rows() == 0) {
-		throw std::runtime_error("PostHog: Table not found(no data): " + schema + "." + table);
-	}
-	POSTHOG_LOG_DEBUG("Flight GetTableSchema first chunk rows=%lld", static_cast<long long>(chunk.data->num_rows()));
+		auto catalog_col = chunk.data->GetColumnByName("catalog_name");
+		auto table_name_col = chunk.data->GetColumnByName("table_name");
+		if (!table_name_col) {
+			throw std::runtime_error("PostHog: Server did not return table_name column");
+		}
 
-	// The table_schema column contains the IPC-serialized Arrow schema
-	// RecordBatch::GetColumnByName returns Array, not ChunkedArray
-	auto schema_col = chunk.data->GetColumnByName("table_schema");
-	if (!schema_col) {
-		throw std::runtime_error("PostHog: Server did not return table schema for: " + schema + "." + table);
-	}
+		// Find the row matching the requested table name.
+		int64_t row_idx = -1;
+		for (int64_t i = 0; i < chunk.data->num_rows(); i++) {
+			if (!catalog.empty() && catalog_col) {
+				switch (catalog_col->type_id()) {
+				case arrow::Type::STRING: {
+					auto catalog_array = std::static_pointer_cast<arrow::StringArray>(catalog_col);
+					if (catalog_array->IsNull(i) || catalog_array->GetView(i) != catalog) {
+						continue;
+					}
+					break;
+				}
+				case arrow::Type::LARGE_STRING: {
+					auto catalog_array = std::static_pointer_cast<arrow::LargeStringArray>(catalog_col);
+					if (catalog_array->IsNull(i) || catalog_array->GetView(i) != catalog) {
+						continue;
+					}
+					break;
+				}
+				default:
+					throw std::runtime_error("PostHog: Unexpected catalog_name column type: " +
+					                         catalog_col->type()->ToString());
+				}
+			}
 
-	auto catalog_col = chunk.data->GetColumnByName("catalog_name");
-	auto table_name_col = chunk.data->GetColumnByName("table_name");
-	if (!table_name_col) {
-		throw std::runtime_error("PostHog: Server did not return table_name column");
-	}
-
-	// Find the row matching the requested table name
-	int64_t row_idx = -1;
-	for (int64_t i = 0; i < chunk.data->num_rows(); i++) {
-		if (!catalog.empty() && catalog_col) {
-			switch (catalog_col->type_id()) {
+			switch (table_name_col->type_id()) {
 			case arrow::Type::STRING: {
-				auto catalog_array = std::static_pointer_cast<arrow::StringArray>(catalog_col);
-				if (catalog_array->IsNull(i) || catalog_array->GetView(i) != catalog) {
-					continue;
+				auto table_name_array = std::static_pointer_cast<arrow::StringArray>(table_name_col);
+				if (!table_name_array->IsNull(i) && table_name_array->GetView(i) == table) {
+					row_idx = i;
 				}
 				break;
 			}
 			case arrow::Type::LARGE_STRING: {
-				auto catalog_array = std::static_pointer_cast<arrow::LargeStringArray>(catalog_col);
-				if (catalog_array->IsNull(i) || catalog_array->GetView(i) != catalog) {
-					continue;
+				auto table_name_array = std::static_pointer_cast<arrow::LargeStringArray>(table_name_col);
+				if (!table_name_array->IsNull(i) && table_name_array->GetView(i) == table) {
+					row_idx = i;
 				}
 				break;
 			}
 			default:
-				throw std::runtime_error("PostHog: Unexpected catalog_name column type: " +
-				                         catalog_col->type()->ToString());
+				throw std::runtime_error("PostHog: Unexpected table_name column type: " +
+				                         table_name_col->type()->ToString());
+			}
+
+			if (row_idx >= 0) {
+				break;
 			}
 		}
 
-		switch (table_name_col->type_id()) {
-		case arrow::Type::STRING: {
-			auto table_name_array = std::static_pointer_cast<arrow::StringArray>(table_name_col);
-			if (!table_name_array->IsNull(i) && table_name_array->GetView(i) == table) {
-				row_idx = i;
+		if (row_idx < 0) {
+			throw std::runtime_error("PostHog: Table not found in metadata: " + schema + "." + table);
+		}
+
+		std::string_view schema_bytes;
+		switch (schema_col->type_id()) {
+		case arrow::Type::BINARY: {
+			auto schema_array = std::static_pointer_cast<arrow::BinaryArray>(schema_col);
+			if (schema_array->IsNull(row_idx)) {
+				throw std::runtime_error("PostHog: Table schema is null for: " + schema + "." + table);
 			}
+			schema_bytes = schema_array->GetView(row_idx);
 			break;
 		}
-		case arrow::Type::LARGE_STRING: {
-			auto table_name_array = std::static_pointer_cast<arrow::LargeStringArray>(table_name_col);
-			if (!table_name_array->IsNull(i) && table_name_array->GetView(i) == table) {
-				row_idx = i;
+		case arrow::Type::LARGE_BINARY: {
+			auto schema_array = std::static_pointer_cast<arrow::LargeBinaryArray>(schema_col);
+			if (schema_array->IsNull(row_idx)) {
+				throw std::runtime_error("PostHog: Table schema is null for: " + schema + "." + table);
 			}
+			schema_bytes = schema_array->GetView(row_idx);
 			break;
 		}
 		default:
-			throw std::runtime_error("PostHog: Unexpected table_name column type: " +
-			                         table_name_col->type()->ToString());
+			throw std::runtime_error("PostHog: Unexpected table_schema column type: " + schema_col->type()->ToString());
 		}
 
-		if (row_idx >= 0) {
-			break;
+		// Drain remaining chunks so this stream is fully consumed before the next
+		// RPC on a single-connection Flight session.
+		size_t drain_chunks = 0;
+		while (true) {
+			auto drain_started_at = SteadyClock::now();
+			auto next_chunk_result = stream->Next();
+			if (!next_chunk_result.ok()) {
+				return next_chunk_result.status();
+			}
+			const auto &next_chunk = *next_chunk_result;
+			if (!next_chunk.data) {
+				POSTHOG_LOG_DEBUG("Flight GetTableSchema drained %zu additional chunks", drain_chunks);
+				break;
+			}
+			drain_chunks++;
+			POSTHOG_LOG_DEBUG("Flight GetTableSchema drain chunk #%zu rows=%lld next_ms=%lld", drain_chunks,
+			                  static_cast<long long>(next_chunk.data->num_rows()),
+			                  static_cast<long long>(ElapsedMillis(drain_started_at)));
 		}
-	}
 
-	if (row_idx < 0) {
-		throw std::runtime_error("PostHog: Table not found in metadata: " + schema + "." + table);
-	}
+		// Deserialize the Arrow schema from IPC format.
+		arrow::ipc::DictionaryMemo dict_memo;
+		auto buffer = std::make_shared<arrow::Buffer>(reinterpret_cast<const uint8_t *>(schema_bytes.data()),
+		                                              static_cast<int64_t>(schema_bytes.size()));
+		arrow::io::BufferReader reader(buffer);
 
-	std::string_view schema_bytes;
-	switch (schema_col->type_id()) {
-	case arrow::Type::BINARY: {
-		auto schema_array = std::static_pointer_cast<arrow::BinaryArray>(schema_col);
-		if (schema_array->IsNull(row_idx)) {
-			throw std::runtime_error("PostHog: Table schema is null for: " + schema + "." + table);
+		auto schema_read_result = arrow::ipc::ReadSchema(&reader, &dict_memo);
+		if (!schema_read_result.ok()) {
+			return schema_read_result.status();
 		}
-		schema_bytes = schema_array->GetView(row_idx);
-		break;
+
+		return *schema_read_result;
+	};
+
+	auto result = run_once();
+	if (!result.ok() && ShouldRetryMetadataWithFreshSession(result.status())) {
+		InvalidateSessionTokenLocked("get table schema retry", &result.status());
+		result = run_once();
 	}
-	case arrow::Type::LARGE_BINARY: {
-		auto schema_array = std::static_pointer_cast<arrow::LargeBinaryArray>(schema_col);
-		if (schema_array->IsNull(row_idx)) {
-			throw std::runtime_error("PostHog: Table schema is null for: " + schema + "." + table);
-		}
-		schema_bytes = schema_array->GetView(row_idx);
-		break;
-	}
-	default:
-		throw std::runtime_error("PostHog: Unexpected table_schema column type: " + schema_col->type()->ToString());
+	if (!result.ok()) {
+		throw std::runtime_error("PostHog: Failed to get table schema: " + result.status().ToString());
 	}
 
-	// Drain remaining chunks so this stream is fully consumed before the next
-	// RPC on a single-connection Flight session.
-	size_t drain_chunks = 0;
-	while (true) {
-		auto drain_started_at = SteadyClock::now();
-		auto next_chunk_result = stream->Next();
-		if (!next_chunk_result.ok()) {
-			throw std::runtime_error("PostHog: Failed to finish reading table metadata: " +
-			                         next_chunk_result.status().ToString());
-		}
-		const auto &next_chunk = *next_chunk_result;
-		if (!next_chunk.data) {
-			POSTHOG_LOG_DEBUG("Flight GetTableSchema drained %zu additional chunks", drain_chunks);
-			break;
-		}
-		drain_chunks++;
-		POSTHOG_LOG_DEBUG("Flight GetTableSchema drain chunk #%zu rows=%lld next_ms=%lld", drain_chunks,
-		                  static_cast<long long>(next_chunk.data->num_rows()),
-		                  static_cast<long long>(ElapsedMillis(drain_started_at)));
-	}
-
-	// Deserialize the Arrow schema from IPC format
-	arrow::ipc::DictionaryMemo dict_memo;
-	auto buffer = std::make_shared<arrow::Buffer>(reinterpret_cast<const uint8_t *>(schema_bytes.data()),
-	                                              static_cast<int64_t>(schema_bytes.size()));
-	arrow::io::BufferReader reader(buffer);
-
-	auto schema_read_result = arrow::ipc::ReadSchema(&reader, &dict_memo);
-	if (!schema_read_result.ok()) {
-		throw std::runtime_error("PostHog: Failed to deserialize table schema: " +
-		                         schema_read_result.status().ToString());
-	}
-
-	POSTHOG_LOG_DEBUG("Flight GetTableSchema done fields=%d total_ms=%lld", (*schema_read_result)->num_fields(),
+	POSTHOG_LOG_DEBUG("Flight GetTableSchema done fields=%d total_ms=%lld", (*result)->num_fields(),
 	                  static_cast<long long>(ElapsedMillis(op_started_at)));
-	return *schema_read_result;
+	return *result;
 }
 
 PostHogFlightQueryStream::PostHogFlightQueryStream(arrow::flight::sql::FlightSqlClient &client,
                                                    std::mutex &client_mutex, arrow::flight::FlightCallOptions options,
-                                                   std::unique_ptr<arrow::flight::FlightInfo> info)
-    : client_(client), client_mutex_(client_mutex), options_(std::move(options)), info_(std::move(info)) {
+                                                   std::unique_ptr<arrow::flight::FlightInfo> info,
+                                                   std::string *session_token, std::mutex *session_token_mutex)
+    : client_(client), client_mutex_(client_mutex), options_(std::move(options)), info_(std::move(info)),
+      session_token_(session_token), session_token_mutex_(session_token_mutex) {
+}
+
+void PostHogFlightQueryStream::InvalidateSessionTokenIfRetryable(const arrow::Status &status) {
+	if (!session_token_ || !session_token_mutex_ || !IsSessionTokenRetryableStatus(status)) {
+		return;
+	}
+	std::lock_guard<std::mutex> lock(*session_token_mutex_);
+	session_token_->clear();
 }
 
 arrow::Status PostHogFlightQueryStream::OpenReader() {
@@ -839,6 +1003,7 @@ arrow::Status PostHogFlightQueryStream::OpenReader() {
 	std::lock_guard<std::mutex> lock(client_mutex_);
 	auto stream_result = client_.DoGet(options_, info_->endpoints()[endpoint_index_].ticket);
 	if (!stream_result.ok()) {
+		InvalidateSessionTokenIfRetryable(stream_result.status());
 		return stream_result.status();
 	}
 	reader_ = std::move(*stream_result);
@@ -880,6 +1045,7 @@ arrow::Result<arrow::flight::FlightStreamChunk> PostHogFlightQueryStream::Next()
 		}
 		auto chunk_result = reader_->Next();
 		if (!chunk_result.ok()) {
+			InvalidateSessionTokenIfRetryable(chunk_result.status());
 			return chunk_result.status();
 		}
 		auto chunk = *chunk_result;

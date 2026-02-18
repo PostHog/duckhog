@@ -1,0 +1,33 @@
+# name: test/sql/integration/update_returning_remote.test_slow
+# description: UPDATE ... RETURNING currently unsupported on remote DuckLake table
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.update_returning_remote CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.update_returning_remote;
+
+statement ok
+CREATE TABLE remote_flight.update_returning_remote.t(i INT, j INT);
+
+statement ok
+INSERT INTO remote_flight.update_returning_remote.t VALUES (1, 10), (2, 20), (3, 30);
+
+statement error
+UPDATE remote_flight.update_returning_remote.t SET j = j + 5 WHERE i = 1 RETURNING i;
+----
+UPDATE ... RETURNING is not yet supported

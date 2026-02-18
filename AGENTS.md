@@ -12,14 +12,15 @@
 - When asked to work on/implement a task in a document, mark the task upon completion
 - When creating new branch from origin/main, do not track origin/main. 
 - Before each commit, run make format-fix and make tidy-check in venv
+- Avoid C++ tests, always prefer SQLLogic
 
 ## Tests
-- Unit tests only: `./build/release/test/unittest "test/sql/*.test" "test/sql/connection/*.test"`
+- Unit tests only: `./build/release/test/unittest "[duckhog],test/sql/unit/*"`
 - Integration tests (`duckgres` control-plane Flight):
   - Expects duckgres checkout at `../duckgres` (or set `DUCKGRES_ROOT`)
   - `./scripts/test-servers.sh start --background --seed`
   - `eval "$(./scripts/test-servers.sh env)"`
-  - `./build/release/test/unittest "test/sql/queries/*"`
+  - `./build/release/test/unittest "test/sql/integration/*"`
   - `./scripts/test-servers.sh stop`
   - in codex sandbox mode, those must run in a single combined command to avoid being killed
 - Full local suite (unit + integration with automatic setup/teardown): `just test-all`

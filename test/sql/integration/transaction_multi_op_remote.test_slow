@@ -1,0 +1,277 @@
+# name: test/sql/integration/transaction_multi_op_remote.test_slow
+# description: Multi-operation transactions on remote tables
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.txn_test CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.txn_test;
+
+# ============================================================
+# INSERT + UPDATE + DELETE in single txn → COMMIT
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.txn_test.t(id INT, val VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.txn_test.t VALUES (1, 'original');
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.txn_test.t VALUES (2, 'new_row');
+
+query I
+UPDATE remote_flight.txn_test.t SET val = 'modified' WHERE id = 1;
+----
+1
+
+query I
+DELETE FROM remote_flight.txn_test.t WHERE id = 2;
+----
+1
+
+statement ok
+COMMIT;
+
+query IT
+SELECT id, val FROM remote_flight.txn_test.t ORDER BY id;
+----
+1	modified
+
+# ============================================================
+# INSERT + UPDATE + DELETE in single txn → ROLLBACK
+# ============================================================
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.txn_test.t VALUES (10, 'will_vanish');
+
+query I
+UPDATE remote_flight.txn_test.t SET val = 'will_revert' WHERE id = 1;
+----
+1
+
+query I
+DELETE FROM remote_flight.txn_test.t WHERE id = 1;
+----
+1
+
+statement ok
+ROLLBACK;
+
+# Everything should be back to pre-txn state
+query IT
+SELECT id, val FROM remote_flight.txn_test.t ORDER BY id;
+----
+1	modified
+
+# ============================================================
+# Multiple INSERTs in single txn (batch accumulation)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.txn_test.batch(seq INT);
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.txn_test.batch VALUES (1), (2), (3);
+
+statement ok
+INSERT INTO remote_flight.txn_test.batch VALUES (4), (5);
+
+statement ok
+INSERT INTO remote_flight.txn_test.batch VALUES (6);
+
+statement ok
+COMMIT;
+
+query I
+SELECT COUNT(*) FROM remote_flight.txn_test.batch;
+----
+6
+
+query I
+SELECT SUM(seq) FROM remote_flight.txn_test.batch;
+----
+21
+
+# ============================================================
+# DDL (CREATE TABLE) + DML (INSERT) in single txn → COMMIT
+# ============================================================
+
+statement ok
+BEGIN;
+
+statement ok
+CREATE TABLE remote_flight.txn_test.ddl_dml(x INT);
+
+statement ok
+INSERT INTO remote_flight.txn_test.ddl_dml VALUES (42);
+
+statement ok
+COMMIT;
+
+query I
+SELECT x FROM remote_flight.txn_test.ddl_dml;
+----
+42
+
+# ============================================================
+# DDL + DML in single txn → ROLLBACK
+# ============================================================
+
+statement ok
+BEGIN;
+
+statement ok
+CREATE TABLE remote_flight.txn_test.ddl_dml_rb(x INT);
+
+statement ok
+INSERT INTO remote_flight.txn_test.ddl_dml_rb VALUES (99);
+
+statement ok
+ROLLBACK;
+
+# Table should not exist after rollback
+statement error
+SELECT * FROM remote_flight.txn_test.ddl_dml_rb;
+----
+
+# ============================================================
+# Error mid-transaction after successful operations
+# ============================================================
+
+statement ok
+ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_mem_txn;
+
+statement ok
+DROP TABLE IF EXISTS remote_mem_txn_memory.err_test;
+
+statement ok
+CREATE TABLE remote_mem_txn_memory.err_test(id INT PRIMARY KEY, val VARCHAR);
+
+statement ok
+INSERT INTO remote_mem_txn_memory.err_test VALUES (1, 'first');
+
+statement ok
+BEGIN;
+
+# This succeeds
+statement ok
+INSERT INTO remote_mem_txn_memory.err_test VALUES (2, 'second');
+
+# This should fail — duplicate PK
+statement error
+INSERT INTO remote_mem_txn_memory.err_test VALUES (1, 'duplicate');
+----
+
+statement ok
+ROLLBACK;
+
+# After rollback, only original row should exist
+query IT
+SELECT id, val FROM remote_mem_txn_memory.err_test ORDER BY id;
+----
+1	first
+
+# ============================================================
+# INSERT into A, INSERT...SELECT from A to B, in one txn
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.txn_test.source(x INT);
+
+statement ok
+CREATE TABLE remote_flight.txn_test.target(x INT);
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.txn_test.source VALUES (100), (200), (300);
+
+statement ok
+INSERT INTO remote_flight.txn_test.target SELECT x FROM remote_flight.txn_test.source;
+
+statement ok
+COMMIT;
+
+query I
+SELECT x FROM remote_flight.txn_test.target ORDER BY x;
+----
+100
+200
+300
+
+# ============================================================
+# Interleaved reads and writes in single txn
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.txn_test.interleave(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.txn_test.interleave VALUES (1, 10);
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.txn_test.interleave VALUES (2, 20);
+
+# Read mid-txn — should see both rows
+query I
+SELECT COUNT(*) FROM remote_flight.txn_test.interleave;
+----
+2
+
+query I
+UPDATE remote_flight.txn_test.interleave SET val = val + 1 WHERE id = 1;
+----
+1
+
+query II
+SELECT id, val FROM remote_flight.txn_test.interleave ORDER BY id;
+----
+1	11
+2	20
+
+statement ok
+COMMIT;
+
+query II
+SELECT id, val FROM remote_flight.txn_test.interleave ORDER BY id;
+----
+1	11
+2	20
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS remote_mem_txn_memory.err_test;
+
+statement ok
+DROP SCHEMA remote_flight.txn_test CASCADE;
