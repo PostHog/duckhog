@@ -11,6 +11,12 @@ EXT_FLAGS += -DMAIN_BRANCH_VERSIONING=0
 # Include the Makefile from extension-ci-tools
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
+.PHONY: release_unittest
+release_unittest: ${EXTENSION_CONFIG_STEP}
+	mkdir -p build/release
+	cmake $(GENERATOR) $(BUILD_FLAGS) $(EXT_RELEASE_FLAGS) $(VCPKG_MANIFEST_FLAGS) -DCMAKE_BUILD_TYPE=Release -S $(DUCKDB_SRCDIR) -B build/release
+	cmake --build build/release --config Release --target unittest
+
 .PHONY: dev-setup
 dev-setup:
 	python3 -m venv .venv
