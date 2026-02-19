@@ -305,7 +305,7 @@ SELECT COUNT(*) FROM remote_flight.type_test.huge WHERE h IS NOT NULL;
 
 # ============================================================
 # DECIMAL — known broken (scale > 0 returns NULL)
-# See docs/DUCKLAKE_BUGS.md #2
+# See docs/RELATED_BUGS.md #2
 # ============================================================
 
 # DECIMAL(p, 0) works

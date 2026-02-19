@@ -112,6 +112,25 @@ TEST_CASE("RenderAtClauseSQL - BOOLEAN is quoted", "[duckhog][at-clause]") {
 }
 
 // ============================================================
+// Single-quote escaping in non-integral values
+// ============================================================
+
+TEST_CASE("RenderAtClauseSQL - embedded single quote is escaped", "[duckhog][at-clause]") {
+	BoundAtClause clause("TIMESTAMP", Value("2024-01-15'injection"));
+	REQUIRE(RenderAtClauseSQL(clause) == "AT (TIMESTAMP => '2024-01-15''injection')");
+}
+
+TEST_CASE("RenderAtClauseSQL - multiple embedded single quotes", "[duckhog][at-clause]") {
+	BoundAtClause clause("TIMESTAMP", Value("it's a quote's world"));
+	REQUIRE(RenderAtClauseSQL(clause) == "AT (TIMESTAMP => 'it''s a quote''s world')");
+}
+
+TEST_CASE("RenderAtClauseSQL - value that is just a single quote", "[duckhog][at-clause]") {
+	BoundAtClause clause("TIMESTAMP", Value("'"));
+	REQUIRE(RenderAtClauseSQL(clause) == "AT (TIMESTAMP => '''')");
+}
+
+// ============================================================
 // Unit string preservation
 // ============================================================
 

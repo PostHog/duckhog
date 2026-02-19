@@ -427,6 +427,29 @@ SELECT COUNT(*) >= 1 FROM remote_flight.snapshots();
 ----
 true
 
+# Projection regression: selecting snapshot_time alone must return real
+# timestamps, not epoch-near values from column swap (see projection pushdown fix).
+# If projection is broken, snapshot_time contains the integer snapshot_id
+# reinterpreted as epoch-µs, yielding dates near 1970-01-01.
+query I
+SELECT COUNT(*) FROM (
+  SELECT snapshot_time FROM remote_flight.snapshots()
+) sub
+WHERE snapshot_time < TIMESTAMPTZ '2020-01-01';
+----
+0
+
+# Same check: snapshot_id projected alone must be a small integer, not epoch µs.
+# If projection is broken, snapshot_id contains the timestamp reinterpreted
+# as an integer, yielding values in the trillions.
+query I
+SELECT COUNT(*) FROM (
+  SELECT snapshot_id FROM remote_flight.snapshots()
+) sub
+WHERE snapshot_id > 1000000000;
+----
+0
+
 # snapshot_id is monotonically increasing
 query I
 SELECT COUNT(*) FROM (
@@ -436,6 +459,284 @@ SELECT COUNT(*) FROM (
 WHERE prev_id IS NOT NULL AND snapshot_id <= prev_id;
 ----
 0
+
+# ============================================================
+# AT TIMESTAMP: timestamp-based time travel
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.rm10.ts_t(val INT);
+
+# Capture the snapshot_time right after CREATE (empty table).
+statement ok
+SET VARIABLE ts_after_create = (SELECT MAX(snapshot_time) FROM remote_flight.snapshots());
+
+statement ok
+INSERT INTO remote_flight.rm10.ts_t VALUES (10), (20);
+
+# Capture the snapshot_time after INSERT.
+statement ok
+SET VARIABLE ts_after_insert = (SELECT MAX(snapshot_time) FROM remote_flight.snapshots());
+
+statement ok
+INSERT INTO remote_flight.rm10.ts_t VALUES (30);
+
+# At create timestamp: table was empty
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.ts_t AT (TIMESTAMP => getvariable('ts_after_create'));
+----
+0
+
+# At first-insert timestamp: 2 rows with exact values
+query I
+SELECT val FROM remote_flight.rm10.ts_t AT (TIMESTAMP => getvariable('ts_after_insert')) ORDER BY val;
+----
+10
+20
+
+statement ok
+UPDATE remote_flight.rm10.ts_t SET val = 99 WHERE val = 10;
+
+# After UPDATE, current state reflects the change
+query I
+SELECT val FROM remote_flight.rm10.ts_t ORDER BY val;
+----
+20
+30
+99
+
+# But timestamp before the UPDATE still shows original value
+query I
+SELECT val FROM remote_flight.rm10.ts_t AT (TIMESTAMP => getvariable('ts_after_insert')) ORDER BY val;
+----
+10
+20
+
+# Aggregation on timestamp-traveled table
+query I
+SELECT SUM(val) FROM remote_flight.rm10.ts_t AT (TIMESTAMP => getvariable('ts_after_insert'));
+----
+30
+
+# WHERE clause on timestamp-traveled table
+query I
+SELECT val FROM remote_flight.rm10.ts_t AT (TIMESTAMP => getvariable('ts_after_insert')) WHERE val > 15;
+----
+20
+
+# CTE with AT TIMESTAMP
+query I
+WITH old_data AS (
+  SELECT val FROM remote_flight.rm10.ts_t AT (TIMESTAMP => getvariable('ts_after_create'))
+)
+SELECT COUNT(*) FROM old_data;
+----
+0
+
+# JOIN: version-based and timestamp-based time travel on the same table
+query II
+SELECT v.val AS by_version, t.val AS by_timestamp
+FROM (SELECT * FROM remote_flight.rm10.ts_t AT (TIMESTAMP => getvariable('ts_after_insert'))) AS t
+JOIN (SELECT * FROM remote_flight.rm10.ts_t AT (TIMESTAMP => getvariable('ts_after_insert'))) AS v
+  ON t.val = v.val
+ORDER BY v.val;
+----
+10	10
+20	20
+
+# ============================================================
+# Schema evolution + time travel (L3 limitation — see #74)
+#
+# DuckHog projects current column names into the remote query,
+# but DuckLake resolves AT clauses against the historical schema.
+# When column names differ between current and target version,
+# queries fail or silently omit columns.
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.rm10.evo(a INT, b VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.rm10.evo VALUES (1, 'hello');
+
+statement ok
+SET VARIABLE evo_v1 = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+# -- ADD COLUMN: time travel to before column existed fails --
+
+statement ok
+ALTER TABLE remote_flight.rm10.evo ADD COLUMN c INT;
+
+statement ok
+INSERT INTO remote_flight.rm10.evo VALUES (2, 'world', 42);
+
+# Current state has all 3 columns
+query ITI
+SELECT a, b, c FROM remote_flight.rm10.evo ORDER BY a;
+----
+1	hello	NULL
+2	world	42
+
+# L3: SELECT * at v1 projects "c" which didn't exist yet
+statement error
+SELECT * FROM remote_flight.rm10.evo AT (VERSION => getvariable('evo_v1'));
+----
+Referenced column "c" not found
+
+# Workaround: explicit column list matching the historical schema
+query IT
+SELECT a, b FROM remote_flight.rm10.evo AT (VERSION => getvariable('evo_v1'));
+----
+1	hello
+
+# -- RENAME COLUMN: time travel to before rename fails --
+
+statement ok
+SET VARIABLE evo_v2 = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+ALTER TABLE remote_flight.rm10.evo RENAME COLUMN c TO z;
+
+# Current state uses new name
+query ITI
+SELECT a, b, z FROM remote_flight.rm10.evo ORDER BY a;
+----
+1	hello	NULL
+2	world	42
+
+# L3: SELECT * at v2 projects "z" but it was called "c" at that version
+statement error
+SELECT * FROM remote_flight.rm10.evo AT (VERSION => getvariable('evo_v2'));
+----
+Referenced column "z" not found
+
+# No workaround available: DuckDB's local binder validates against
+# the current schema, so old column name "c" is also rejected.
+statement error
+SELECT a, b, c FROM remote_flight.rm10.evo AT (VERSION => getvariable('evo_v2'));
+----
+Referenced column "c" not found
+
+# -- DROP COLUMN: time travel silently omits the dropped column --
+
+statement ok
+SET VARIABLE evo_v3 = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+ALTER TABLE remote_flight.rm10.evo DROP COLUMN b;
+
+# Current schema is (a, z)
+query II
+SELECT a, z FROM remote_flight.rm10.evo ORDER BY a;
+----
+1	NULL
+2	42
+
+# L3: SELECT * at v3 succeeds but silently omits "b" — it projects
+# only current columns (a, z) which both existed at v3.
+query II
+SELECT * FROM remote_flight.rm10.evo AT (VERSION => getvariable('evo_v3')) ORDER BY a;
+----
+1	NULL
+2	42
+
+# No workaround available: DuckDB's local binder doesn't know about
+# dropped column "b", so it can't be requested by name either.
+statement error
+SELECT a, z, b FROM remote_flight.rm10.evo AT (VERSION => getvariable('evo_v3')) ORDER BY a;
+----
+Referenced column "b" not found
+
+# -- RENAME TABLE: current name at old version is rejected by remote --
+#
+# Native DuckLake resolves table names at the target version, so
+# tbl_b AT (VERSION => before_rename) fails because tbl_b didn't exist
+# yet. DuckHog sends the current name to the remote, which rejects it.
+# Using the old name (tbl_a) also fails because our local binder
+# doesn't know it.
+
+statement ok
+CREATE TABLE remote_flight.rm10.tbl_a(x INT);
+
+statement ok
+INSERT INTO remote_flight.rm10.tbl_a VALUES (1), (2);
+
+statement ok
+SET VARIABLE rename_v1 = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+ALTER TABLE remote_flight.rm10.tbl_a RENAME TO tbl_b;
+
+statement ok
+INSERT INTO remote_flight.rm10.tbl_b VALUES (3);
+
+# Current name works at current version
+query I
+SELECT x FROM remote_flight.rm10.tbl_b ORDER BY x;
+----
+1
+2
+3
+
+# Current name at pre-rename version: remote rejects (matches native DuckLake)
+statement error
+SELECT * FROM remote_flight.rm10.tbl_b AT (VERSION => getvariable('rename_v1'));
+----
+Table with name tbl_b does not exist
+
+# Old name at pre-rename version: local binder rejects (L3 divergence from native)
+# Native DuckLake would allow this because it resolves names at the target version.
+statement error
+SELECT * FROM remote_flight.rm10.tbl_a AT (VERSION => getvariable('rename_v1'));
+----
+Table with name tbl_a does not exist
+
+# Current name at post-rename version works
+statement ok
+SET VARIABLE rename_v2 = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+query I
+SELECT x FROM remote_flight.rm10.tbl_b AT (VERSION => getvariable('rename_v2')) ORDER BY x;
+----
+1
+2
+3
+
+# -- TYPE PROMOTION: time travel returns garbled data --
+#
+# L3: The local Arrow schema declares the current type (BIGINT) but the
+# remote returns historical data at the old type width (INT). Arrow
+# deserialization reads 4-byte ints as 8-byte, producing garbage values.
+
+statement ok
+CREATE TABLE remote_flight.rm10.evo_type(x INT);
+
+statement ok
+INSERT INTO remote_flight.rm10.evo_type VALUES (1), (2);
+
+statement ok
+SET VARIABLE evo_type_v1 = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+ALTER TABLE remote_flight.rm10.evo_type ALTER COLUMN x SET TYPE BIGINT;
+
+statement ok
+INSERT INTO remote_flight.rm10.evo_type VALUES (3000000000);
+
+# Current state works fine with BIGINT
+query I
+SELECT x FROM remote_flight.rm10.evo_type ORDER BY x;
+----
+1
+2
+3000000000
+
+# L3: Time travel to before type promotion returns wrong values because
+# the Arrow schema mismatch between local (BIGINT) and remote (INT).
+# We verify the query doesn't crash, but the values are wrong.
+# When #74 is fixed this should return (1, 2).
+statement ok
+SELECT x FROM remote_flight.rm10.evo_type AT (VERSION => getvariable('evo_type_v1')) ORDER BY x;
 
 # ============================================================
 # Cleanup

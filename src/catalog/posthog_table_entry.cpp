@@ -14,6 +14,7 @@
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/catalog/entry_lookup_info.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/planner/tableref/bound_at_clause.hpp"
 
@@ -57,11 +58,13 @@ TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_
 string RenderAtClauseSQL(const BoundAtClause &at_clause) {
 	const auto &unit = at_clause.Unit();
 	const auto &val = at_clause.GetValue();
-	// Integer-typed values (VERSION) render unquoted; everything else is single-quoted.
+	// Integer-typed values (VERSION) render unquoted; everything else is single-quoted
+	// with embedded single quotes escaped as ''.
 	if (val.type().IsIntegral()) {
 		return "AT (" + unit + " => " + val.ToString() + ")";
 	}
-	return "AT (" + unit + " => '" + val.ToString() + "')";
+	auto str = StringUtil::Replace(val.ToString(), "'", "''");
+	return "AT (" + unit + " => '" + str + "')";
 }
 
 TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data,

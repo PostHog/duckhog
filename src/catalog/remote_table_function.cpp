@@ -29,12 +29,13 @@ namespace duckdb {
 //===----------------------------------------------------------------------===//
 
 struct RemoteTableFunctionInfo : public TableFunctionInfo {
-	RemoteTableFunctionInfo(PostHogCatalog &catalog_p, string remote_sql_p)
-	    : catalog(catalog_p), remote_sql(std::move(remote_sql_p)) {
+	RemoteTableFunctionInfo(PostHogCatalog &catalog_p, string function_ref_p)
+	    : catalog(catalog_p), function_ref(std::move(function_ref_p)) {
 	}
 
 	PostHogCatalog &catalog;
-	string remote_sql;
+	// The remote function reference, e.g. "ducklake"."snapshots"()
+	string function_ref;
 };
 
 //===----------------------------------------------------------------------===//
@@ -42,10 +43,11 @@ struct RemoteTableFunctionInfo : public TableFunctionInfo {
 //===----------------------------------------------------------------------===//
 
 struct RemoteTableFunctionBindData : public ArrowScanFunctionData {
-	RemoteTableFunctionBindData(PostHogCatalog &catalog_p, string remote_sql_p);
+	RemoteTableFunctionBindData(PostHogCatalog &catalog_p, string function_ref_p);
 
 	PostHogCatalog &catalog;
-	string remote_sql;
+	// The remote function reference, e.g. "ducklake"."snapshots"()
+	string function_ref;
 
 	static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr, ArrowStreamParameters &parameters);
 };
@@ -55,18 +57,32 @@ struct RemoteTableFunctionStreamFactory {
 	std::optional<TransactionId> txn_id;
 };
 
-RemoteTableFunctionBindData::RemoteTableFunctionBindData(PostHogCatalog &catalog_p, string remote_sql_p)
+RemoteTableFunctionBindData::RemoteTableFunctionBindData(PostHogCatalog &catalog_p, string function_ref_p)
     : ArrowScanFunctionData(&RemoteTableFunctionBindData::Produce, reinterpret_cast<uintptr_t>(this)),
-      catalog(catalog_p), remote_sql(std::move(remote_sql_p)) {
+      catalog(catalog_p), function_ref(std::move(function_ref_p)) {
 }
 
 unique_ptr<ArrowArrayStreamWrapper> RemoteTableFunctionBindData::Produce(uintptr_t factory_ptr,
-                                                                         ArrowStreamParameters & /*parameters*/) {
+                                                                         ArrowStreamParameters &parameters) {
 	auto *factory = reinterpret_cast<RemoteTableFunctionStreamFactory *>(factory_ptr);
 	auto *bind_data = factory->bind_data;
 
-	auto stream_state =
-	    std::make_shared<PostHogArrowStreamState>(bind_data->catalog, bind_data->remote_sql, factory->txn_id);
+	// Build projected column list from the parameters, mirroring PostHogArrowStream::Produce.
+	auto &columns = parameters.projected_columns.columns;
+	string columns_str;
+	if (columns.empty()) {
+		columns_str = "*";
+	} else {
+		for (size_t i = 0; i < columns.size(); i++) {
+			if (i > 0) {
+				columns_str += ", ";
+			}
+			columns_str += "\"" + columns[i] + "\"";
+		}
+	}
+	string query = "SELECT " + columns_str + " FROM " + bind_data->function_ref;
+
+	auto stream_state = std::make_shared<PostHogArrowStreamState>(bind_data->catalog, query, factory->txn_id);
 
 	ArrowArrayStream tmp_stream;
 	PostHogArrowStream::Initialize(tmp_stream, std::move(stream_state));
@@ -99,11 +115,12 @@ static unique_ptr<FunctionData> RemoteTableFunctionBind(ClientContext &context, 
                                                         vector<LogicalType> &return_types, vector<string> &names) {
 	auto &fn_info = input.info->Cast<RemoteTableFunctionInfo>();
 	auto &catalog = fn_info.catalog;
-	auto &remote_sql = fn_info.remote_sql;
+	auto &function_ref = fn_info.function_ref;
 
-	auto bind_data = make_uniq<RemoteTableFunctionBindData>(catalog, remote_sql);
+	auto bind_data = make_uniq<RemoteTableFunctionBindData>(catalog, function_ref);
 
-	// Discover the return schema by probing the remote server.
+	// Discover the return schema by probing the remote server with SELECT *.
+	string schema_query = "SELECT * FROM " + function_ref;
 	std::optional<TransactionId> remote_txn_id;
 	try {
 		remote_txn_id = PostHogTransaction::Get(context, catalog).remote_txn_id;
@@ -111,7 +128,7 @@ static unique_ptr<FunctionData> RemoteTableFunctionBind(ClientContext &context, 
 		remote_txn_id = std::nullopt;
 	}
 
-	auto arrow_schema = catalog.GetFlightClient().GetQuerySchema(remote_sql, remote_txn_id);
+	auto arrow_schema = catalog.GetFlightClient().GetQuerySchema(schema_query, remote_txn_id);
 
 	auto status = arrow::ExportSchema(*arrow_schema, &bind_data->schema_root.arrow_schema);
 	if (!status.ok()) {
@@ -188,11 +205,11 @@ static void RemoteTableFunctionExecute(ClientContext &context, TableFunctionInpu
 unique_ptr<TableFunctionCatalogEntry>
 CreateRemoteTableFunctionEntry(PostHogCatalog &catalog, SchemaCatalogEntry &schema, const string &function_name) {
 	const auto &remote_catalog = catalog.GetRemoteCatalog();
-	string remote_sql;
+	string function_ref;
 	if (remote_catalog.empty()) {
-		remote_sql = "SELECT * FROM \"" + function_name + "\"()";
+		function_ref = "\"" + function_name + "\"()";
 	} else {
-		remote_sql = "SELECT * FROM \"" + remote_catalog + "\".\"" + function_name + "\"()";
+		function_ref = "\"" + remote_catalog + "\".\"" + function_name + "\"()";
 	}
 
 	// Create the no-arg table function with callbacks.
@@ -200,7 +217,7 @@ CreateRemoteTableFunctionEntry(PostHogCatalog &catalog, SchemaCatalogEntry &sche
 	                   RemoteTableFunctionInitGlobal, RemoteTableFunctionInitLocal);
 	func.projection_pushdown = true;
 	func.filter_pushdown = false;
-	func.function_info = make_shared_ptr<RemoteTableFunctionInfo>(catalog, remote_sql);
+	func.function_info = make_shared_ptr<RemoteTableFunctionInfo>(catalog, function_ref);
 
 	auto info = make_uniq<CreateTableFunctionInfo>(std::move(func));
 	info->name = function_name;
