@@ -9,7 +9,11 @@ TEST_SERVERS="${PROJECT_ROOT}/scripts/test-servers.sh"
 UNITTEST_BIN="${PROJECT_ROOT}/build/release/test/unittest"
 
 INCLUDE_GLOB="${1:-test/*}"
-EXCLUDE_GLOB="${2:-~test/sql/roadmap/*,~test/sql/token/*}"
+if (($# > 1)); then
+    EXCLUDE_GLOBS=("${@:2}")
+else
+    EXCLUDE_GLOBS=("~test/sql/roadmap/*" "~test/sql/token/*")
+fi
 
 start_servers() {
     "${TEST_SERVERS}" start --background --seed
@@ -18,11 +22,12 @@ start_servers() {
 
 run_phase() {
     local include_glob="$1"
-    local exclude_glob="${2:-}"
+    shift
+    local exclude_globs=("$@")
 
     start_servers
-    if [[ -n "${exclude_glob}" ]]; then
-        "${UNITTEST_BIN}" "${include_glob}" "${exclude_glob}"
+    if [[ ${#exclude_globs[@]} -gt 0 ]]; then
+        "${UNITTEST_BIN}" "${include_glob}" "${exclude_globs[@]}"
     else
         "${UNITTEST_BIN}" "${include_glob}"
     fi
@@ -36,7 +41,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Default suite (unit + integration + caller filters).
-run_phase "${INCLUDE_GLOB}" "${EXCLUDE_GLOB}"
+run_phase "${INCLUDE_GLOB}" "${EXCLUDE_GLOBS[@]}"
 
 # Dedicated token-expiry regression phase.
 (
