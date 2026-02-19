@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
@@ -126,6 +125,9 @@ jobs:
       - duckdb-stable-build-pr
     if: ${{ always() && (needs.duckdb-stable-build-main.result == 'failure' || needs.duckdb-stable-build-pr.result == 'failure') && fromJSON(github.run_attempt) < 3 }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     steps:
       - name: Trigger rerun workflow
         env:
