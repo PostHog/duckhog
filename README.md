@@ -4,7 +4,7 @@ A DuckDB extension that enables direct SQL queries against PostHog data warehous
 
 ## Overview
 
-This extension allows you to attach a PostHog data source to DuckDB and query it using standard SQL. Data is transferred efficiently using Apache Arrow's columnar format via the Flight SQL protocol.
+This extension allows you to attach a PostHog data source (https://github.com/PostHog/duckgres/) in DuckDB and query it using standard SQL. Data is transferred efficiently using Apache Arrow's columnar format via the Flight SQL protocol.
 
 ## Features
 
