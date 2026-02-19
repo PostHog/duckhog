@@ -20,8 +20,6 @@ jobs:
   duckdb-stable-build-main:
     name: Build extension binaries (main)
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    permissions:
-      contents: read
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4-andium
     with:
       duckdb_version: v1.4.4
@@ -31,8 +29,6 @@ jobs:
   duckdb-stable-build-pr:
     name: Build extension binaries (PR)
     if: ${{ github.event_name == 'pull_request' }}
-    permissions:
-      contents: read
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4-andium
     with:
       duckdb_version: v1.4.4
