@@ -57,15 +57,11 @@ TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_
 string RenderAtClauseSQL(const BoundAtClause &at_clause) {
 	const auto &unit = at_clause.Unit();
 	const auto &val = at_clause.GetValue();
-	// Integer-typed values (VERSION) don't need quoting; everything else does.
-	bool needs_quoting = val.type().id() != LogicalTypeId::BIGINT && val.type().id() != LogicalTypeId::INTEGER &&
-	                     val.type().id() != LogicalTypeId::SMALLINT && val.type().id() != LogicalTypeId::TINYINT &&
-	                     val.type().id() != LogicalTypeId::UBIGINT && val.type().id() != LogicalTypeId::UINTEGER &&
-	                     val.type().id() != LogicalTypeId::USMALLINT && val.type().id() != LogicalTypeId::UTINYINT;
-	if (needs_quoting) {
-		return "AT (" + unit + " => '" + val.ToString() + "')";
+	// Integer-typed values (VERSION) render unquoted; everything else is single-quoted.
+	if (val.type().IsIntegral()) {
+		return "AT (" + unit + " => " + val.ToString() + ")";
 	}
-	return "AT (" + unit + " => " + val.ToString() + ")";
+	return "AT (" + unit + " => '" + val.ToString() + "')";
 }
 
 TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data,

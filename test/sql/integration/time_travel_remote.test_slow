@@ -249,6 +249,195 @@ SELECT COUNT(*) FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver
 2
 
 # ============================================================
+# SELECT * (no projection pushdown — all columns)
+# ============================================================
+
+query IT
+SELECT * FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1) ORDER BY i;
+----
+1	alpha
+2	bravo
+
+# ============================================================
+# ORDER BY + LIMIT on time-traveled table
+# ============================================================
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2) ORDER BY i DESC LIMIT 2;
+----
+3	charlie
+2	bravo
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2) ORDER BY v LIMIT 1;
+----
+1	alpha
+
+# ============================================================
+# NULLs in time-traveled data
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.rm10.nulls_t(a INT, b VARCHAR);
+
+statement ok
+SET VARIABLE nulls_create_ver = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+INSERT INTO remote_flight.rm10.nulls_t VALUES (1, NULL), (NULL, 'hello'), (NULL, NULL);
+
+query IT
+SELECT a, b FROM remote_flight.rm10.nulls_t AT (VERSION => getvariable('nulls_create_ver') + 1) ORDER BY a NULLS LAST;
+----
+1	NULL
+NULL	hello
+NULL	NULL
+
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.nulls_t AT (VERSION => getvariable('nulls_create_ver') + 1) WHERE a IS NULL;
+----
+2
+
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.nulls_t AT (VERSION => getvariable('nulls_create_ver'));
+----
+0
+
+# ============================================================
+# Time travel after TRUNCATE
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.rm10.trunc_t(x INT);
+
+statement ok
+SET VARIABLE trunc_create_ver = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+INSERT INTO remote_flight.rm10.trunc_t VALUES (1), (2), (3);
+
+statement ok
+TRUNCATE TABLE remote_flight.rm10.trunc_t;
+
+# At create: empty. At create+1: has data. At create+2 (truncate): empty again.
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.trunc_t AT (VERSION => getvariable('trunc_create_ver'));
+----
+0
+
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.trunc_t AT (VERSION => getvariable('trunc_create_ver') + 1);
+----
+3
+
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.trunc_t AT (VERSION => getvariable('trunc_create_ver') + 2);
+----
+0
+
+# Current state also empty
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.trunc_t;
+----
+0
+
+# ============================================================
+# AT clause inside CTE
+# ============================================================
+
+query IT
+WITH historical AS (
+  SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2)
+)
+SELECT * FROM historical WHERE i <= 2 ORDER BY i;
+----
+1	alpha
+2	bravo
+
+query I
+WITH counts AS (
+  SELECT COUNT(*) AS c FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2)
+)
+SELECT c FROM counts;
+----
+3
+
+# ============================================================
+# AT clause inside UNION
+# ============================================================
+
+query I
+SELECT i FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1)
+UNION ALL
+SELECT i FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 4)
+ORDER BY i;
+----
+1
+1
+2
+3
+
+query I
+SELECT i FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1)
+UNION
+SELECT i FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 4)
+ORDER BY i;
+----
+1
+2
+3
+
+# ============================================================
+# AT VERSION pointing to current version equals current state
+# ============================================================
+
+statement ok
+SET VARIABLE current_ver = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('current_ver')) ORDER BY i;
+----
+1	ALPHA
+3	charlie
+
+# ============================================================
+# Error: version before table existed
+# ============================================================
+
+statement error
+SELECT * FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') - 1);
+----
+Table with name t does not exist
+
+# ============================================================
+# Error: version far in the future
+# ============================================================
+
+statement error
+SELECT * FROM remote_flight.rm10.t AT (VERSION => 999999999);
+----
+No snapshot found at version 999999999
+
+# ============================================================
+# snapshots() basic validation
+# ============================================================
+
+query I
+SELECT COUNT(*) >= 1 FROM remote_flight.snapshots();
+----
+true
+
+# snapshot_id is monotonically increasing
+query I
+SELECT COUNT(*) FROM (
+  SELECT snapshot_id, LAG(snapshot_id) OVER (ORDER BY snapshot_id) AS prev_id
+  FROM remote_flight.snapshots()
+) sub
+WHERE prev_id IS NOT NULL AND snapshot_id <= prev_id;
+----
+0
+
+# ============================================================
 # Cleanup
 # ============================================================
 
