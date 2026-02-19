@@ -24,6 +24,7 @@ jobs:
     with:
       duckdb_version: v1.4.4
       ci_tools_version: v1.4-andium
+      vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
       extension_name: duckhog
 
   duckdb-stable-build-pr:
@@ -33,6 +34,7 @@ jobs:
     with:
       duckdb_version: v1.4.4
       ci_tools_version: v1.4-andium
+      vcpkg_commit: 66c0373dc7fca549e5803087b9487edfe3aca0a1
       extension_name: duckhog
 
   code-quality-check:
