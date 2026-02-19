@@ -16,6 +16,7 @@
 #include "execution/posthog_delete.hpp"
 #include "execution/posthog_dml_rewriter.hpp"
 #include "execution/posthog_insert.hpp"
+#include "execution/posthog_merge.hpp"
 #include "execution/posthog_update.hpp"
 #include "storage/posthog_transaction.hpp"
 #include "utils/posthog_logger.hpp"
@@ -24,6 +25,7 @@
 #include "duckdb/planner/operator/logical_create_table.hpp"
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/planner/operator/logical_delete.hpp"
+#include "duckdb/planner/operator/logical_merge_into.hpp"
 #include "duckdb/planner/operator/logical_update.hpp"
 #include "duckdb/storage/database_size.hpp"
 #include "duckdb/common/unordered_set.hpp"
@@ -458,13 +460,32 @@ PhysicalOperator &PostHogCatalog::PlanUpdate(ClientContext &context, PhysicalPla
 		throw CatalogException("PostHog: Not connected to remote server.");
 	}
 	if (op.return_chunk) {
-		throw NotImplementedException("PostHog: UPDATE ... RETURNING is not yet supported by this Flight backend");
+		// Blocked by D2: CTE wrapping rejected by remote server
+		throw NotImplementedException("PostHog: UPDATE ... RETURNING is not yet supported");
 	}
 
 	auto rewritten = RewriteRemoteUpdateSQL(context, database_name_, remote_catalog_);
 	return planner.Make<PhysicalPostHogUpdate>(op.types, *this, std::move(rewritten.non_returning_sql),
 	                                           std::move(rewritten.returning_sql), op.return_chunk,
 	                                           op.estimated_cardinality);
+}
+
+PhysicalOperator &PostHogCatalog::PlanMergeInto(ClientContext &context, PhysicalPlanGenerator &planner,
+                                                LogicalMergeInto &op, PhysicalOperator &plan) {
+	(void)plan;
+	if (!IsConnected()) {
+		throw CatalogException("PostHog: Not connected to remote server.");
+	}
+	if (op.return_chunk) {
+		// Blocked by both D2 (CTE wrapping rejected by remote server) and DuckLake
+		// not supporting MERGE RETURNING. Even if D2 is fixed, DuckLake would still reject it.
+		throw NotImplementedException("PostHog: MERGE ... RETURNING is not yet supported");
+	}
+
+	auto rewritten = RewriteRemoteMergeSQL(context, database_name_, remote_catalog_);
+	return planner.Make<PhysicalPostHogMerge>(op.types, *this, std::move(rewritten.non_returning_sql),
+	                                          std::move(rewritten.returning_sql), op.return_chunk,
+	                                          op.estimated_cardinality);
 }
 
 DatabaseSize PostHogCatalog::GetDatabaseSize(ClientContext &context) {

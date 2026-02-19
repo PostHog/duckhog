@@ -35,6 +35,17 @@ PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(const std::string &query, const
 PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(ClientContext &context, const std::string &attached_catalog,
                                                  const std::string &remote_catalog);
 
+struct PostHogRewrittenMergeSQL {
+	std::string non_returning_sql;
+	std::string returning_sql;
+	bool has_returning_clause = false;
+};
+
+PostHogRewrittenMergeSQL RewriteRemoteMergeSQL(const std::string &query, const std::string &attached_catalog,
+                                               const std::string &remote_catalog);
+PostHogRewrittenMergeSQL RewriteRemoteMergeSQL(ClientContext &context, const std::string &attached_catalog,
+                                               const std::string &remote_catalog);
+
 struct CreateTableInfo;
 struct CreateViewInfo;
 

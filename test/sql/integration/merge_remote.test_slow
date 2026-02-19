@@ -1,0 +1,511 @@
+# name: test/sql/integration/merge_remote.test_slow
+# description: MERGE INTO on remote DuckLake tables
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.merge_test CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.merge_test;
+
+# ============================================================
+# Basic MERGE: matched rows updated, unmatched rows inserted
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.basic_tgt(id INT, val VARCHAR);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.basic_src(id INT, val VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.merge_test.basic_tgt VALUES (1, 'old1'), (2, 'old2');
+
+statement ok
+INSERT INTO remote_flight.merge_test.basic_src VALUES (2, 'new2'), (3, 'new3');
+
+statement ok
+MERGE INTO remote_flight.merge_test.basic_tgt AS t
+USING remote_flight.merge_test.basic_src AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+query IT
+SELECT id, val FROM remote_flight.merge_test.basic_tgt ORDER BY id;
+----
+1	old1
+2	new2
+3	new3
+
+# ============================================================
+# MERGE with only WHEN MATCHED (update-only)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.upd_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.upd_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.upd_tgt VALUES (1, 10), (2, 20);
+
+statement ok
+INSERT INTO remote_flight.merge_test.upd_src VALUES (2, 99), (3, 30);
+
+statement ok
+MERGE INTO remote_flight.merge_test.upd_tgt AS t
+USING remote_flight.merge_test.upd_src AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val;
+
+# Row 2 updated, row 3 NOT inserted (no WHEN NOT MATCHED), row 1 untouched
+query II
+SELECT id, val FROM remote_flight.merge_test.upd_tgt ORDER BY id;
+----
+1	10
+2	99
+
+# ============================================================
+# MERGE with only WHEN NOT MATCHED (insert-only)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.ins_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.ins_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.ins_tgt VALUES (1, 10);
+
+statement ok
+INSERT INTO remote_flight.merge_test.ins_src VALUES (1, 99), (2, 20);
+
+statement ok
+MERGE INTO remote_flight.merge_test.ins_tgt AS t
+USING remote_flight.merge_test.ins_src AS s ON t.id = s.id
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+# Row 1 untouched (matched but no WHEN MATCHED clause), row 2 inserted
+query II
+SELECT id, val FROM remote_flight.merge_test.ins_tgt ORDER BY id;
+----
+1	10
+2	20
+
+# ============================================================
+# MERGE with WHEN MATCHED THEN DELETE
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.del_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.del_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.del_tgt VALUES (1, 10), (2, 20), (3, 30);
+
+statement ok
+INSERT INTO remote_flight.merge_test.del_src VALUES (2, 0), (3, 0);
+
+statement ok
+MERGE INTO remote_flight.merge_test.del_tgt AS t
+USING remote_flight.merge_test.del_src AS s ON t.id = s.id
+WHEN MATCHED THEN DELETE;
+
+# Rows 2 and 3 deleted, row 1 remains
+query II
+SELECT id, val FROM remote_flight.merge_test.del_tgt ORDER BY id;
+----
+1	10
+
+# ============================================================
+# MERGE with AND condition on WHEN MATCHED
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.cond_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.cond_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.cond_tgt VALUES (1, 10), (2, 20), (3, 30);
+
+statement ok
+INSERT INTO remote_flight.merge_test.cond_src VALUES (1, 100), (2, 200), (3, 300);
+
+statement ok
+MERGE INTO remote_flight.merge_test.cond_tgt AS t
+USING remote_flight.merge_test.cond_src AS s ON t.id = s.id
+WHEN MATCHED AND s.val > 150 THEN UPDATE SET val = s.val;
+
+# Only rows 2 and 3 updated (s.val > 150), row 1 untouched
+query II
+SELECT id, val FROM remote_flight.merge_test.cond_tgt ORDER BY id;
+----
+1	10
+2	200
+3	300
+
+# ============================================================
+# MERGE with empty source table (no-op)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.noop_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.noop_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.noop_tgt VALUES (1, 10);
+
+statement ok
+MERGE INTO remote_flight.merge_test.noop_tgt AS t
+USING remote_flight.merge_test.noop_src AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+# Target unchanged
+query II
+SELECT id, val FROM remote_flight.merge_test.noop_tgt ORDER BY id;
+----
+1	10
+
+# ============================================================
+# MERGE with empty target table (all inserts)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.empty_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.empty_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.empty_src VALUES (1, 10), (2, 20);
+
+statement ok
+MERGE INTO remote_flight.merge_test.empty_tgt AS t
+USING remote_flight.merge_test.empty_src AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+query II
+SELECT id, val FROM remote_flight.merge_test.empty_tgt ORDER BY id;
+----
+1	10
+2	20
+
+# ============================================================
+# MERGE where all rows match (all updates, no inserts)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.all_match_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.all_match_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.all_match_tgt VALUES (1, 10), (2, 20);
+
+statement ok
+INSERT INTO remote_flight.merge_test.all_match_src VALUES (1, 100), (2, 200);
+
+statement ok
+MERGE INTO remote_flight.merge_test.all_match_tgt AS t
+USING remote_flight.merge_test.all_match_src AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+query II
+SELECT id, val FROM remote_flight.merge_test.all_match_tgt ORDER BY id;
+----
+1	100
+2	200
+
+# ============================================================
+# MERGE with subquery as source
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.sub_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.sub_data(id INT, val INT, active BOOLEAN);
+
+statement ok
+INSERT INTO remote_flight.merge_test.sub_tgt VALUES (1, 10);
+
+statement ok
+INSERT INTO remote_flight.merge_test.sub_data VALUES (1, 100, true), (2, 20, true), (3, 30, false);
+
+statement ok
+MERGE INTO remote_flight.merge_test.sub_tgt AS t
+USING (SELECT id, val FROM remote_flight.merge_test.sub_data WHERE active = true) AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+# Row 1 updated, row 2 inserted, row 3 filtered out by subquery
+query II
+SELECT id, val FROM remote_flight.merge_test.sub_tgt ORDER BY id;
+----
+1	100
+2	20
+
+# ============================================================
+# MERGE with multiple WHEN MATCHED actions
+# DuckLake only supports a single UPDATE/DELETE action currently
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.multi_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.multi_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.multi_tgt VALUES (1, 10), (2, 20), (3, 30);
+
+statement ok
+INSERT INTO remote_flight.merge_test.multi_src VALUES (1, 0), (2, 200), (4, 40);
+
+statement error
+MERGE INTO remote_flight.merge_test.multi_tgt AS t
+USING remote_flight.merge_test.multi_src AS s ON t.id = s.id
+WHEN MATCHED AND s.val = 0 THEN DELETE
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+----
+single UPDATE/DELETE action
+
+# ============================================================
+# WHEN NOT MATCHED BY SOURCE — DuckLake limitation
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.byso_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.byso_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.byso_tgt VALUES (1, 10), (2, 20);
+
+statement ok
+INSERT INTO remote_flight.merge_test.byso_src VALUES (1, 100);
+
+statement error
+MERGE INTO remote_flight.merge_test.byso_tgt AS t
+USING remote_flight.merge_test.byso_src AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED BY SOURCE THEN DELETE;
+----
+single UPDATE/DELETE action
+
+# ============================================================
+# MERGE with NULL join keys — standard SQL NULL semantics
+# NULL != NULL so NULL-keyed source rows never match
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.null_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.null_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.null_tgt VALUES (1, 10), (NULL, 99);
+
+statement ok
+INSERT INTO remote_flight.merge_test.null_src VALUES (1, 100), (NULL, 88);
+
+statement ok
+MERGE INTO remote_flight.merge_test.null_tgt AS t
+USING remote_flight.merge_test.null_src AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+# Row 1 updated. NULL-keyed source row doesn't match NULL-keyed target (NULL!=NULL),
+# so it's inserted as a new row. Target now has: (1,100), (NULL,99), (NULL,88)
+query I
+SELECT COUNT(*) FROM remote_flight.merge_test.null_tgt;
+----
+3
+
+query II
+SELECT id, val FROM remote_flight.merge_test.null_tgt WHERE id = 1;
+----
+1	100
+
+query I
+SELECT COUNT(*) FROM remote_flight.merge_test.null_tgt WHERE id IS NULL;
+----
+2
+
+# ============================================================
+# MERGE with DO NOTHING — matched rows untouched, unmatched inserted
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.noop2_tgt(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.noop2_src(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.noop2_tgt VALUES (1, 10);
+
+statement ok
+INSERT INTO remote_flight.merge_test.noop2_src VALUES (1, 100), (2, 20);
+
+statement ok
+MERGE INTO remote_flight.merge_test.noop2_tgt AS t
+USING remote_flight.merge_test.noop2_src AS s ON t.id = s.id
+WHEN MATCHED THEN DO NOTHING
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+# Row 1 untouched (DO NOTHING), row 2 inserted
+query II
+SELECT id, val FROM remote_flight.merge_test.noop2_tgt ORDER BY id;
+----
+1	10
+2	20
+
+# ============================================================
+# MERGE with CTE as source
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.cte_tgt(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.cte_tgt VALUES (1, 10);
+
+statement ok
+MERGE INTO remote_flight.merge_test.cte_tgt AS t
+USING (WITH cte AS (SELECT 1 AS id, 100 AS val) SELECT * FROM cte) AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+query II
+SELECT id, val FROM remote_flight.merge_test.cte_tgt ORDER BY id;
+----
+1	100
+
+# ============================================================
+# Self-merge — verify correct snapshot semantics
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.self_tgt(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.self_tgt VALUES (1, 10), (2, 20);
+
+statement ok
+MERGE INTO remote_flight.merge_test.self_tgt AS t
+USING remote_flight.merge_test.self_tgt AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val + 1;
+
+# Through DuckHog's rewrite path, DuckLake correctly gives +1 (matching plain DuckDB).
+# The +2 behavior observed in psql with attached DuckLake catalog does not reproduce here.
+query II
+SELECT id, val FROM remote_flight.merge_test.self_tgt ORDER BY id;
+----
+1	11
+2	21
+
+# ============================================================
+# Cross-schema MERGE — source and target in different schemas
+# ============================================================
+
+statement ok
+CREATE SCHEMA remote_flight.merge_xschema;
+
+statement ok
+CREATE TABLE remote_flight.merge_xschema.src(id INT, val INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.xsch_tgt(id INT, val INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.xsch_tgt VALUES (1, 10);
+
+statement ok
+INSERT INTO remote_flight.merge_xschema.src VALUES (1, 100), (2, 20);
+
+statement ok
+MERGE INTO remote_flight.merge_test.xsch_tgt AS t
+USING remote_flight.merge_xschema.src AS s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.val);
+
+query II
+SELECT id, val FROM remote_flight.merge_test.xsch_tgt ORDER BY id;
+----
+1	100
+2	20
+
+statement ok
+DROP SCHEMA remote_flight.merge_xschema CASCADE;
+
+# ============================================================
+# Verify row counts after MERGE
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.merge_test.count_tgt(id INT);
+
+statement ok
+CREATE TABLE remote_flight.merge_test.count_src(id INT);
+
+statement ok
+INSERT INTO remote_flight.merge_test.count_tgt SELECT i FROM range(5) t(i);
+
+statement ok
+INSERT INTO remote_flight.merge_test.count_src SELECT i FROM range(3, 8) t(i);
+
+statement ok
+MERGE INTO remote_flight.merge_test.count_tgt AS t
+USING remote_flight.merge_test.count_src AS s ON t.id = s.id
+WHEN NOT MATCHED THEN INSERT VALUES (s.id);
+
+# Original: 0,1,2,3,4. Source: 3,4,5,6,7. New inserts: 5,6,7 → total 8
+query I
+SELECT COUNT(*) FROM remote_flight.merge_test.count_tgt;
+----
+8
+
+query I
+SELECT MIN(id) FROM remote_flight.merge_test.count_tgt;
+----
+0
+
+query I
+SELECT MAX(id) FROM remote_flight.merge_test.count_tgt;
+----
+7
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.merge_test CASCADE;

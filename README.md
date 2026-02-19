@@ -101,11 +101,15 @@ The extension is built on several key components:
 ## Remote DML Support
 
 - `INSERT` is supported for remote tables, including `INSERT ... RETURNING` for explicit column lists.
-- `UPDATE` is supported for remote tables and executes directly on the Flight SQL backend.
-  - `UPDATE ... RETURNING` is currently not supported by the Flight backend path.
+- `UPDATE` is supported for remote tables and executes directly on the remote server.
+  - `UPDATE ... RETURNING` is not yet supported (D2: CTE wrapping rejected by remote server).
   - Explicit references to catalogs other than the attached remote catalog are rejected during rewrite/validation.
 - `DELETE` is supported for remote tables, including `WHERE`, `USING`, and `RETURNING` clauses.
-- CTE references within `UPDATE` and `DELETE` statements are not yet rewritten to the remote catalog.
+  - `DELETE ... RETURNING` is not yet supported (D2: same CTE wrapping issue as UPDATE).
+- `MERGE INTO` is supported for remote tables, including `WHEN MATCHED`, `WHEN NOT MATCHED`, subquery sources, and CTE sources.
+  - `MERGE ... RETURNING` is not yet supported (D2 + DuckLake does not implement MERGE RETURNING).
+  - DuckLake currently limits MERGE to a single UPDATE/DELETE action per statement.
+- CTE references within `UPDATE`, `DELETE`, and `MERGE` statements are not yet rewritten to the remote catalog.
 
 ## Development Status
 

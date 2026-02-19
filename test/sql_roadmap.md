@@ -50,7 +50,6 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- [`rm09_merge_remote.test_slow`](sql/roadmap/rm09_merge_remote.test_slow) — [#32](https://github.com/PostHog/duckhog/issues/32)
 - [`rm10_time_travel_remote.test_slow`](sql/roadmap/rm10_time_travel_remote.test_slow) — [#33](https://github.com/PostHog/duckhog/issues/33)
 - [`rm11_table_changes_remote.test_slow`](sql/roadmap/rm11_table_changes_remote.test_slow) — [#34](https://github.com/PostHog/duckhog/issues/34)
 - [`rm12_snapshots_remote.test_slow`](sql/roadmap/rm12_snapshots_remote.test_slow) — [#35](https://github.com/PostHog/duckhog/issues/35)
@@ -78,6 +77,7 @@ Graduated targets (now part of normal integration suite):
 - [`create_view_remote.test_slow`](sql/integration/create_view_remote.test_slow) (RM06)
 - [`rename_table_remote.test_slow`](sql/integration/rename_table_remote.test_slow) (RM07)
 - [`partition_insert_remote.test_slow`](sql/integration/partition_insert_remote.test_slow) (RM08)
+- [`merge_remote.test_slow`](sql/integration/merge_remote.test_slow) (RM09) — [#32](https://github.com/PostHog/duckhog/issues/32)
 
 ## Design Rules
 

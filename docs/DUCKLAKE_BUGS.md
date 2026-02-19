@@ -100,6 +100,18 @@ via Arrow Flight.
 
 ---
 
+## ~~U7. MERGE self-join reads own writes~~ — not confirmed
+
+Self-merge (`MERGE INTO t USING t AS s ... SET val = s.val + 1`) produced
+`val + 2` when tested via psql with an attached DuckLake catalog, but through
+DuckHog's Flight SQL rewrite path, DuckLake correctly returns `val + 1`
+(matching plain DuckDB behavior). The +2 behavior may be specific to the
+local-attach execution path in DuckLake, not the SQL-over-Flight path we use.
+
+Not filing upstream — needs further investigation outside DuckHog to confirm.
+
+---
+
 ## U6. CREATE INDEX on remote catalog crashes DuckDB binder
 
 | Field | Value |
