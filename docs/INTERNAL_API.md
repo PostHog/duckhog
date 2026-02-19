@@ -9,8 +9,7 @@ It is intended for maintainers and contributors.
   - Registers the `hog:` protocol for `ATTACH`.
   - Parses connection strings and validates required parameters (`user`/`password`).
   - **Single-catalog attach**: if `hog:<catalog>?user=...&password=...` is provided, creates one `PostHogCatalog` for that remote catalog.
-  - **Multi-catalog attach**: if no catalog is provided (`hog:?user=...&password=...`), enumerates remote catalogs via Flight SQL metadata and attaches each as a separate DuckDB database using `<alias>_<catalog>` naming. The primary alias (`AS <alias>`) is a stub catalog with no tables - users must use the prefixed versions for queries.
-  - Uses an internal `__remote_catalog=<catalog>` option when attaching secondary catalogs to avoid re-enumeration.
+  - **Catalog-omitted attach**: if no catalog is provided (`hog:?user=...&password=...`), creates one `PostHogCatalog` with an empty remote-catalog value and relies on server-default catalog resolution.
 
 ## Connection String
 
@@ -32,10 +31,6 @@ It is intended for maintainers and contributors.
 - `PostHogCatalog` (`src/catalog/posthog_catalog.cpp`)
   - Owns the Flight client, connection state, and schema cache.
   - Lazily loads schemas and exposes them via DuckDB's catalog interface.
-
-- `PostHogStubCatalog` (`src/catalog/posthog_stub_catalog.cpp`)
-  - Empty catalog used as the primary alias in multi-catalog mode.
-  - Has no schemas or tables - all operations throw helpful errors directing users to the prefixed catalogs.
 
 - `PostHogSchemaEntry` (`src/catalog/posthog_schema_entry.cpp`)
   - Lazily loads tables for a schema with caching/TTL.

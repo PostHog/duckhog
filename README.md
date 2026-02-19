@@ -32,14 +32,11 @@ LOAD duckhog;
 -- Direct Flight SQL attach (Duckgres control-plane Flight endpoint)
 ATTACH 'hog:my_database?user=postgres&password=postgres&flight_server=grpc+tls://localhost:8815' AS posthog_db;
 
--- Multi-catalog: Auto-discover and attach *all* remote catalogs
--- This creates attachments named: <alias>_<catalog> (e.g. posthog_db_test, posthog_db_alt, ...)
--- Note: the primary alias (posthog_db) is a stub with no tables - use the prefixed versions for queries
+-- Attach using server-default catalog resolution when catalog is omitted
 ATTACH 'hog:?user=postgres&password=postgres&flight_server=grpc+tls://localhost:8815' AS posthog_db;
 
 -- Query your data
 SELECT * FROM posthog_db.events LIMIT 10;
--- (In multi-catalog mode you may prefer: SELECT * FROM posthog_db_<catalog>.events LIMIT 10;)
 
 -- Local/dev only: skip TLS certificate verification for self-signed certs
 ATTACH 'hog:my_database?user=postgres&password=postgres&flight_server=grpc+tls://localhost:8815&tls_skip_verify=true' AS posthog_dev;
@@ -53,7 +50,7 @@ hog:[<catalog>]?user=<username>&password=<password>[&flight_server=<url>][&tls_s
 
 | Parameter | Description | Required |
 |-----------|-------------|----------|
-| `catalog` | Remote catalog to attach. If omitted (`hog:?user=...`), auto-discovers and attaches all remote catalogs. | No |
+| `catalog` | Remote catalog to attach. If omitted (`hog:?user=...`), DuckHog attaches a single catalog using server-default resolution. | No |
 | `user` | Flight SQL username | Yes |
 | `password` | Flight SQL password | Yes |
 | `flight_server` | Flight SQL server endpoint (default: `grpc+tls://127.0.0.1:8815`) | No |
@@ -61,8 +58,7 @@ hog:[<catalog>]?user=<username>&password=<password>[&flight_server=<url>][&tls_s
 
 **Catalog Attach Modes:**
 - **Single-catalog attach**: `ATTACH 'hog:<catalog>?user=...&password=...' AS remote;` attaches exactly one remote catalog under the local name `remote`.
-- **Multi-catalog attach**: `ATTACH 'hog:?user=...&password=...' AS remote;` discovers remote catalogs and attaches each as `remote_<catalog>`. The `remote` alias is a stub catalog with no tables - always use the prefixed versions for queries.
-  - Cleanup: you must `DETACH` each discovered `remote_<catalog>` separately if you want to remove them all.
+- **Catalog-omitted attach**: `ATTACH 'hog:?user=...&password=...' AS remote;` attaches one catalog under `remote` using server-default catalog resolution.
 
 ## Building from Source
 
