@@ -18,7 +18,7 @@ statement ok
 ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
 
 statement ok
-ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_multi;
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_mem;
 
 statement ok
 DROP SCHEMA IF EXISTS remote_flight.cross_cat CASCADE;
@@ -28,10 +28,10 @@ CREATE SCHEMA remote_flight.cross_cat;
 
 # Clean up memory catalog tables from prior runs
 statement ok
-DROP TABLE IF EXISTS remote_multi_memory.customers;
+DROP TABLE IF EXISTS remote_mem.customers;
 
 statement ok
-DROP TABLE IF EXISTS remote_multi_memory.from_ducklake;
+DROP TABLE IF EXISTS remote_mem.from_ducklake;
 
 # ============================================================
 # Setup: tables in DuckLake, memory remote, and local
@@ -48,10 +48,10 @@ INSERT INTO remote_flight.cross_cat.orders VALUES
     (4, 300, 30.0);
 
 statement ok
-CREATE TABLE remote_multi_memory.customers(customer_id INT, name VARCHAR);
+CREATE TABLE remote_mem.customers(customer_id INT, name VARCHAR);
 
 statement ok
-INSERT INTO remote_multi_memory.customers VALUES
+INSERT INTO remote_mem.customers VALUES
     (100, 'alice'),
     (200, 'bob'),
     (400, 'dave');
@@ -97,18 +97,16 @@ ORDER BY o.order_id;
 # JOIN between two different remote catalogs (ducklake + memory)
 # ============================================================
 
-# DuckHog limitation: cross-catalog JOINs between two remote catalogs
-# that share the same Flight server fail with "transaction already active"
-# because both catalogs try to begin a transaction on the same connection.
-# This is a known limitation — document with error test.
-
-statement error
+# Cross-catalog JOIN between two explicitly attached remote catalogs.
+query ITRI
 SELECT c.customer_id, c.name, o.amount, o.order_id
-FROM remote_multi_memory.customers c
+FROM remote_mem.customers c
 INNER JOIN remote_flight.cross_cat.orders o ON c.customer_id = o.customer_id
 ORDER BY o.order_id;
 ----
-transaction already active
+100	alice	50.0	1
+100	alice	75.0	2
+200	bob	120.0	3
 
 # ============================================================
 # INSERT...SELECT from local table to remote table
@@ -134,29 +132,34 @@ SELECT x, v FROM remote_flight.cross_cat.from_local ORDER BY x;
 
 # ============================================================
 # INSERT...SELECT from one remote catalog to another
-# Same "transaction already active" limitation as cross-catalog JOINs.
+# Works with explicit single-catalog attaches.
 # ============================================================
 
 statement ok
-CREATE TABLE remote_multi_memory.from_ducklake(order_id INT, amount DOUBLE);
+CREATE TABLE remote_mem.from_ducklake(order_id INT, amount DOUBLE);
 
-statement error
-INSERT INTO remote_multi_memory.from_ducklake
+statement ok
+INSERT INTO remote_mem.from_ducklake
     SELECT order_id, amount FROM remote_flight.cross_cat.orders WHERE amount > 50;
+
+query IR
+SELECT order_id, amount FROM remote_mem.from_ducklake ORDER BY order_id;
 ----
-transaction already active
+2	75.0
+3	120.0
 
 # ============================================================
-# Subquery referencing both remote catalogs — same limitation
+# Subquery referencing both remote catalogs
 # ============================================================
 
-statement error
+query IR
 SELECT order_id, amount
 FROM remote_flight.cross_cat.orders
-WHERE customer_id IN (SELECT customer_id FROM remote_multi_memory.customers WHERE name = 'alice')
+WHERE customer_id IN (SELECT customer_id FROM remote_mem.customers WHERE name = 'alice')
 ORDER BY order_id;
 ----
-transaction already active
+1	50.0
+2	75.0
 
 # ============================================================
 # Subquery with local + single remote works fine
@@ -182,7 +185,7 @@ statement ok
 DROP TABLE local_cust_ids;
 
 # ============================================================
-# Three-way join: local + ducklake + memory — same limitation
+# Three-way join: local + ducklake + memory
 # ============================================================
 
 statement ok
@@ -191,14 +194,16 @@ CREATE TABLE local_tags(order_id INT, tag VARCHAR);
 statement ok
 INSERT INTO local_tags VALUES (1, 'priority'), (2, 'normal'), (3, 'priority');
 
-statement error
+query TTRI
 SELECT c.name, lt.tag, o.amount, o.order_id
 FROM remote_flight.cross_cat.orders o
-INNER JOIN remote_multi_memory.customers c ON o.customer_id = c.customer_id
+INNER JOIN remote_mem.customers c ON o.customer_id = c.customer_id
 INNER JOIN local_tags lt ON o.order_id = lt.order_id
 ORDER BY o.order_id;
 ----
-transaction already active
+alice	priority	50.0	1
+alice	normal	75.0	2
+bob	priority	120.0	3
 
 # ============================================================
 # Cleanup
@@ -217,10 +222,10 @@ statement ok
 DROP TABLE IF EXISTS local_tags;
 
 statement ok
-DROP TABLE IF EXISTS remote_multi_memory.customers;
+DROP TABLE IF EXISTS remote_mem.customers;
 
 statement ok
-DROP TABLE IF EXISTS remote_multi_memory.from_ducklake;
+DROP TABLE IF EXISTS remote_mem.from_ducklake;
 
 statement ok
 DROP SCHEMA remote_flight.cross_cat CASCADE;

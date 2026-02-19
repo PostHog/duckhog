@@ -212,21 +212,21 @@ CTE needs a SELECT
 # ============================================================
 
 statement ok
-ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_ret_mem;
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_ret_mem;
 
 statement ok
-DROP TABLE IF EXISTS remote_ret_mem_memory.unsigned_ret;
+DROP TABLE IF EXISTS remote_ret_mem.unsigned_ret;
 
 statement ok
-CREATE TABLE remote_ret_mem_memory.unsigned_ret(uti UTINYINT, usi USMALLINT, ui UINTEGER, ubi UBIGINT);
+CREATE TABLE remote_ret_mem.unsigned_ret(uti UTINYINT, usi USMALLINT, ui UINTEGER, ubi UBIGINT);
 
 query IIII
-INSERT INTO remote_ret_mem_memory.unsigned_ret VALUES (255, 65535, 4294967295, 18446744073709551615) RETURNING *;
+INSERT INTO remote_ret_mem.unsigned_ret VALUES (255, 65535, 4294967295, 18446744073709551615) RETURNING *;
 ----
 255	65535	4294967295	18446744073709551615
 
 query IIII
-INSERT INTO remote_ret_mem_memory.unsigned_ret VALUES (0, 0, 0, 0) RETURNING *;
+INSERT INTO remote_ret_mem.unsigned_ret VALUES (0, 0, 0, 0) RETURNING *;
 ----
 0	0	0	0
 
@@ -235,7 +235,7 @@ INSERT INTO remote_ret_mem_memory.unsigned_ret VALUES (0, 0, 0, 0) RETURNING *;
 # ============================================================
 
 statement ok
-DROP TABLE IF EXISTS remote_ret_mem_memory.unsigned_ret;
+DROP TABLE IF EXISTS remote_ret_mem.unsigned_ret;
 
 statement ok
 DROP SCHEMA remote_flight.ret_types CASCADE;

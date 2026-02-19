@@ -163,27 +163,27 @@ SELECT * FROM remote_flight.txn_test.ddl_dml_rb;
 # ============================================================
 
 statement ok
-ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_mem_txn;
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_mem_txn;
 
 statement ok
-DROP TABLE IF EXISTS remote_mem_txn_memory.err_test;
+DROP TABLE IF EXISTS remote_mem_txn.err_test;
 
 statement ok
-CREATE TABLE remote_mem_txn_memory.err_test(id INT PRIMARY KEY, val VARCHAR);
+CREATE TABLE remote_mem_txn.err_test(id INT PRIMARY KEY, val VARCHAR);
 
 statement ok
-INSERT INTO remote_mem_txn_memory.err_test VALUES (1, 'first');
+INSERT INTO remote_mem_txn.err_test VALUES (1, 'first');
 
 statement ok
 BEGIN;
 
 # This succeeds
 statement ok
-INSERT INTO remote_mem_txn_memory.err_test VALUES (2, 'second');
+INSERT INTO remote_mem_txn.err_test VALUES (2, 'second');
 
 # This should fail — duplicate PK
 statement error
-INSERT INTO remote_mem_txn_memory.err_test VALUES (1, 'duplicate');
+INSERT INTO remote_mem_txn.err_test VALUES (1, 'duplicate');
 ----
 
 statement ok
@@ -191,7 +191,7 @@ ROLLBACK;
 
 # After rollback, only original row should exist
 query IT
-SELECT id, val FROM remote_mem_txn_memory.err_test ORDER BY id;
+SELECT id, val FROM remote_mem_txn.err_test ORDER BY id;
 ----
 1	first
 
@@ -271,7 +271,7 @@ SELECT id, val FROM remote_flight.txn_test.interleave ORDER BY id;
 # ============================================================
 
 statement ok
-DROP TABLE IF EXISTS remote_mem_txn_memory.err_test;
+DROP TABLE IF EXISTS remote_mem_txn.err_test;
 
 statement ok
 DROP SCHEMA remote_flight.txn_test CASCADE;

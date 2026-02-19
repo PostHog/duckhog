@@ -16,9 +16,9 @@ require-env DUCKHOG_PASSWORD
 statement ok
 ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
 
-# Multi-catalog attach for metadata inspection
+# Explicit metadata-catalog attach for metadata inspection
 statement ok
-ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote;
+ATTACH 'hog:__ducklake_metadata_ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_meta;
 
 statement ok
 DROP SCHEMA IF EXISTS remote_flight.part_rm08 CASCADE;
@@ -65,10 +65,10 @@ SELECT part_key, v FROM remote_flight.part_rm08.t WHERE part_key = 2;
 
 query IT
 SELECT pc.partition_key_index, pc.transform
-FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+FROM remote_meta.public.ducklake_partition_column pc
 WHERE pc.table_id = (
-    SELECT MAX(t.table_id) FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
-    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    SELECT MAX(t.table_id) FROM remote_meta.public.ducklake_table t
+    JOIN remote_meta.public.ducklake_schema s ON t.schema_id = s.schema_id
     WHERE s.schema_name = 'part_rm08' AND t.table_name = 't'
 );
 ----
@@ -78,10 +78,10 @@ WHERE pc.table_id = (
 
 query T
 SELECT DISTINCT fpv.partition_value
-FROM remote___ducklake_metadata_ducklake.public.ducklake_file_partition_value fpv
+FROM remote_meta.public.ducklake_file_partition_value fpv
 WHERE fpv.table_id = (
-    SELECT MAX(t.table_id) FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
-    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    SELECT MAX(t.table_id) FROM remote_meta.public.ducklake_table t
+    JOIN remote_meta.public.ducklake_schema s ON t.schema_id = s.schema_id
     WHERE s.schema_name = 'part_rm08' AND t.table_name = 't'
 )
 ORDER BY fpv.partition_value;
@@ -109,10 +109,10 @@ SELECT part_key, v FROM remote_flight.part_rm08.t ORDER BY part_key, v;
 
 query T
 SELECT DISTINCT fpv.partition_value
-FROM remote___ducklake_metadata_ducklake.public.ducklake_file_partition_value fpv
+FROM remote_meta.public.ducklake_file_partition_value fpv
 WHERE fpv.table_id = (
-    SELECT MAX(t.table_id) FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
-    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    SELECT MAX(t.table_id) FROM remote_meta.public.ducklake_table t
+    JOIN remote_meta.public.ducklake_schema s ON t.schema_id = s.schema_id
     WHERE s.schema_name = 'part_rm08' AND t.table_name = 't'
 )
 ORDER BY fpv.partition_value;
@@ -238,10 +238,10 @@ us	2024	100.0
 
 query IT
 SELECT pc.partition_key_index, pc.transform
-FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+FROM remote_meta.public.ducklake_partition_column pc
 WHERE pc.table_id = (
-    SELECT MAX(t.table_id) FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
-    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    SELECT MAX(t.table_id) FROM remote_meta.public.ducklake_table t
+    JOIN remote_meta.public.ducklake_schema s ON t.schema_id = s.schema_id
     WHERE s.schema_name = 'part_rm08' AND t.table_name = 'multi'
 )
 ORDER BY pc.partition_key_index;
@@ -276,10 +276,10 @@ INSERT INTO remote_flight.part_rm08.resettable VALUES (1, 'before_reset'), (2, '
 
 query IT
 SELECT pc.partition_key_index, pc.transform
-FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+FROM remote_meta.public.ducklake_partition_column pc
 WHERE pc.table_id = (
-    SELECT MAX(t.table_id) FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
-    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    SELECT MAX(t.table_id) FROM remote_meta.public.ducklake_table t
+    JOIN remote_meta.public.ducklake_schema s ON t.schema_id = s.schema_id
     WHERE s.schema_name = 'part_rm08' AND t.table_name = 'resettable'
 );
 ----
@@ -296,10 +296,10 @@ ALTER TABLE remote_flight.part_rm08.resettable RESET PARTITIONED BY;
 
 query IT
 SELECT pc.partition_key_index, pc.transform
-FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+FROM remote_meta.public.ducklake_partition_column pc
 WHERE pc.table_id = (
-    SELECT MAX(t.table_id) FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
-    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    SELECT MAX(t.table_id) FROM remote_meta.public.ducklake_table t
+    JOIN remote_meta.public.ducklake_schema s ON t.schema_id = s.schema_id
     WHERE s.schema_name = 'part_rm08' AND t.table_name = 'resettable'
 );
 ----
@@ -349,10 +349,10 @@ SELECT pk, val FROM remote_flight.part_rm08.resettable ORDER BY pk;
 
 query I
 SELECT COUNT(*)
-FROM remote___ducklake_metadata_ducklake.public.ducklake_partition_column pc
+FROM remote_meta.public.ducklake_partition_column pc
 WHERE pc.table_id = (
-    SELECT MAX(t.table_id) FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
-    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    SELECT MAX(t.table_id) FROM remote_meta.public.ducklake_table t
+    JOIN remote_meta.public.ducklake_schema s ON t.schema_id = s.schema_id
     WHERE s.schema_name = 'part_rm08' AND t.table_name = 'resettable'
 );
 ----
@@ -436,10 +436,10 @@ SELECT COUNT(*) FROM remote_flight.part_rm08.str_part WHERE category = 'food';
 
 query T
 SELECT DISTINCT fpv.partition_value
-FROM remote___ducklake_metadata_ducklake.public.ducklake_file_partition_value fpv
+FROM remote_meta.public.ducklake_file_partition_value fpv
 WHERE fpv.table_id = (
-    SELECT MAX(t.table_id) FROM remote___ducklake_metadata_ducklake.public.ducklake_table t
-    JOIN remote___ducklake_metadata_ducklake.public.ducklake_schema s ON t.schema_id = s.schema_id
+    SELECT MAX(t.table_id) FROM remote_meta.public.ducklake_table t
+    JOIN remote_meta.public.ducklake_schema s ON t.schema_id = s.schema_id
     WHERE s.schema_name = 'part_rm08' AND t.table_name = 'str_part'
 )
 ORDER BY fpv.partition_value;
@@ -573,4 +573,4 @@ statement ok
 DROP SCHEMA remote_flight.part_rm08 CASCADE;
 
 statement ok
-DETACH remote;
+DETACH remote_meta;

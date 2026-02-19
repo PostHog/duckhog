@@ -56,13 +56,13 @@ NULL	NULL	NULL	NULL
 # Testing on memory catalog to verify Arrow Flight roundtrip.
 
 statement ok
-ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_u;
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_u;
 
 statement ok
-DROP TABLE IF EXISTS remote_u_memory.unsigned_test;
+DROP TABLE IF EXISTS remote_u.unsigned_test;
 
 statement ok
-CREATE TABLE remote_u_memory.unsigned_test(
+CREATE TABLE remote_u.unsigned_test(
     uti UTINYINT,
     usi USMALLINT,
     ui UINTEGER,
@@ -70,13 +70,13 @@ CREATE TABLE remote_u_memory.unsigned_test(
 );
 
 statement ok
-INSERT INTO remote_u_memory.unsigned_test VALUES
+INSERT INTO remote_u.unsigned_test VALUES
     (0, 0, 0, 0),
     (255, 65535, 4294967295, 18446744073709551615),
     (NULL, NULL, NULL, NULL);
 
 query IIII
-SELECT uti, usi, ui, ubi FROM remote_u_memory.unsigned_test ORDER BY uti NULLS LAST;
+SELECT uti, usi, ui, ubi FROM remote_u.unsigned_test ORDER BY uti NULLS LAST;
 ----
 0	0	0	0
 255	65535	4294967295	18446744073709551615
@@ -377,4 +377,4 @@ statement ok
 DROP SCHEMA remote_flight.type_test CASCADE;
 
 statement ok
-DROP TABLE IF EXISTS remote_u_memory.unsigned_test;
+DROP TABLE IF EXISTS remote_u.unsigned_test;

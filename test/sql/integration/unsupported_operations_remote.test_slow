@@ -78,29 +78,29 @@ UPDATE ... RETURNING is not yet supported
 # Test with memory catalog instead.
 
 statement ok
-ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_unsup_mem;
+ATTACH 'hog:memory?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_unsup_mem;
 
 statement ok
-DROP TABLE IF EXISTS remote_unsup_mem_memory.pk_table;
+DROP TABLE IF EXISTS remote_unsup_mem.pk_table;
 
 statement ok
-CREATE TABLE remote_unsup_mem_memory.pk_table(id INT PRIMARY KEY, val VARCHAR);
+CREATE TABLE remote_unsup_mem.pk_table(id INT PRIMARY KEY, val VARCHAR);
 
 statement ok
-INSERT INTO remote_unsup_mem_memory.pk_table VALUES (1, 'original');
+INSERT INTO remote_unsup_mem.pk_table VALUES (1, 'original');
 
 # DO UPDATE should error — but the binder can't see the PK constraint
 # (DuckHog metadata sync gap), so the error comes from the binder, not
 # our ON CONFLICT code path.
 statement error
-INSERT INTO remote_unsup_mem_memory.pk_table VALUES (1, 'conflict')
+INSERT INTO remote_unsup_mem.pk_table VALUES (1, 'conflict')
     ON CONFLICT (id) DO UPDATE SET val = EXCLUDED.val;
 ----
 not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT
 
 # Same binder error for DO NOTHING with explicit conflict target
 statement error
-INSERT INTO remote_unsup_mem_memory.pk_table VALUES (1, 'conflict')
+INSERT INTO remote_unsup_mem.pk_table VALUES (1, 'conflict')
     ON CONFLICT (id) DO NOTHING RETURNING *;
 ----
 not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT
@@ -134,33 +134,11 @@ DROP SEQUENCE remote_flight.unsup_test.nonexistent;
 ----
 
 # ============================================================
-# Stub catalog operations
-# ============================================================
-
-statement ok
-ATTACH 'hog:?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_stub;
-
-statement error
-CREATE SCHEMA remote_stub.test;
-----
-Cannot create schema on
-
-statement error
-INSERT INTO remote_stub.nonexistent VALUES (1);
-----
-stub catalog
-
-statement error
-CREATE TABLE remote_stub.test_table(id INT);
-----
-stub catalog
-
-# ============================================================
 # Cleanup
 # ============================================================
 
 statement ok
-DROP TABLE IF EXISTS remote_unsup_mem_memory.pk_table;
+DROP TABLE IF EXISTS remote_unsup_mem.pk_table;
 
 statement ok
 DROP SCHEMA remote_flight.unsup_test CASCADE;
