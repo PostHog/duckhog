@@ -55,6 +55,8 @@ TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_
 
 // Render a BoundAtClause as a SQL fragment for the remote query.
 // DuckLake supports AT (VERSION => <int>) and AT (TIMESTAMP => '<ts>').
+// Safety: Unit() is always "TIMESTAMP" or "VERSION" — the grammar (select.y at_unit rule)
+// hardcodes these as string literals, so no user-controlled text reaches the unit string.
 string RenderAtClauseSQL(const BoundAtClause &at_clause) {
 	const auto &unit = at_clause.Unit();
 	const auto &val = at_clause.GetValue();
