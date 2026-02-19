@@ -66,5 +66,9 @@ test/integration/duckling_go.yaml
 test/integration/memory.duckdb*
 test/integration/duckling_go_server
 
+# DuckLake temp files from conformance tests
+:memory:.files/
+__test_conformance.duckdb*
+
 # Local ccache (used in sandboxed builds)
 .ccache/
