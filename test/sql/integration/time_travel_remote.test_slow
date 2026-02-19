@@ -1,0 +1,256 @@
+# name: test/sql/integration/time_travel_remote.test_slow
+# description: Time travel queries (AT VERSION) on remote DuckLake tables (RM10)
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.rm10 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.rm10;
+
+# ============================================================
+# Setup: create table and capture base version
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.rm10.t(i INT, v VARCHAR);
+
+# Capture the snapshot_id right after CREATE TABLE.
+# All subsequent version offsets are relative to this.
+# create_ver+0 = empty table (just created)
+# create_ver+1 = after first INSERT
+# create_ver+2 = after second INSERT
+# create_ver+3 = after UPDATE
+# create_ver+4 = after DELETE
+statement ok
+SET VARIABLE create_ver = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+INSERT INTO remote_flight.rm10.t VALUES (1, 'alpha'), (2, 'bravo');
+
+statement ok
+INSERT INTO remote_flight.rm10.t VALUES (3, 'charlie');
+
+statement ok
+UPDATE remote_flight.rm10.t SET v = 'ALPHA' WHERE i = 1;
+
+statement ok
+DELETE FROM remote_flight.rm10.t WHERE i = 2;
+
+# ============================================================
+# Basic: current state (no AT clause, sanity check)
+# ============================================================
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t ORDER BY i;
+----
+1	ALPHA
+3	charlie
+
+# ============================================================
+# AT VERSION create_ver+0: table just created, should be empty
+# ============================================================
+
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver'));
+----
+0
+
+# ============================================================
+# AT VERSION create_ver+1: after first insert
+# ============================================================
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1) ORDER BY i;
+----
+1	alpha
+2	bravo
+
+# ============================================================
+# AT VERSION create_ver+2: after second insert
+# ============================================================
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2) ORDER BY i;
+----
+1	alpha
+2	bravo
+3	charlie
+
+# ============================================================
+# AT VERSION create_ver+3: after update (row 1 changed)
+# ============================================================
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 3) ORDER BY i;
+----
+1	ALPHA
+2	bravo
+3	charlie
+
+# ============================================================
+# AT VERSION create_ver+4: after delete — same as current
+# ============================================================
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 4) ORDER BY i;
+----
+1	ALPHA
+3	charlie
+
+# ============================================================
+# Projection pushdown: select single column with AT clause
+# ============================================================
+
+query T
+SELECT v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1) ORDER BY v;
+----
+alpha
+bravo
+
+query I
+SELECT i FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2) ORDER BY i;
+----
+1
+2
+3
+
+# ============================================================
+# Aggregation on time-traveled table
+# ============================================================
+
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2);
+----
+3
+
+query I
+SELECT SUM(i) FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2);
+----
+6
+
+query I
+SELECT MAX(i) FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1);
+----
+2
+
+# ============================================================
+# WHERE clause on time-traveled table
+# ============================================================
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2) WHERE i > 1 ORDER BY i;
+----
+2	bravo
+3	charlie
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2) WHERE v LIKE '%a%' ORDER BY i;
+----
+1	alpha
+2	bravo
+3	charlie
+
+# ============================================================
+# JOIN: time-traveled table against current state
+# Note: DuckDB's parser does not support aliases directly after
+# AT clauses, so we wrap in subqueries.
+# ============================================================
+
+query ITIT
+SELECT old.i, old.v, cur.i, cur.v
+FROM (SELECT * FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1)) AS old
+JOIN (SELECT * FROM remote_flight.rm10.t) AS cur
+  ON old.i = cur.i
+ORDER BY old.i;
+----
+1	alpha	1	ALPHA
+
+# ============================================================
+# JOIN: two different versions of the same table
+# ============================================================
+
+query ITT
+SELECT v1.i, v1.v AS v_before, v3.v AS v_after
+FROM (SELECT * FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1)) AS v1
+JOIN (SELECT * FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 3)) AS v3
+  ON v1.i = v3.i
+ORDER BY v1.i;
+----
+1	alpha	ALPHA
+2	bravo	bravo
+
+# ============================================================
+# Subquery with time travel
+# ============================================================
+
+query IT
+SELECT i, v FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2)
+WHERE i IN (SELECT i FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1))
+ORDER BY i;
+----
+1	alpha
+2	bravo
+
+# ============================================================
+# Compare counts across versions (scalar subqueries)
+# ============================================================
+
+query III
+SELECT
+  (SELECT COUNT(*) FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver'))) AS v_create,
+  (SELECT COUNT(*) FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 2)) AS v_insert2,
+  (SELECT COUNT(*) FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 4)) AS v_delete;
+----
+0	3	2
+
+# ============================================================
+# Time travel on a second table (isolation check)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.rm10.t2(x INT);
+
+statement ok
+SET VARIABLE t2_create_ver = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+INSERT INTO remote_flight.rm10.t2 VALUES (100);
+
+# t2 at its own create version is empty
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.t2 AT (VERSION => getvariable('t2_create_ver'));
+----
+0
+
+# t2 at create_ver+1 has data
+query I
+SELECT x FROM remote_flight.rm10.t2 AT (VERSION => getvariable('t2_create_ver') + 1);
+----
+100
+
+# t's version history is independent — still works at its own offsets
+query I
+SELECT COUNT(*) FROM remote_flight.rm10.t AT (VERSION => getvariable('create_ver') + 1);
+----
+2
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.rm10 CASCADE;

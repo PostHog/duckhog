@@ -12,8 +12,10 @@
 #include "catalog/remote_scan.hpp"
 
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/catalog/entry_lookup_info.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
+#include "duckdb/planner/tableref/bound_at_clause.hpp"
 
 #include <arrow/type.h>
 
@@ -48,6 +50,35 @@ TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_
 	                                              arrow_schema_);
 
 	return PostHogRemoteScan::GetFunction();
+}
+
+// Render a BoundAtClause as a SQL fragment for the remote query.
+// DuckLake supports AT (VERSION => <int>) and AT (TIMESTAMP => '<ts>').
+string RenderAtClauseSQL(const BoundAtClause &at_clause) {
+	const auto &unit = at_clause.Unit();
+	const auto &val = at_clause.GetValue();
+	// Integer-typed values (VERSION) don't need quoting; everything else does.
+	bool needs_quoting = val.type().id() != LogicalTypeId::BIGINT && val.type().id() != LogicalTypeId::INTEGER &&
+	                     val.type().id() != LogicalTypeId::SMALLINT && val.type().id() != LogicalTypeId::TINYINT &&
+	                     val.type().id() != LogicalTypeId::UBIGINT && val.type().id() != LogicalTypeId::UINTEGER &&
+	                     val.type().id() != LogicalTypeId::USMALLINT && val.type().id() != LogicalTypeId::UTINYINT;
+	if (needs_quoting) {
+		return "AT (" + unit + " => '" + val.ToString() + "')";
+	}
+	return "AT (" + unit + " => " + val.ToString() + ")";
+}
+
+TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data,
+                                                 const EntryLookupInfo &lookup_info) {
+	auto func = GetScanFunction(context, bind_data);
+
+	auto at_clause = lookup_info.GetAtClause();
+	if (at_clause) {
+		auto &scan_bind = bind_data->Cast<PostHogRemoteScanBindData>();
+		scan_bind.at_clause_sql = RenderAtClauseSQL(*at_clause);
+	}
+
+	return func;
 }
 
 TableStorageInfo PostHogTableEntry::GetStorageInfo(ClientContext &context) {
