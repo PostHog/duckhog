@@ -11,9 +11,10 @@ LOAD ducklake;
 statement ok
 LOAD parquet;
 
-# Use a temporary in-memory DuckLake catalog (no files on disk).
+# Use __TEST_DIR__ so the metadata DB and Parquet data files are created
+# in the per-test temp directory (automatically cleaned up by the runner).
 statement ok
-ATTACH ':memory:' AS dl (TYPE ducklake);
+ATTACH 'ducklake:__TEST_DIR__/meta.db' AS dl;
 
 # ============================================================
 # Basic version semantics
