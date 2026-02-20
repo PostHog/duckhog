@@ -1,6 +1,6 @@
 ---
 name: bug-verification
-description: Rigorously verify suspected bugs before filing issues. Determines provenance (upstream vs DuckHog), severity, and whether a bug is real. Use whenever a test failure, unexpected behavior, or suspected regression needs to be classified before opening an issue or adding to DUCKLAKE_BUGS.md.
+description: Rigorously verify suspected bugs before filing issues. Determines provenance (upstream vs DuckHog), severity, and whether a bug is real. Use whenever a test failure, unexpected behavior, or suspected regression needs to be classified before opening an issue or adding to RELATED_BUGS.md.
 ---
 
 # Bug Verification
@@ -149,9 +149,9 @@ SELECT "has""dq" FROM remote_catalog.schema.t;
 syntax error
 ```
 
-### Step 8: Document in DUCKLAKE_BUGS.md
+### Step 8: Document in RELATED_BUGS.md
 
-Add the bug to `docs/DUCKLAKE_BUGS.md` using the established format:
+Add the bug to `docs/RELATED_BUGS.md` using the established format:
 
 - **Upstream bugs** get a `U#` prefix
 - **DuckHog bugs** get a `D#` prefix
@@ -177,5 +177,5 @@ These patterns frequently look like bugs but aren't:
 ## References
 
 - Provenance decision tree: `references/provenance-tree.md`
-- Known bugs catalog: `docs/DUCKLAKE_BUGS.md`
+- Known bugs catalog: `docs/RELATED_BUGS.md`
 - Architecture guide (code paths): `CLAUDE.md`

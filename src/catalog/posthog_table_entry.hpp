@@ -22,6 +22,12 @@ namespace duckdb {
 class PostHogCatalog;
 class PostHogSchemaEntry;
 
+class BoundAtClause;
+
+// Render a BoundAtClause as a SQL fragment for the remote query, e.g.
+// "AT (VERSION => 1)" or "AT (TIMESTAMP => '2024-01-15 10:30:00')".
+string RenderAtClauseSQL(const BoundAtClause &at_clause);
+
 class PostHogTableEntry : public TableCatalogEntry {
 public:
 	PostHogTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info,
@@ -36,6 +42,8 @@ public:
 	unique_ptr<BaseStatistics> GetStatistics(ClientContext &context, column_t column_id) override;
 
 	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) override;
+	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data,
+	                              const EntryLookupInfo &lookup_info) override;
 
 	TableStorageInfo GetStorageInfo(ClientContext &context) override;
 

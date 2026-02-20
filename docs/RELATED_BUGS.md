@@ -83,36 +83,7 @@ value parser treated `true`/`false` as expressions, not literals.
 
 ---
 
-## ~~U4. Large INSERT loses rows~~ → moved to D4
-
-Originally attributed to DuckLake. Verified via psql that DuckLake inserts
-3000/3000 rows correctly through the Postgres wire protocol. The row loss
-is in DuckHog's chunk handling — see D4 below.
-
----
-
-## ~~U5. BOOLEAN renders as 0/1 through DuckLake~~ — not a bug
-
-BOOLEAN works correctly. The `0`/`1` was a test authoring error (using
-`query II` integer type specifier instead of `query TI`). Verified that
-both raw SELECT and GROUP BY return proper `true`/`false` through DuckLake
-via Arrow Flight.
-
----
-
-## ~~U7. MERGE self-join reads own writes~~ — not confirmed
-
-Self-merge (`MERGE INTO t USING t AS s ... SET val = s.val + 1`) produced
-`val + 2` when tested via psql with an attached DuckLake catalog, but through
-DuckHog's Flight SQL rewrite path, DuckLake correctly returns `val + 1`
-(matching plain DuckDB behavior). The +2 behavior may be specific to the
-local-attach execution path in DuckLake, not the SQL-over-Flight path we use.
-
-Not filing upstream — needs further investigation outside DuckHog to confirm.
-
----
-
-## U6. CREATE INDEX on remote catalog crashes DuckDB binder
+## U4. CREATE INDEX on remote catalog crashes DuckDB binder
 
 | Field | Value |
 |-------|-------|
@@ -250,11 +221,68 @@ and verify `MIN`/`MAX` instead of exact counts.
 
 These are known gaps, not bugs.
 
-## L1. INSERT ... RETURNING with omitted columns
+## L1. INSERT ... RETURNING with omitted/default columns
 
-`posthog_catalog.cpp:309` throws `NotImplementedException` when INSERT
-RETURNING is used with a partial column list. The INSERT itself works; only
-the RETURNING path is missing.
+`posthog_catalog.cpp:306` throws `NotImplementedException` when INSERT
+RETURNING is combined with omitted or default columns. The INSERT itself works
+(defaults are applied server-side); only the RETURNING path is blocked.
+
+**Affected patterns:**
+- `INSERT DEFAULT VALUES RETURNING *`
+- `INSERT INTO t(subset) VALUES (...) RETURNING *`
+- `INSERT INTO t(i, j) VALUES (DEFAULT, ...) RETURNING *`
+
+**Root cause:** DuckHog fakes RETURNING by echoing the input chunk back to the
+client. When columns are omitted, their default values are resolved
+server-side (by DuckLake/Postgres) and are unknown to DuckHog:
+
+1. `ColumnDefinition` objects are created from the Arrow schema
+   (`PopulateTableSchemaFromArrow`) with only name and type — no defaults.
+2. `ExecuteUpdate` returns only an affected-row count, not data.
+3. DuckLake does not support `INSERT ... RETURNING` natively.
+4. Even if defaults were fetched from `information_schema`, non-deterministic
+   expressions (`random()`, `current_timestamp`) would produce wrong values.
+
+This is consistent with `postgres_scanner` and `mysql_scanner`, which do not
+support INSERT RETURNING at all. DuckHog supports it for full-column inserts.
+
+**Tests:** `insert_defaults_returning_remote.test_slow` — error assertions;
+`insert_default_values_remote.test_slow` — RM18 covers the same error.
+
+## L3. Time travel with schema evolution projects current column names
+
+- **GitHub issue:** [#74](https://github.com/PostHog/duckhog/issues/74)
+
+DuckHog builds remote SQL projections from the current `TableCatalogEntry`
+schema. When time-traveling to a version with a different schema, column names
+in the projection may not match the historical schema.
+
+All four [DuckLake schema evolution operations](https://ducklake.select/docs/stable/duckdb/usage/schema_evolution.html)
+are affected:
+
+| Schema change | DuckLake spec | Behavior |
+|---|---|---|
+| [ADD COLUMN](https://ducklake.select/docs/stable/duckdb/usage/schema_evolution.html#adding-columns--fields) | Supported | **Error** — projects column that didn't exist at target version |
+| [RENAME COLUMN](https://ducklake.select/docs/stable/duckdb/usage/schema_evolution.html#renaming-columns--fields) | Supported | **Error** — projects new name; old name expected at target version |
+| [DROP COLUMN](https://ducklake.select/docs/stable/duckdb/usage/schema_evolution.html#dropping-columns--fields) | Supported | **Silent omission** — dropped column not projected, data invisible |
+| [TYPE PROMOTION](https://ducklake.select/docs/stable/duckdb/usage/schema_evolution.html#type-promotion) | Supported | **Garbled data** — local Arrow schema uses new type width, remote returns old width |
+| [RENAME TABLE](https://ducklake.select/docs/stable/duckdb/usage/schema_evolution.html#renaming-tables) | Supported | **Error** — remote rejects current name at pre-rename version; local binder rejects old name |
+
+Note: for RENAME TABLE, native DuckLake allows querying by the old name at
+the old version (it resolves names at the target version). DuckHog cannot do
+this because the local binder only knows the current table name.
+
+Native DuckLake handles this via [field identifiers](https://ducklake.select/docs/stable/duckdb/usage/schema_evolution.html#field-identifiers)
+and `begin_snapshot`/`end_snapshot` ranges in the
+[`ducklake_column`](https://ducklake.select/docs/stable/specification/tables/ducklake_column) table.
+DuckHog can't replicate this over SQL proxy.
+
+**Workaround (ADD COLUMN only):** Use explicit column list matching the
+historical schema: `SELECT a, b FROM t AT (VERSION => v)` instead of
+`SELECT *`. Does not help for RENAME or DROP (local binder rejects old/dropped
+column names).
+
+**Test:** `time_travel_remote.test_slow` — schema evolution section.
 
 ## L2. PK/UNIQUE constraint metadata not synced to client
 

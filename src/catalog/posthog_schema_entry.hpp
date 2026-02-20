@@ -9,6 +9,7 @@
 #pragma once
 
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
+#include "duckdb/catalog/catalog_entry/table_function_catalog_entry.hpp"
 
 #include <unordered_map>
 #include <mutex>
@@ -86,6 +87,9 @@ private:
 	bool tables_loaded_ = false;
 	std::chrono::steady_clock::time_point tables_loaded_at_;
 	std::unordered_map<string, unique_ptr<PostHogTableEntry>> table_cache_;
+
+	// Table function proxy cache (e.g. snapshots(), table_insertions())
+	std::unordered_map<string, unique_ptr<TableFunctionCatalogEntry>> table_function_cache_;
 
 	// Cache TTL (5 minutes by default)
 	static constexpr int64_t CACHE_TTL_SECONDS = 300;

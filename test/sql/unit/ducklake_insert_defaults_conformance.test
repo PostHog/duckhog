@@ -1,0 +1,133 @@
+# name: test/sql/unit/ducklake_insert_defaults_conformance.test
+# description: Verify native DuckLake INSERT default-value behavior that DuckHog integration tests rely on.
+# group: [unit]
+
+#              Conformance tests run DuckDB + DuckLake directly — no DuckHog, no Duckgres.
+#              They document our assumptions about native DuckLake behavior so that when
+#              an integration test fails, we can tell whether DuckLake changed underneath
+#              us or whether our proxy is broken.
+#
+#              Note: DuckLake does not support RETURNING, so we verify defaults via SELECT.
+
+require parquet
+
+statement ok
+INSTALL ducklake;
+
+statement ok
+LOAD ducklake;
+
+statement ok
+ATTACH 'ducklake:__TEST_DIR__/meta.db' AS dl;
+
+statement ok
+CREATE TABLE dl.main.t(i INT DEFAULT 42, j INT DEFAULT 7, v VARCHAR DEFAULT 'hello');
+
+# ============================================================
+# INSERT DEFAULT VALUES
+# ============================================================
+
+statement ok
+INSERT INTO dl.main.t DEFAULT VALUES;
+
+query III
+SELECT i, j, v FROM dl.main.t;
+----
+42	7	hello
+
+# ============================================================
+# Partial column list — omitted columns get defaults
+# ============================================================
+
+statement ok
+DELETE FROM dl.main.t;
+
+statement ok
+INSERT INTO dl.main.t(i) VALUES (1);
+
+query III
+SELECT i, j, v FROM dl.main.t;
+----
+1	7	hello
+
+# ============================================================
+# Explicit DEFAULT literals in VALUES
+# ============================================================
+
+statement ok
+DELETE FROM dl.main.t;
+
+statement ok
+INSERT INTO dl.main.t(i, j, v) VALUES (DEFAULT, DEFAULT, DEFAULT);
+
+query III
+SELECT i, j, v FROM dl.main.t;
+----
+42	7	hello
+
+# ============================================================
+# Mixed DEFAULT and explicit values
+# ============================================================
+
+statement ok
+DELETE FROM dl.main.t;
+
+statement ok
+INSERT INTO dl.main.t(i, j, v) VALUES (DEFAULT, 99, 'world');
+
+query III
+SELECT i, j, v FROM dl.main.t;
+----
+42	99	world
+
+statement ok
+DELETE FROM dl.main.t;
+
+statement ok
+INSERT INTO dl.main.t(i, j, v) VALUES (10, DEFAULT, DEFAULT);
+
+query III
+SELECT i, j, v FROM dl.main.t;
+----
+10	7	hello
+
+# ============================================================
+# Multi-row partial insert — each row gets defaults
+# ============================================================
+
+statement ok
+DELETE FROM dl.main.t;
+
+statement ok
+INSERT INTO dl.main.t(j) VALUES (100), (200);
+
+query III
+SELECT i, j, v FROM dl.main.t ORDER BY j;
+----
+42	100	hello
+42	200	hello
+
+# ============================================================
+# Column with no DEFAULT — omitted column gets NULL
+# ============================================================
+
+statement ok
+CREATE TABLE dl.main.t_nullable(a INT, b INT DEFAULT 5);
+
+statement ok
+INSERT INTO dl.main.t_nullable(b) VALUES (10);
+
+query II
+SELECT a, b FROM dl.main.t_nullable;
+----
+NULL	10
+
+# ============================================================
+# DuckLake does not support RETURNING on INSERT
+# (DuckHog implements RETURNING by intercepting the chunk)
+# ============================================================
+
+statement error
+INSERT INTO dl.main.t DEFAULT VALUES RETURNING i, j;
+----
+RETURNING clause not yet supported for insertion into DuckLake table

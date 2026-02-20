@@ -39,6 +39,9 @@ struct PostHogRemoteScanBindData : public ArrowScanFunctionData {
 	vector<string> column_names;
 	vector<LogicalType> column_types;
 
+	// Optional AT clause SQL fragment, e.g. "AT (VERSION => 1)"
+	string at_clause_sql;
+
 	// Patched C ArrowSchema child name pointers.  Each entry records the child
 	// schema, the original name pointer (owned by Arrow's private data), and the
 	// strdup'd replacement.  The destructor restores originals before the base
