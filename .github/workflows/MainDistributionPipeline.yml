@@ -24,6 +24,7 @@ jobs:
     with:
       duckdb_version: v1.4.4
       ci_tools_version: v1.4-andium
+      extra_toolchains: parser_tools
       extension_name: duckhog
 
   duckdb-stable-build-pr:
@@ -33,6 +34,7 @@ jobs:
     with:
       duckdb_version: v1.4.4
       ci_tools_version: v1.4-andium
+      extra_toolchains: parser_tools
       extension_name: duckhog
 
   code-quality-check:

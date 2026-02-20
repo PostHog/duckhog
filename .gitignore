@@ -68,3 +68,8 @@ test/integration/duckling_go_server
 
 # Local ccache (used in sandboxed builds)
 .ccache/
+ccache_dir/
+
+# Local CI scratch artifacts
+docker_env.txt
+local_vcpkg_installation/
