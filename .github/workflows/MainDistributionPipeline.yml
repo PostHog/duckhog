@@ -28,7 +28,13 @@ jobs:
       # duckhog depends on Arrow Flight/FlightSQL via vcpkg.json; Arrow is unsupported on wasm32-emscripten.
       # Exclude all WASM targets to avoid deterministic vcpkg configure failures in WASM matrix jobs.
       exclude_archs: wasm_mvp;wasm_eh;wasm_threads
+      vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,readwrite;http,https://vcpkg-cache.duckdb.org,read
       extension_name: duckhog
+    secrets:
+      VCPKG_CACHING_AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_RW_AWS_ACCESS_KEY_ID }}
+      VCPKG_CACHING_AWS_SECRET_ACCESS_KEY: ${{ secrets.VCPKG_CACHING_RW_AWS_SECRET_ACCESS_KEY }}
+      VCPKG_CACHING_AWS_ENDPOINT_URL: ${{ secrets.VCPKG_CACHING_AWS_ENDPOINT_URL }}
+      VCPKG_CACHING_AWS_DEFAULT_REGION: ${{ secrets.VCPKG_CACHING_AWS_DEFAULT_REGION }}
 
   duckdb-stable-build-pr:
     name: Build extension binaries (PR)
@@ -41,7 +47,13 @@ jobs:
       # duckhog depends on Arrow Flight/FlightSQL via vcpkg.json; Arrow is unsupported on wasm32-emscripten.
       # Exclude all WASM targets to avoid deterministic vcpkg configure failures in WASM matrix jobs.
       exclude_archs: wasm_mvp;wasm_eh;wasm_threads
+      vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read
       extension_name: duckhog
+    secrets:
+      VCPKG_CACHING_AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_RO_AWS_ACCESS_KEY_ID }}
+      VCPKG_CACHING_AWS_SECRET_ACCESS_KEY: ${{ secrets.VCPKG_CACHING_RO_AWS_SECRET_ACCESS_KEY }}
+      VCPKG_CACHING_AWS_ENDPOINT_URL: ${{ secrets.VCPKG_CACHING_AWS_ENDPOINT_URL }}
+      VCPKG_CACHING_AWS_DEFAULT_REGION: ${{ secrets.VCPKG_CACHING_AWS_DEFAULT_REGION }}
 
   code-quality-check:
     name: Code Quality Check
