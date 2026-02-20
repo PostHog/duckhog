@@ -82,6 +82,7 @@ if(${BUILD_UNITTESTS})
         test/cpp/test_merge_rewriter.cpp
         test/cpp/test_render_at_clause.cpp
         test/cpp/test_update_rewriter.cpp
+        test/cpp/test_insert_sql_builder.cpp
     )
     target_include_directories(test_duckhog_cpp PRIVATE src/include src
         ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/catch

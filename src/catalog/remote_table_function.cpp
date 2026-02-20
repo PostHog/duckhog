@@ -263,7 +263,7 @@ CreateRemoteTableFunctionEntry(PostHogCatalog &catalog, SchemaCatalogEntry &sche
 
 	auto fn_info = make_shared_ptr<RemoteTableFunctionInfo>(catalog, function_base);
 
-	// Zero-arg overload (e.g. snapshots(), table_info(), table_changes()).
+	// Zero-arg overload (e.g. snapshots(), table_info(), table_insertions()).
 	TableFunction zero_arg(function_name, {}, RemoteTableFunctionExecute, RemoteTableFunctionBind,
 	                       RemoteTableFunctionInitGlobal, RemoteTableFunctionInitLocal);
 	zero_arg.projection_pushdown = true;

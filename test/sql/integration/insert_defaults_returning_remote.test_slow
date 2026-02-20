@@ -1,0 +1,187 @@
+# name: test/sql/integration/insert_defaults_returning_remote.test_slow
+# description: INSERT with DEFAULT/partial columns — working paths and known limitations (RM20-22)
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.rm20_22 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.rm20_22;
+
+statement ok
+CREATE TABLE remote_flight.rm20_22.t(i INT DEFAULT 42, j INT DEFAULT 7, v VARCHAR DEFAULT 'hello');
+
+# ============================================================
+# Partial column list without RETURNING — omitted cols get defaults
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.rm20_22.t(i) VALUES (1);
+
+query IIT
+SELECT i, j, v FROM remote_flight.rm20_22.t;
+----
+1	7	hello
+
+statement ok
+DELETE FROM remote_flight.rm20_22.t;
+
+statement ok
+INSERT INTO remote_flight.rm20_22.t(v) VALUES ('world');
+
+query IIT
+SELECT i, j, v FROM remote_flight.rm20_22.t;
+----
+42	7	world
+
+statement ok
+DELETE FROM remote_flight.rm20_22.t;
+
+statement ok
+INSERT INTO remote_flight.rm20_22.t(i, v) VALUES (10, 'ten');
+
+query IIT
+SELECT i, j, v FROM remote_flight.rm20_22.t;
+----
+10	7	ten
+
+statement ok
+DELETE FROM remote_flight.rm20_22.t;
+
+# Omit first and last column
+statement ok
+INSERT INTO remote_flight.rm20_22.t(j) VALUES (99);
+
+query IIT
+SELECT i, j, v FROM remote_flight.rm20_22.t;
+----
+42	99	hello
+
+statement ok
+DELETE FROM remote_flight.rm20_22.t;
+
+# ============================================================
+# Explicit DEFAULT literals in VALUES
+# ============================================================
+
+# All DEFAULT
+statement ok
+INSERT INTO remote_flight.rm20_22.t(i, j, v) VALUES (DEFAULT, DEFAULT, DEFAULT);
+
+query IIT
+SELECT i, j, v FROM remote_flight.rm20_22.t;
+----
+42	7	hello
+
+statement ok
+DELETE FROM remote_flight.rm20_22.t;
+
+# Mixed DEFAULT and explicit
+statement ok
+INSERT INTO remote_flight.rm20_22.t(i, j, v) VALUES (DEFAULT, 99, 'world');
+
+query IIT
+SELECT i, j, v FROM remote_flight.rm20_22.t;
+----
+42	99	world
+
+statement ok
+DELETE FROM remote_flight.rm20_22.t;
+
+statement ok
+INSERT INTO remote_flight.rm20_22.t(i, j, v) VALUES (10, DEFAULT, DEFAULT);
+
+query IIT
+SELECT i, j, v FROM remote_flight.rm20_22.t;
+----
+10	7	hello
+
+statement ok
+DELETE FROM remote_flight.rm20_22.t;
+
+# ============================================================
+# Multi-row with partial columns (no RETURNING)
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.rm20_22.t(j) VALUES (100), (200);
+
+query IIT
+SELECT i, j, v FROM remote_flight.rm20_22.t ORDER BY j;
+----
+42	100	hello
+42	200	hello
+
+statement ok
+DELETE FROM remote_flight.rm20_22.t;
+
+# ============================================================
+# Column with no DEFAULT — omitted column gets NULL
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.rm20_22.nullable(a INT, b INT DEFAULT 5);
+
+statement ok
+INSERT INTO remote_flight.rm20_22.nullable(b) VALUES (10);
+
+query II
+SELECT a, b FROM remote_flight.rm20_22.nullable;
+----
+NULL	10
+
+statement ok
+DELETE FROM remote_flight.rm20_22.nullable;
+
+# ============================================================
+# Known limitation: RETURNING + omitted/default columns
+# DuckHog echoes the input chunk for RETURNING, but omitted columns
+# are unknown (remote defaults aren't available locally).
+# ============================================================
+
+# RM20: DEFAULT VALUES + RETURNING
+statement error
+INSERT INTO remote_flight.rm20_22.t DEFAULT VALUES RETURNING *;
+----
+INSERT ... RETURNING with omitted/default columns is not yet implemented
+
+# RM21: Partial column list + RETURNING
+statement error
+INSERT INTO remote_flight.rm20_22.t(i) VALUES (1) RETURNING *;
+----
+INSERT ... RETURNING with omitted/default columns is not yet implemented
+
+# Explicit DEFAULT literal + RETURNING
+statement error
+INSERT INTO remote_flight.rm20_22.t(i, j, v) VALUES (DEFAULT, DEFAULT, DEFAULT) RETURNING *;
+----
+INSERT ... RETURNING with omitted/default columns is not yet implemented
+
+# ============================================================
+# Full column list + RETURNING still works (no defaults involved)
+# ============================================================
+
+query IIT
+INSERT INTO remote_flight.rm20_22.t(i, j, v) VALUES (1, 2, 'works') RETURNING *;
+----
+1	2	works
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.rm20_22 CASCADE;
