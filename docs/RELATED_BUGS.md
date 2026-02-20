@@ -221,11 +221,33 @@ and verify `MIN`/`MAX` instead of exact counts.
 
 These are known gaps, not bugs.
 
-## L1. INSERT ... RETURNING with omitted columns
+## L1. INSERT ... RETURNING with omitted/default columns
 
-`posthog_catalog.cpp:309` throws `NotImplementedException` when INSERT
-RETURNING is used with a partial column list. The INSERT itself works; only
-the RETURNING path is missing.
+`posthog_catalog.cpp:306` throws `NotImplementedException` when INSERT
+RETURNING is combined with omitted or default columns. The INSERT itself works
+(defaults are applied server-side); only the RETURNING path is blocked.
+
+**Affected patterns:**
+- `INSERT DEFAULT VALUES RETURNING *`
+- `INSERT INTO t(subset) VALUES (...) RETURNING *`
+- `INSERT INTO t(i, j) VALUES (DEFAULT, ...) RETURNING *`
+
+**Root cause:** DuckHog fakes RETURNING by echoing the input chunk back to the
+client. When columns are omitted, their default values are resolved
+server-side (by DuckLake/Postgres) and are unknown to DuckHog:
+
+1. `ColumnDefinition` objects are created from the Arrow schema
+   (`PopulateTableSchemaFromArrow`) with only name and type — no defaults.
+2. `ExecuteUpdate` returns only an affected-row count, not data.
+3. DuckLake does not support `INSERT ... RETURNING` natively.
+4. Even if defaults were fetched from `information_schema`, non-deterministic
+   expressions (`random()`, `current_timestamp`) would produce wrong values.
+
+This is consistent with `postgres_scanner` and `mysql_scanner`, which do not
+support INSERT RETURNING at all. DuckHog supports it for full-column inserts.
+
+**Tests:** `insert_defaults_returning_remote.test_slow` — error assertions;
+`insert_default_values_remote.test_slow` — RM18 covers the same error.
 
 ## L3. Time travel with schema evolution projects current column names
 

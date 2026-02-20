@@ -54,9 +54,8 @@ Current targets:
 - [`rm16_on_conflict_do_nothing_remote.test_slow`](sql/roadmap/rm16_on_conflict_do_nothing_remote.test_slow) — [#38](https://github.com/PostHog/duckhog/issues/38)
 - [`rm17_on_conflict_do_update_remote.test_slow`](sql/roadmap/rm17_on_conflict_do_update_remote.test_slow) — [#39](https://github.com/PostHog/duckhog/issues/39)
 - [`rm19_on_conflict_do_nothing_returning_remote.test_slow`](sql/roadmap/rm19_on_conflict_do_nothing_returning_remote.test_slow) — [#40](https://github.com/PostHog/duckhog/issues/40)
-- [`rm20_insert_returning_omitted_columns_remote.test_slow`](sql/roadmap/rm20_insert_returning_omitted_columns_remote.test_slow) — [#41](https://github.com/PostHog/duckhog/issues/41)
-- [`rm21_insert_partial_returning_remote.test_slow`](sql/roadmap/rm21_insert_partial_returning_remote.test_slow) — [#42](https://github.com/PostHog/duckhog/issues/42)
-- [`rm22_insert_values_default_literals_remote.test_slow`](sql/roadmap/rm22_insert_values_default_literals_remote.test_slow) — [#43](https://github.com/PostHog/duckhog/issues/43)
+- [`rm20_insert_returning_omitted_columns_remote.test_slow`](sql/roadmap/rm20_insert_returning_omitted_columns_remote.test_slow) — [#41](https://github.com/PostHog/duckhog/issues/41) — see limitation L1
+- [`rm21_insert_partial_returning_remote.test_slow`](sql/roadmap/rm21_insert_partial_returning_remote.test_slow) — [#42](https://github.com/PostHog/duckhog/issues/42) — see limitation L1
 - [`rm23_on_conflict_rewrite_path_remote.test_slow`](sql/roadmap/rm23_on_conflict_rewrite_path_remote.test_slow) — [#44](https://github.com/PostHog/duckhog/issues/44)
 
 Non-test-file targets:
@@ -76,6 +75,7 @@ Graduated targets (now part of normal integration suite):
 - [`table_functions_remote.test_slow`](sql/integration/table_functions_remote.test_slow) (RM11, RM12, RM13) — [#34](https://github.com/PostHog/duckhog/issues/34), [#35](https://github.com/PostHog/duckhog/issues/35), [#36](https://github.com/PostHog/duckhog/issues/36)
 - [`insert_returning_remote.test_slow`](sql/integration/insert_returning_remote.test_slow) (RM15)
 - [`insert_default_values_remote.test_slow`](sql/integration/insert_default_values_remote.test_slow) (RM18)
+- [`insert_defaults_returning_remote.test_slow`](sql/integration/insert_defaults_returning_remote.test_slow) (RM22) — [#43](https://github.com/PostHog/duckhog/issues/43); RM20/RM21 remain as limitation L1
 
 ## Design Rules
 

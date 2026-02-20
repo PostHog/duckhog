@@ -88,7 +88,7 @@ private:
 	std::chrono::steady_clock::time_point tables_loaded_at_;
 	std::unordered_map<string, unique_ptr<PostHogTableEntry>> table_cache_;
 
-	// Table function proxy cache (e.g. snapshots(), table_changes())
+	// Table function proxy cache (e.g. snapshots(), table_insertions())
 	std::unordered_map<string, unique_ptr<TableFunctionCatalogEntry>> table_function_cache_;
 
 	// Cache TTL (5 minutes by default)

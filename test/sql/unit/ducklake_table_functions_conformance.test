@@ -2,7 +2,10 @@
 # description: Verify native DuckLake table function behavior that DuckHog integration tests rely on.
 # group: [unit]
 
-#              If these fail, the assumptions in the RM11-13 integration tests are wrong.
+#              Conformance tests run DuckDB + DuckLake directly — no DuckHog, no Duckgres.
+#              They document our assumptions about native DuckLake behavior so that when
+#              an integration test fails, we can tell whether DuckLake changed underneath
+#              us or whether our proxy is broken.
 
 require parquet
 
