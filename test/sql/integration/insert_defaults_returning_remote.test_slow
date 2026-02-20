@@ -164,11 +164,11 @@ INSERT INTO remote_flight.rm20_22.t(i) VALUES (1) RETURNING *;
 ----
 INSERT ... RETURNING with omitted/default columns is not yet implemented
 
-# Explicit DEFAULT literal + RETURNING
-statement error
+# Explicit DEFAULT literal + RETURNING with full column list is now supported
+query IIT
 INSERT INTO remote_flight.rm20_22.t(i, j, v) VALUES (DEFAULT, DEFAULT, DEFAULT) RETURNING *;
 ----
-INSERT ... RETURNING with omitted/default columns is not yet implemented
+42	7	hello
 
 # ============================================================
 # Full column list + RETURNING still works (no defaults involved)

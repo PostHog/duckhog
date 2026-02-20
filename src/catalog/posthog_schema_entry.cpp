@@ -57,6 +57,24 @@ string QuoteIdent(const string &ident) {
 
 string QualifyTable(const string &catalog, const string &schema, const string &table);
 
+void CopyKnownDefaultsByName(const ColumnList &source_columns, ColumnList &target_columns) {
+	auto target_names = target_columns.GetColumnNames();
+	for (auto &target_name : target_names) {
+		if (!source_columns.ColumnExists(target_name)) {
+			continue;
+		}
+		const auto &source_column = source_columns.GetColumn(target_name);
+		const auto &target_column = target_columns.GetColumn(target_name);
+		if (source_column.Type() != target_column.Type()) {
+			continue;
+		}
+		if (!source_column.HasDefaultValue()) {
+			continue;
+		}
+		target_columns.GetColumnMutable(target_name).SetDefaultValue(source_column.DefaultValue().Copy());
+	}
+}
+
 string RenderSafeDefaultExpression(const ParsedExpression &expression) {
 	if (expression.HasSubquery() || expression.HasParameter() || expression.IsAggregate() || expression.IsWindow()) {
 		throw NotImplementedException(
@@ -237,6 +255,7 @@ optional_ptr<CatalogEntry> PostHogSchemaEntry::CreateTable(CatalogTransaction tr
 	for (idx_t i = 0; i < column_names.size(); i++) {
 		create_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
 	}
+	CopyKnownDefaultsByName(remote_info.columns, create_info->columns);
 	create_info->columns.Finalize();
 
 	std::lock_guard<std::mutex> lock(tables_mutex_);
@@ -345,9 +364,23 @@ void PostHogSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) 
 	for (idx_t i = 0; i < column_names.size(); i++) {
 		create_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
 	}
+	std::lock_guard<std::mutex> lock(tables_mutex_);
+	auto existing_entry = table_cache_.find(info.name);
+	if (existing_entry != table_cache_.end()) {
+		CopyKnownDefaultsByName(existing_entry->second->GetColumns(), create_info->columns);
+	}
+	if (alter_table_info.alter_table_type == AlterTableType::ADD_COLUMN) {
+		auto &new_column = info.Cast<AddColumnInfo>().new_column;
+		if (new_column.HasDefaultValue() && create_info->columns.ColumnExists(new_column.Name())) {
+			const auto &hydrated_column = create_info->columns.GetColumn(new_column.Name());
+			if (hydrated_column.Type() == new_column.Type()) {
+				create_info->columns.GetColumnMutable(new_column.Name())
+				    .SetDefaultValue(new_column.DefaultValue().Copy());
+			}
+		}
+	}
 	create_info->columns.Finalize();
 
-	std::lock_guard<std::mutex> lock(tables_mutex_);
 	table_cache_.erase(info.name);
 	table_cache_[effective_table_name] =
 	    make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, std::move(arrow_schema));
