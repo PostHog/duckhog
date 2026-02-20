@@ -561,13 +561,38 @@ void PostHogSchemaEntry::Scan(CatalogType type, const std::function<void(Catalog
 
 optional_ptr<CatalogEntry> PostHogSchemaEntry::LookupEntry(CatalogTransaction transaction,
                                                            const EntryLookupInfo &lookup_info) {
-	// Proxy catalog-level table functions (e.g. snapshots()) through Flight SQL.
-	// We speculatively create a proxy entry; if the remote server doesn't recognize the
-	// function, the Flight SQL call in bind will surface the error naturally.
+	// Proxy known DuckLake catalog-scoped table functions through Flight SQL.
+	// Only allowlisted names are proxied; unknown names return nullptr so that
+	// DuckDB's binder doesn't confuse an unknown scalar function (e.g. a typo)
+	// with a table function we speculatively created.
+	// The sentinel test in ducklake_table_functions_conformance.test verifies
+	// this list stays in sync with DuckLake's actual function inventory.
 	if (lookup_info.GetCatalogType() == CatalogType::TABLE_FUNCTION_ENTRY) {
-		auto entry = CreateRemoteTableFunctionEntry(posthog_catalog_, *this, lookup_info.GetEntryName());
+		static const unordered_set<string> known_table_functions = {"add_data_files",
+		                                                            "cleanup_old_files",
+		                                                            "current_snapshot",
+		                                                            "delete_orphaned_files",
+		                                                            "expire_snapshots",
+		                                                            "flush_inlined_data",
+		                                                            "last_committed_snapshot",
+		                                                            "list_files",
+		                                                            "merge_adjacent_files",
+		                                                            "options",
+		                                                            "rewrite_data_files",
+		                                                            "set_commit_message",
+		                                                            "set_option",
+		                                                            "snapshots",
+		                                                            "table_changes",
+		                                                            "table_deletions",
+		                                                            "table_info",
+		                                                            "table_insertions"};
+		auto &name = lookup_info.GetEntryName();
+		if (known_table_functions.find(name) == known_table_functions.end()) {
+			return nullptr;
+		}
+		auto entry = CreateRemoteTableFunctionEntry(posthog_catalog_, *this, name);
 		auto *result = entry.get();
-		table_function_cache_[lookup_info.GetEntryName()] = std::move(entry);
+		table_function_cache_[name] = std::move(entry);
 		return result;
 	}
 
