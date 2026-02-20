@@ -183,7 +183,7 @@ SELECT part_key, v FROM remote_flight.part_rm08.t WHERE part_key = 3;
 # ============================================================
 
 # NOTE: amount uses DOUBLE instead of DECIMAL(10,2) because DECIMAL columns
-# return NULL through Flight SQL — see docs/DUCKLAKE_BUGS.md #2.
+# return NULL through Flight SQL — see docs/RELATED_BUGS.md #2.
 statement ok
 CREATE TABLE remote_flight.part_rm08.multi(region VARCHAR, year INT, amount DOUBLE);
 
@@ -475,7 +475,7 @@ SELECT pk, v FROM remote_flight.part_rm08.nulls ORDER BY pk;
 # NOTE: INSERT with NULL partition key crashes DuckLake with:
 #   INTERNAL Error: Calling StringValue::Get on a NULL value
 #   in DuckLakeInsert::AddWrittenFiles
-# This is a DuckLake server-side bug — see docs/DUCKLAKE_BUGS.md #1.
+# This is a DuckLake server-side bug — see docs/RELATED_BUGS.md #1.
 # Cannot test with `statement error` because SQLLogicTest treats internal
 # exceptions as test failures.
 # When DuckLake fixes this, add back a test for NULL partition keys.

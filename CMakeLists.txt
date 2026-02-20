@@ -37,6 +37,7 @@ set(EXTENSION_SOURCES
     src/catalog/posthog_schema_entry.cpp
     src/catalog/posthog_table_entry.cpp
     src/catalog/remote_scan.cpp
+    src/catalog/remote_table_function.cpp
     src/execution/posthog_create_table_as.cpp
     src/execution/posthog_delete.cpp
     src/execution/posthog_dml_rewriter.cpp
@@ -79,6 +80,7 @@ if(${BUILD_UNITTESTS})
         test/cpp/test_rename_table.cpp
         test/cpp/test_delete_rewriter.cpp
         test/cpp/test_merge_rewriter.cpp
+        test/cpp/test_render_at_clause.cpp
         test/cpp/test_update_rewriter.cpp
     )
     target_include_directories(test_duckhog_cpp PRIVATE src/include src

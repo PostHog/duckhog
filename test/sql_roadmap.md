@@ -1,6 +1,6 @@
 # SQL Roadmap Suite Plan (DuckHog-Only, DuckLake-Referenced)
 
-Last updated: `2026-02-17`
+Last updated: `2026-02-19`
 
 ## Goal
 
@@ -50,7 +50,6 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- [`rm10_time_travel_remote.test_slow`](sql/roadmap/rm10_time_travel_remote.test_slow) — [#33](https://github.com/PostHog/duckhog/issues/33)
 - [`rm11_table_changes_remote.test_slow`](sql/roadmap/rm11_table_changes_remote.test_slow) — [#34](https://github.com/PostHog/duckhog/issues/34)
 - [`rm12_snapshots_remote.test_slow`](sql/roadmap/rm12_snapshots_remote.test_slow) — [#35](https://github.com/PostHog/duckhog/issues/35)
 - [`rm13_table_info_remote.test_slow`](sql/roadmap/rm13_table_info_remote.test_slow) — [#36](https://github.com/PostHog/duckhog/issues/36)
@@ -78,6 +77,7 @@ Graduated targets (now part of normal integration suite):
 - [`rename_table_remote.test_slow`](sql/integration/rename_table_remote.test_slow) (RM07)
 - [`partition_insert_remote.test_slow`](sql/integration/partition_insert_remote.test_slow) (RM08)
 - [`merge_remote.test_slow`](sql/integration/merge_remote.test_slow) (RM09) — [#32](https://github.com/PostHog/duckhog/issues/32)
+- [`time_travel_remote.test_slow`](sql/integration/time_travel_remote.test_slow) (RM10) — [#33](https://github.com/PostHog/duckhog/issues/33)
 
 ## Design Rules
 

@@ -1,0 +1,382 @@
+# name: test/sql/unit/ducklake_time_travel_conformance.test
+# description: Verify native DuckLake time travel behavior that DuckHog integration tests rely on.
+# group: [unit]
+
+#              If these fail, the assumptions in time_travel_remote.test_slow are wrong.
+
+require parquet
+
+statement ok
+INSTALL ducklake;
+
+statement ok
+LOAD ducklake;
+
+# Use __TEST_DIR__ so the metadata DB and Parquet data files are created
+# in the per-test temp directory (automatically cleaned up by the runner).
+statement ok
+ATTACH 'ducklake:__TEST_DIR__/meta.db' AS dl;
+
+# ============================================================
+# Basic version semantics
+# Assumption: each DDL/DML increments the global snapshot_id.
+# Used by: time_travel_remote.test_slow (create_ver + offset pattern)
+# ============================================================
+
+statement ok
+CREATE TABLE dl.main.t(i INT, v VARCHAR);
+
+statement ok
+SET VARIABLE v_create = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+INSERT INTO dl.main.t VALUES (1, 'alpha'), (2, 'bravo');
+
+statement ok
+SET VARIABLE v_insert1 = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+INSERT INTO dl.main.t VALUES (3, 'charlie');
+
+statement ok
+SET VARIABLE v_insert2 = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+UPDATE dl.main.t SET v = 'ALPHA' WHERE i = 1;
+
+statement ok
+SET VARIABLE v_update = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+DELETE FROM dl.main.t WHERE i = 2;
+
+statement ok
+SET VARIABLE v_delete = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+# Versions are sequential: each operation is exactly +1
+query I
+SELECT getvariable('v_insert1') - getvariable('v_create');
+----
+1
+
+query I
+SELECT getvariable('v_insert2') - getvariable('v_insert1');
+----
+1
+
+query I
+SELECT getvariable('v_update') - getvariable('v_insert2');
+----
+1
+
+query I
+SELECT getvariable('v_delete') - getvariable('v_update');
+----
+1
+
+# ============================================================
+# AT VERSION returns correct data at each snapshot
+# Used by: time_travel_remote.test_slow (core version traversal)
+# ============================================================
+
+# At create: empty
+query I
+SELECT COUNT(*) FROM dl.main.t AT (VERSION => getvariable('v_create'));
+----
+0
+
+# After first insert: 2 rows
+query IT
+SELECT i, v FROM dl.main.t AT (VERSION => getvariable('v_insert1')) ORDER BY i;
+----
+1	alpha
+2	bravo
+
+# After second insert: 3 rows
+query IT
+SELECT i, v FROM dl.main.t AT (VERSION => getvariable('v_insert2')) ORDER BY i;
+----
+1	alpha
+2	bravo
+3	charlie
+
+# After update: row 1 changed
+query IT
+SELECT i, v FROM dl.main.t AT (VERSION => getvariable('v_update')) ORDER BY i;
+----
+1	ALPHA
+2	bravo
+3	charlie
+
+# After delete: 2 rows
+query IT
+SELECT i, v FROM dl.main.t AT (VERSION => getvariable('v_delete')) ORDER BY i;
+----
+1	ALPHA
+3	charlie
+
+# ============================================================
+# AT TIMESTAMP returns same data as AT VERSION
+# Used by: time_travel_remote.test_slow (AT TIMESTAMP section)
+# ============================================================
+
+statement ok
+SET VARIABLE ts_create = (
+  SELECT snapshot_time FROM dl.snapshots()
+  WHERE snapshot_id = getvariable('v_create')
+);
+
+query I
+SELECT COUNT(*) FROM dl.main.t AT (TIMESTAMP => getvariable('ts_create'));
+----
+0
+
+statement ok
+SET VARIABLE ts_insert1 = (
+  SELECT snapshot_time FROM dl.snapshots()
+  WHERE snapshot_id = getvariable('v_insert1')
+);
+
+query IT
+SELECT i, v FROM dl.main.t AT (TIMESTAMP => getvariable('ts_insert1')) ORDER BY i;
+----
+1	alpha
+2	bravo
+
+# ============================================================
+# Current version equals AT VERSION with latest snapshot
+# Used by: time_travel_remote.test_slow (current version section)
+# ============================================================
+
+statement ok
+SET VARIABLE v_current = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+query IT
+SELECT i, v FROM dl.main.t AT (VERSION => getvariable('v_current')) ORDER BY i;
+----
+1	ALPHA
+3	charlie
+
+# ============================================================
+# Error: version before table existed
+# Used by: time_travel_remote.test_slow (error cases)
+# ============================================================
+
+statement error
+SELECT * FROM dl.main.t AT (VERSION => getvariable('v_create') - 1);
+----
+Table with name t does not exist
+
+# ============================================================
+# Error: version far in the future
+# Used by: time_travel_remote.test_slow (error cases)
+# ============================================================
+
+statement error
+SELECT * FROM dl.main.t AT (VERSION => 999999999);
+----
+No snapshot found at version 999999999
+
+# ============================================================
+# TRUNCATE + time travel: data recoverable at old version
+# Used by: time_travel_remote.test_slow (TRUNCATE section)
+# ============================================================
+
+statement ok
+CREATE TABLE dl.main.trunc(x INT);
+
+statement ok
+SET VARIABLE v_trunc_create = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+INSERT INTO dl.main.trunc VALUES (1), (2), (3);
+
+statement ok
+SET VARIABLE v_trunc_insert = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+TRUNCATE TABLE dl.main.trunc;
+
+query I
+SELECT COUNT(*) FROM dl.main.trunc AT (VERSION => getvariable('v_trunc_create'));
+----
+0
+
+query I
+SELECT COUNT(*) FROM dl.main.trunc AT (VERSION => getvariable('v_trunc_insert'));
+----
+3
+
+query I
+SELECT COUNT(*) FROM dl.main.trunc;
+----
+0
+
+# ============================================================
+# snapshots() returns monotonically increasing IDs
+# Used by: time_travel_remote.test_slow (snapshots validation)
+# ============================================================
+
+query I
+SELECT COUNT(*) FROM (
+  SELECT snapshot_id, LAG(snapshot_id) OVER (ORDER BY snapshot_id) AS prev_id
+  FROM dl.snapshots()
+) sub
+WHERE prev_id IS NOT NULL AND snapshot_id <= prev_id;
+----
+0
+
+# ============================================================
+# Schema evolution + time travel: ADD COLUMN
+# Used by: time_travel_remote.test_slow (schema evolution section)
+# ============================================================
+
+statement ok
+CREATE TABLE dl.main.evo(a INT, b VARCHAR);
+
+statement ok
+INSERT INTO dl.main.evo VALUES (1, 'hello');
+
+statement ok
+SET VARIABLE evo_v1 = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+ALTER TABLE dl.main.evo ADD COLUMN c INT;
+
+statement ok
+INSERT INTO dl.main.evo VALUES (2, 'world', 42);
+
+# SELECT * at old version uses historical schema (2 columns, not 3)
+query IT
+SELECT * FROM dl.main.evo AT (VERSION => getvariable('evo_v1')) ORDER BY a;
+----
+1	hello
+
+# Explicit old columns work
+query IT
+SELECT a, b FROM dl.main.evo AT (VERSION => getvariable('evo_v1'));
+----
+1	hello
+
+# ============================================================
+# Schema evolution + time travel: RENAME COLUMN
+# Used by: time_travel_remote.test_slow (schema evolution section)
+# ============================================================
+
+statement ok
+SET VARIABLE evo_v2 = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+ALTER TABLE dl.main.evo RENAME COLUMN c TO z;
+
+# Old name works at old version
+query ITI
+SELECT a, b, c FROM dl.main.evo AT (VERSION => getvariable('evo_v2')) ORDER BY a;
+----
+1	hello	NULL
+2	world	42
+
+# New name fails at old version
+statement error
+SELECT a, b, z FROM dl.main.evo AT (VERSION => getvariable('evo_v2')) ORDER BY a;
+----
+Referenced column "z" not found
+
+# ============================================================
+# Schema evolution + time travel: DROP COLUMN
+# Used by: time_travel_remote.test_slow (schema evolution section)
+# ============================================================
+
+statement ok
+SET VARIABLE evo_v3 = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+ALTER TABLE dl.main.evo DROP COLUMN b;
+
+# Old version still has column b
+query ITI
+SELECT a, b, z FROM dl.main.evo AT (VERSION => getvariable('evo_v3')) ORDER BY a;
+----
+1	hello	NULL
+2	world	42
+
+# Current version does not
+statement error
+SELECT b FROM dl.main.evo;
+----
+Referenced column "b" not found
+
+# ============================================================
+# Schema evolution + time travel: TYPE PROMOTION
+# Used by: time_travel_remote.test_slow (schema evolution section)
+# ============================================================
+
+statement ok
+CREATE TABLE dl.main.evo_type(x INT);
+
+statement ok
+INSERT INTO dl.main.evo_type VALUES (1), (2);
+
+statement ok
+SET VARIABLE evo_type_v1 = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+ALTER TABLE dl.main.evo_type ALTER COLUMN x SET TYPE BIGINT;
+
+statement ok
+INSERT INTO dl.main.evo_type VALUES (3000000000);
+
+# Time travel to before promotion: correct values, not garbled
+query I
+SELECT x FROM dl.main.evo_type AT (VERSION => getvariable('evo_type_v1')) ORDER BY x;
+----
+1
+2
+
+# ============================================================
+# Schema evolution + time travel: RENAME TABLE
+# Used by: time_travel_remote.test_slow (schema evolution section)
+# ============================================================
+
+statement ok
+CREATE TABLE dl.main.tbl_a(x INT);
+
+statement ok
+INSERT INTO dl.main.tbl_a VALUES (10), (20);
+
+statement ok
+SET VARIABLE rename_v1 = (SELECT MAX(snapshot_id) FROM dl.snapshots());
+
+statement ok
+ALTER TABLE dl.main.tbl_a RENAME TO tbl_b;
+
+statement ok
+INSERT INTO dl.main.tbl_b VALUES (30);
+
+# New name at pre-rename version: fails (name didn't exist yet)
+statement error
+SELECT * FROM dl.main.tbl_b AT (VERSION => getvariable('rename_v1'));
+----
+Table with name tbl_b does not exist
+
+# Old name at pre-rename version: works
+query I
+SELECT x FROM dl.main.tbl_a AT (VERSION => getvariable('rename_v1')) ORDER BY x;
+----
+10
+20
+
+# New name at current version: works
+query I
+SELECT x FROM dl.main.tbl_b ORDER BY x;
+----
+10
+20
+30
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DETACH dl;

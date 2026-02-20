@@ -9,6 +9,7 @@
 #include "catalog/posthog_schema_entry.hpp"
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/posthog_table_entry.hpp"
+#include "catalog/remote_table_function.hpp"
 #include "execution/posthog_dml_rewriter.hpp"
 #include "storage/posthog_transaction.hpp"
 #include "utils/posthog_logger.hpp"
@@ -560,6 +561,16 @@ void PostHogSchemaEntry::Scan(CatalogType type, const std::function<void(Catalog
 
 optional_ptr<CatalogEntry> PostHogSchemaEntry::LookupEntry(CatalogTransaction transaction,
                                                            const EntryLookupInfo &lookup_info) {
+	// Proxy catalog-level table functions (e.g. snapshots()) through Flight SQL.
+	// We speculatively create a proxy entry; if the remote server doesn't recognize the
+	// function, the Flight SQL call in bind will surface the error naturally.
+	if (lookup_info.GetCatalogType() == CatalogType::TABLE_FUNCTION_ENTRY) {
+		auto entry = CreateRemoteTableFunctionEntry(posthog_catalog_, *this, lookup_info.GetEntryName());
+		auto *result = entry.get();
+		table_function_cache_[lookup_info.GetEntryName()] = std::move(entry);
+		return result;
+	}
+
 	// VIEW_ENTRY is required here: DuckDB resolves DROP VIEW (and other view operations)
 	// by looking up the entry as VIEW_ENTRY. Views are stored in table_cache_ because the
 	// remote server's ListTables returns both tables and views indistinguishably.

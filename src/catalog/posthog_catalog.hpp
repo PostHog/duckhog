@@ -61,6 +61,11 @@ public:
 	bool InMemory() override;
 	string GetDBPath() override;
 
+	// DuckLake supports time travel (AT VERSION / AT TIMESTAMP)
+	bool SupportsTimeTravel() const override {
+		return true;
+	}
+
 	// Accessors for configuration
 	const PostHogConnectionConfig &GetConfig() const {
 		return config_;
