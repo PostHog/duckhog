@@ -1,0 +1,284 @@
+# name: test/sql/integration/table_functions_remote.test_slow
+# description: Catalog-scoped table functions through remote DuckLake (RM11-13)
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.rm11_13 CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.rm11_13;
+
+# ============================================================
+# snapshots() — RM12
+# ============================================================
+
+# snapshots() returns at least one row (the initial catalog snapshot)
+query I
+SELECT CASE WHEN COUNT(*) >= 1 THEN 1 ELSE 0 END FROM remote_flight.snapshots();
+----
+1
+
+# snapshot_id is BIGINT, snapshot_time is TIMESTAMPTZ
+query TT
+SELECT typeof(snapshot_id), typeof(snapshot_time) FROM remote_flight.snapshots() LIMIT 1;
+----
+BIGINT	TIMESTAMP WITH TIME ZONE
+
+# IDs are monotonically increasing
+query I
+SELECT COUNT(*) FROM (
+  SELECT snapshot_id, LAG(snapshot_id) OVER (ORDER BY snapshot_id) AS prev
+  FROM remote_flight.snapshots()
+) sub WHERE prev IS NOT NULL AND snapshot_id <= prev;
+----
+0
+
+# Capture baseline snapshot before our DML
+statement ok
+SET VARIABLE base_snap = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+# ============================================================
+# Setup: create table in main schema (table_changes shorthand
+# only resolves tables in the default schema)
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS remote_flight.main.rm11_13_t;
+
+statement ok
+CREATE TABLE remote_flight.main.rm11_13_t(i INT, v VARCHAR);
+
+statement ok
+SET VARIABLE v_create = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+INSERT INTO remote_flight.main.rm11_13_t VALUES (1, 'a'), (2, 'b');
+
+statement ok
+SET VARIABLE v_insert = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+UPDATE remote_flight.main.rm11_13_t SET v = 'x' WHERE i = 1;
+
+statement ok
+SET VARIABLE v_update = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+statement ok
+DELETE FROM remote_flight.main.rm11_13_t WHERE i = 2;
+
+statement ok
+SET VARIABLE v_delete = (SELECT MAX(snapshot_id) FROM remote_flight.snapshots());
+
+# Each DML incremented snapshot_id by 1
+query I
+SELECT getvariable('v_insert') - getvariable('v_create');
+----
+1
+
+query I
+SELECT getvariable('v_update') - getvariable('v_insert');
+----
+1
+
+query I
+SELECT getvariable('v_delete') - getvariable('v_update');
+----
+1
+
+# New snapshots appeared for our operations
+query I
+SELECT CASE WHEN COUNT(*) >= 4 THEN 1 ELSE 0 END
+FROM remote_flight.snapshots()
+WHERE snapshot_id > getvariable('base_snap');
+----
+1
+
+# ============================================================
+# snapshots() projection: verify individual columns return sane values
+# (regression test for the projection pushdown column-swap bug from RM10)
+# ============================================================
+
+# snapshot_id projected alone is a reasonable integer (not a timestamp-scale value)
+query I
+SELECT CASE WHEN MAX(snapshot_id) < 1000000 THEN 1 ELSE 0 END FROM remote_flight.snapshots();
+----
+1
+
+# snapshot_time projected alone is after 2020 (not near epoch)
+query I
+SELECT CASE WHEN MAX(snapshot_time) > '2020-01-01'::TIMESTAMPTZ THEN 1 ELSE 0 END FROM remote_flight.snapshots();
+----
+1
+
+# ============================================================
+# table_info() — RM13
+# ============================================================
+
+# Our table appears in table_info
+query I
+SELECT COUNT(*) FROM remote_flight.table_info() WHERE table_name = 'rm11_13_t';
+----
+1
+
+# table_id and schema_id are BIGINT
+query TT
+SELECT typeof(table_id), typeof(schema_id) FROM remote_flight.table_info() WHERE table_name = 'rm11_13_t';
+----
+BIGINT	BIGINT
+
+# file_count is positive (we inserted data)
+query I
+SELECT CASE WHEN file_count > 0 THEN 1 ELSE 0 END FROM remote_flight.table_info() WHERE table_name = 'rm11_13_t';
+----
+1
+
+# file_size_bytes is positive
+query I
+SELECT CASE WHEN file_size_bytes > 0 THEN 1 ELSE 0 END FROM remote_flight.table_info() WHERE table_name = 'rm11_13_t';
+----
+1
+
+# delete_file_count is positive (we updated and deleted)
+query I
+SELECT CASE WHEN delete_file_count > 0 THEN 1 ELSE 0 END FROM remote_flight.table_info() WHERE table_name = 'rm11_13_t';
+----
+1
+
+# ============================================================
+# table_changes() — RM11
+# ============================================================
+
+# Full range: all changes from insert through delete
+# snapshot_id values are absolute, so we verify row count and content, not IDs
+query I
+SELECT COUNT(*)
+FROM remote_flight.table_changes('rm11_13_t', getvariable('v_insert'), getvariable('v_delete'));
+----
+5
+
+# Verify change types present
+query T
+SELECT DISTINCT change_type
+FROM remote_flight.table_changes('rm11_13_t', getvariable('v_insert'), getvariable('v_delete'))
+ORDER BY change_type;
+----
+delete
+insert
+update_postimage
+update_preimage
+
+# Single snapshot: just the insert
+query IT
+SELECT i, v FROM remote_flight.table_changes('rm11_13_t', getvariable('v_insert'), getvariable('v_insert')) ORDER BY i;
+----
+1	a
+2	b
+
+# Update pre/post images with correct values
+query TT
+SELECT change_type, v
+FROM remote_flight.table_changes('rm11_13_t', getvariable('v_update'), getvariable('v_update'))
+ORDER BY change_type;
+----
+update_postimage	x
+update_preimage	a
+
+# Delete shows deleted row values
+query IT
+SELECT i, v FROM remote_flight.table_changes('rm11_13_t', getvariable('v_delete'), getvariable('v_delete'));
+----
+2	b
+
+# Integer literal args (implicit INTEGER→BIGINT cast)
+query I
+SELECT COUNT(*)
+FROM remote_flight.table_changes('rm11_13_t', getvariable('v_insert')::INT, getvariable('v_insert')::INT);
+----
+2
+
+# Zero-arg table_changes() errors (macro requires 3 args)
+statement error
+SELECT * FROM remote_flight.table_changes();
+----
+does not support
+
+# Error: nonexistent table
+statement error
+SELECT * FROM remote_flight.table_changes('nonexistent', 1, 2);
+----
+does not exist
+
+# Error: version beyond current max
+statement error
+SELECT * FROM remote_flight.table_changes('rm11_13_t', 1, 999999);
+----
+No snapshot found
+
+# ============================================================
+# table_info after DROP: table disappears
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.rm11_13.t_drop(x INT);
+
+statement ok
+INSERT INTO remote_flight.rm11_13.t_drop VALUES (1);
+
+query I
+SELECT COUNT(*) FROM remote_flight.table_info() WHERE table_name = 't_drop';
+----
+1
+
+statement ok
+DROP TABLE remote_flight.rm11_13.t_drop;
+
+query I
+SELECT COUNT(*) FROM remote_flight.table_info() WHERE table_name = 't_drop';
+----
+0
+
+# ============================================================
+# User-defined functions: DuckLake does not support them
+# ============================================================
+
+# CREATE MACRO (scalar) on remote catalog
+statement error
+CREATE MACRO remote_flight.main.add_one(x) AS x + 1;
+----
+not supported
+
+# CREATE MACRO (table) on remote catalog
+statement error
+CREATE MACRO remote_flight.main.my_table(x) AS TABLE SELECT x AS val;
+----
+not supported
+
+# Unknown function called as scalar: should NOT produce a misleading
+# "is a table function" error (regression test for speculative proxy)
+statement error
+SELECT remote_flight.main.no_such_function(5);
+----
+does not exist
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS remote_flight.main.rm11_13_t;
+
+statement ok
+DROP SCHEMA remote_flight.rm11_13 CASCADE;

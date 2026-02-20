@@ -18,6 +18,7 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/config.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 
 #include <arrow/c/bridge.h>
@@ -29,13 +30,13 @@ namespace duckdb {
 //===----------------------------------------------------------------------===//
 
 struct RemoteTableFunctionInfo : public TableFunctionInfo {
-	RemoteTableFunctionInfo(PostHogCatalog &catalog_p, string function_ref_p)
-	    : catalog(catalog_p), function_ref(std::move(function_ref_p)) {
+	RemoteTableFunctionInfo(PostHogCatalog &catalog_p, string function_base_p)
+	    : catalog(catalog_p), function_base(std::move(function_base_p)) {
 	}
 
 	PostHogCatalog &catalog;
-	// The remote function reference, e.g. "ducklake"."snapshots"()
-	string function_ref;
+	// The remote function base, e.g. "ducklake"."snapshots" (without trailing parens/args).
+	string function_base;
 };
 
 //===----------------------------------------------------------------------===//
@@ -111,15 +112,63 @@ struct RemoteTableFunctionGlobalState : public ArrowScanGlobalState {
 // Table function callbacks
 //===----------------------------------------------------------------------===//
 
+// Build the full function_ref for a zero-arg call, e.g. "ducklake"."snapshots"().
+static string BuildZeroArgRef(const string &function_base) {
+	return function_base + "()";
+}
+
+// Build the function_ref for table_changes(table_name, start_snapshot, end_snapshot).
+// Escapes the VARCHAR argument; BIGINT arguments are rendered unquoted.
+static string BuildTableChangesRef(const string &function_base, const vector<Value> &inputs) {
+	auto table_name = StringUtil::Replace(inputs[0].ToString(), "'", "''");
+	auto start_snap = inputs[1].ToString();
+	auto end_snap = inputs[2].ToString();
+	return function_base + "('" + table_name + "', " + start_snap + ", " + end_snap + ")";
+}
+
 static unique_ptr<FunctionData> RemoteTableFunctionBind(ClientContext &context, TableFunctionBindInput &input,
                                                         vector<LogicalType> &return_types, vector<string> &names) {
 	auto &fn_info = input.info->Cast<RemoteTableFunctionInfo>();
 	auto &catalog = fn_info.catalog;
-	auto &function_ref = fn_info.function_ref;
+	auto function_ref = BuildZeroArgRef(fn_info.function_base);
 
 	auto bind_data = make_uniq<RemoteTableFunctionBindData>(catalog, function_ref);
 
 	// Discover the return schema by probing the remote server with SELECT *.
+	string schema_query = "SELECT * FROM " + function_ref;
+	std::optional<TransactionId> remote_txn_id;
+	try {
+		remote_txn_id = PostHogTransaction::Get(context, catalog).remote_txn_id;
+	} catch (const std::exception &) {
+		remote_txn_id = std::nullopt;
+	}
+
+	auto arrow_schema = catalog.GetFlightClient().GetQuerySchema(schema_query, remote_txn_id);
+
+	auto status = arrow::ExportSchema(*arrow_schema, &bind_data->schema_root.arrow_schema);
+	if (!status.ok()) {
+		throw IOException("PostHog: Failed to export Arrow schema for remote table function: " + status.ToString());
+	}
+
+	ArrowTableFunction::PopulateArrowTableSchema(DBConfig::GetConfig(context), bind_data->arrow_table,
+	                                             bind_data->schema_root.arrow_schema);
+	names = bind_data->arrow_table.GetNames();
+	return_types = bind_data->arrow_table.GetTypes();
+	bind_data->all_types = return_types;
+
+	return bind_data;
+}
+
+// Bind callback for parameterized table functions (e.g. table_changes(VARCHAR, BIGINT, BIGINT)).
+// Reads positional arguments and interpolates them into the remote function call.
+static unique_ptr<FunctionData> RemoteTableChangesBindArgs(ClientContext &context, TableFunctionBindInput &input,
+                                                           vector<LogicalType> &return_types, vector<string> &names) {
+	auto &fn_info = input.info->Cast<RemoteTableFunctionInfo>();
+	auto &catalog = fn_info.catalog;
+	auto function_ref = BuildTableChangesRef(fn_info.function_base, input.inputs);
+
+	auto bind_data = make_uniq<RemoteTableFunctionBindData>(catalog, function_ref);
+
 	string schema_query = "SELECT * FROM " + function_ref;
 	std::optional<TransactionId> remote_txn_id;
 	try {
@@ -205,21 +254,39 @@ static void RemoteTableFunctionExecute(ClientContext &context, TableFunctionInpu
 unique_ptr<TableFunctionCatalogEntry>
 CreateRemoteTableFunctionEntry(PostHogCatalog &catalog, SchemaCatalogEntry &schema, const string &function_name) {
 	const auto &remote_catalog = catalog.GetRemoteCatalog();
-	string function_ref;
+	string function_base;
 	if (remote_catalog.empty()) {
-		function_ref = "\"" + function_name + "\"()";
+		function_base = "\"" + function_name + "\"";
 	} else {
-		function_ref = "\"" + remote_catalog + "\".\"" + function_name + "\"()";
+		function_base = "\"" + remote_catalog + "\".\"" + function_name + "\"";
 	}
 
-	// Create the no-arg table function with callbacks.
-	TableFunction func(function_name, {}, RemoteTableFunctionExecute, RemoteTableFunctionBind,
-	                   RemoteTableFunctionInitGlobal, RemoteTableFunctionInitLocal);
-	func.projection_pushdown = true;
-	func.filter_pushdown = false;
-	func.function_info = make_shared_ptr<RemoteTableFunctionInfo>(catalog, function_ref);
+	auto fn_info = make_shared_ptr<RemoteTableFunctionInfo>(catalog, function_base);
 
-	auto info = make_uniq<CreateTableFunctionInfo>(std::move(func));
+	// Zero-arg overload (e.g. snapshots(), table_info(), table_changes()).
+	TableFunction zero_arg(function_name, {}, RemoteTableFunctionExecute, RemoteTableFunctionBind,
+	                       RemoteTableFunctionInitGlobal, RemoteTableFunctionInitLocal);
+	zero_arg.projection_pushdown = true;
+	zero_arg.filter_pushdown = false;
+	zero_arg.function_info = fn_info;
+
+	TableFunctionSet func_set(function_name);
+	func_set.AddFunction(std::move(zero_arg));
+
+	// table_changes(table_name VARCHAR, start_snapshot BIGINT, end_snapshot BIGINT).
+	// Hardcoded: this is the only parameterized catalog-scoped table function in DuckLake.
+	// The sentinel test in ducklake_table_functions_conformance.test will fail if this changes.
+	if (function_name == "table_changes") {
+		TableFunction with_args(function_name, {LogicalType::VARCHAR, LogicalType::BIGINT, LogicalType::BIGINT},
+		                        RemoteTableFunctionExecute, RemoteTableChangesBindArgs, RemoteTableFunctionInitGlobal,
+		                        RemoteTableFunctionInitLocal);
+		with_args.projection_pushdown = true;
+		with_args.filter_pushdown = false;
+		with_args.function_info = fn_info;
+		func_set.AddFunction(std::move(with_args));
+	}
+
+	auto info = make_uniq<CreateTableFunctionInfo>(std::move(func_set));
 	info->name = function_name;
 
 	return make_uniq<TableFunctionCatalogEntry>(catalog, schema, *info);

@@ -1,6 +1,6 @@
 # SQL Roadmap Suite Plan (DuckHog-Only, DuckLake-Referenced)
 
-Last updated: `2026-02-19`
+Last updated: `2026-02-20`
 
 ## Goal
 
@@ -50,9 +50,6 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- [`rm11_table_changes_remote.test_slow`](sql/roadmap/rm11_table_changes_remote.test_slow) — [#34](https://github.com/PostHog/duckhog/issues/34)
-- [`rm12_snapshots_remote.test_slow`](sql/roadmap/rm12_snapshots_remote.test_slow) — [#35](https://github.com/PostHog/duckhog/issues/35)
-- [`rm13_table_info_remote.test_slow`](sql/roadmap/rm13_table_info_remote.test_slow) — [#36](https://github.com/PostHog/duckhog/issues/36)
 - [`rm14_nested_types_remote.test_slow`](sql/roadmap/rm14_nested_types_remote.test_slow) — [#37](https://github.com/PostHog/duckhog/issues/37)
 - [`rm16_on_conflict_do_nothing_remote.test_slow`](sql/roadmap/rm16_on_conflict_do_nothing_remote.test_slow) — [#38](https://github.com/PostHog/duckhog/issues/38)
 - [`rm17_on_conflict_do_update_remote.test_slow`](sql/roadmap/rm17_on_conflict_do_update_remote.test_slow) — [#39](https://github.com/PostHog/duckhog/issues/39)
@@ -68,8 +65,6 @@ Non-test-file targets:
 Graduated targets (now part of normal integration suite):
 - [`insert_remote.test_slow`](sql/integration/insert_remote.test_slow) (RM01)
 - [`update_remote.test_slow`](sql/integration/update_remote.test_slow) (RM02)
-- [`insert_default_values_remote.test_slow`](sql/integration/insert_default_values_remote.test_slow) (RM18)
-- [`insert_returning_remote.test_slow`](sql/integration/insert_returning_remote.test_slow) (RM15)
 - [`delete_remote.test_slow`](sql/integration/delete_remote.test_slow) (RM03)
 - [`truncate_remote.test_slow`](sql/integration/truncate_remote.test_slow) (RM04) — desugared to DELETE by DuckDB's grammar
 - [`ctas_remote.test_slow`](sql/integration/ctas_remote.test_slow) (RM05)
@@ -78,6 +73,9 @@ Graduated targets (now part of normal integration suite):
 - [`partition_insert_remote.test_slow`](sql/integration/partition_insert_remote.test_slow) (RM08)
 - [`merge_remote.test_slow`](sql/integration/merge_remote.test_slow) (RM09) — [#32](https://github.com/PostHog/duckhog/issues/32)
 - [`time_travel_remote.test_slow`](sql/integration/time_travel_remote.test_slow) (RM10) — [#33](https://github.com/PostHog/duckhog/issues/33)
+- [`table_functions_remote.test_slow`](sql/integration/table_functions_remote.test_slow) (RM11, RM12, RM13) — [#34](https://github.com/PostHog/duckhog/issues/34), [#35](https://github.com/PostHog/duckhog/issues/35), [#36](https://github.com/PostHog/duckhog/issues/36)
+- [`insert_returning_remote.test_slow`](sql/integration/insert_returning_remote.test_slow) (RM15)
+- [`insert_default_values_remote.test_slow`](sql/integration/insert_default_values_remote.test_slow) (RM18)
 
 ## Design Rules
 
