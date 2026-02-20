@@ -15,10 +15,28 @@ INSTALL ducklake;
 statement ok
 LOAD ducklake;
 
-# Use __TEST_DIR__ so the metadata DB and Parquet data files are created
-# in the per-test temp directory (automatically cleaned up by the runner).
+# Use __TEST_DIR__ so metadata/data files land under the test temp directory.
+# Use a file unique to this test file to avoid cross-file DuckLake metadata reuse.
 statement ok
-ATTACH 'ducklake:__TEST_DIR__/meta.db' AS dl;
+ATTACH 'ducklake:__TEST_DIR__/ducklake_time_travel_meta.db' AS dl;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.trunc;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.evo;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.evo_type;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.tbl_a;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.tbl_b;
 
 # ============================================================
 # Basic version semantics
@@ -380,6 +398,24 @@ SELECT x FROM dl.main.tbl_b ORDER BY x;
 # ============================================================
 # Cleanup
 # ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.tbl_b;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.tbl_a;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.evo_type;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.evo;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.trunc;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t;
 
 statement ok
 DETACH dl;

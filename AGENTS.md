@@ -5,14 +5,13 @@
 - Load extension: `./build/release/duckdb -cmd "LOAD 'build/release/extension/duckhog/duckhog.duckdb_extension';"`
 
 ## Working Style
-- Prefer small, incremental PRs aligned to deliverables.
+- Prefer small, maintanable and robust solution, avoid hacky or overgegineered fixes.
 - TDD with red-green cycle is required: write/adjust tests first and run them to confirm they fail (red), then implement the minimum code to make them pass (green).
 - Keep configs and flags explicit; document defaults in README.
 - Provide runbooks for local dev and failure recovery.
 - When asked to work on/implement a task in a document, mark the task upon completion
 - When creating new branch from origin/main, do not track origin/main. 
-- Before each commit, run make format-fix and make tidy-check in venv
-- Avoid C++ tests, always prefer SQLLogic
+- Parallelize using subagents when possible.
 
 ## Tests
 - Unit tests only: `./build/release/test/unittest "[duckhog],test/sql/unit/*"`
@@ -31,6 +30,8 @@
 - Submodules required: `git submodule update --init --recursive`
 - Dependencies are managed by vcpkg; ensure `VCPKG_TOOLCHAIN_PATH` is set (see `docs/DEVELOPMENT.md`).
 - SQLLogicTest files live under `test/sql`; integration tests use `.test_slow`.
+- Avoid C++ tests, always prefer SQLLogic
+- Before each commit, run make format-fix and make tidy-check in venv
 
 ## Skills
 A skill is a set of local instructions to follow that is stored in a `SKILL.md` file.
