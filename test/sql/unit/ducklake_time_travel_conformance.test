@@ -4,12 +4,13 @@
 
 #              If these fail, the assumptions in time_travel_remote.test_slow are wrong.
 
-# Requires INSTALL ducklake and INSTALL parquet to have been run previously.
-statement ok
-LOAD ducklake;
+require parquet
 
 statement ok
-LOAD parquet;
+INSTALL ducklake;
+
+statement ok
+LOAD ducklake;
 
 # Use __TEST_DIR__ so the metadata DB and Parquet data files are created
 # in the per-test temp directory (automatically cleaned up by the runner).
