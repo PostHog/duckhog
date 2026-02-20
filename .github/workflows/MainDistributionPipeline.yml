@@ -25,6 +25,9 @@ jobs:
       duckdb_version: v1.4.4
       ci_tools_version: v1.4-andium
       extra_toolchains: parser_tools
+      # duckhog depends on Arrow Flight/FlightSQL via vcpkg.json; Arrow is unsupported on wasm32-emscripten.
+      # Exclude all WASM targets to avoid deterministic vcpkg configure failures in WASM matrix jobs.
+      exclude_archs: wasm_mvp;wasm_eh;wasm_threads
       extension_name: duckhog
 
   duckdb-stable-build-pr:
@@ -35,6 +38,9 @@ jobs:
       duckdb_version: v1.4.4
       ci_tools_version: v1.4-andium
       extra_toolchains: parser_tools
+      # duckhog depends on Arrow Flight/FlightSQL via vcpkg.json; Arrow is unsupported on wasm32-emscripten.
+      # Exclude all WASM targets to avoid deterministic vcpkg configure failures in WASM matrix jobs.
+      exclude_archs: wasm_mvp;wasm_eh;wasm_threads
       extension_name: duckhog
 
   code-quality-check:
