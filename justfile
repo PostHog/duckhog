@@ -49,7 +49,7 @@ test-integration:
 # Expects duckgres at ../duckgres by default (override with DUCKGRES_ROOT).
 [group('test')]
 test-all: build _require-duckgres
-    ./test/run_full_suite.sh "test/*" "~test/sql/roadmap/*,~test/sql/token/*"
+    ./test/run_full_suite.sh "test/*" "~test/sql/roadmap/*" "~test/sql/token/*"
 
 # Run default extension-ci-tools test target
 [group('test')]
