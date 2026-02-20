@@ -4,12 +4,13 @@
 
 #              If these fail, the assumptions in the RM11-13 integration tests are wrong.
 
-# Requires INSTALL ducklake and INSTALL parquet to have been run previously.
-statement ok
-LOAD ducklake;
+require parquet
 
 statement ok
-LOAD parquet;
+INSTALL ducklake;
+
+statement ok
+LOAD ducklake;
 
 statement ok
 ATTACH 'ducklake:__TEST_DIR__/meta.db' AS dl;
