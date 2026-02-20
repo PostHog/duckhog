@@ -15,8 +15,33 @@ INSTALL ducklake;
 statement ok
 LOAD ducklake;
 
+# Use a file unique to this test file to avoid cross-file DuckLake metadata reuse.
 statement ok
-ATTACH 'ducklake:__TEST_DIR__/meta.db' AS dl;
+ATTACH 'ducklake:__TEST_DIR__/ducklake_table_functions_meta.db' AS dl;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t2;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_trunc;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_empty;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_tc_trunc;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_tc_evo;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.drop_me;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_drop;
 
 # ============================================================
 # snapshots() — RM12
@@ -389,6 +414,30 @@ ducklake_table_changes	table_macro
 # ============================================================
 # Cleanup
 # ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_tc_evo;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_tc_trunc;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_empty;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_trunc;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_drop;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.drop_me;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t2;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t;
 
 statement ok
 DETACH dl;
