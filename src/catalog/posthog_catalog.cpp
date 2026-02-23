@@ -296,21 +296,12 @@ PhysicalOperator &PostHogCatalog::PlanInsert(ClientContext &context, PhysicalPla
 	if (!IsConnected()) {
 		throw CatalogException("PostHog: Not connected to remote server.");
 	}
+	if (op.return_chunk) {
+		throw NotImplementedException("PostHog: INSERT ... RETURNING is not supported (DuckLake limitation)");
+	}
 	if (op.on_conflict_info.action_type != OnConflictAction::THROW &&
 	    op.on_conflict_info.action_type != OnConflictAction::NOTHING) {
 		throw NotImplementedException("PostHog: INSERT ... ON CONFLICT currently supports only DO NOTHING");
-	}
-	if (op.return_chunk && op.on_conflict_info.action_type == OnConflictAction::NOTHING) {
-		throw NotImplementedException("PostHog: INSERT ... ON CONFLICT DO NOTHING RETURNING is not yet implemented");
-	}
-	if (op.return_chunk && !op.column_index_map.empty()) {
-		for (auto &column : op.table.GetColumns().Physical()) {
-			auto mapped_index = op.column_index_map[column.Physical()];
-			if (mapped_index == DConstants::INVALID_INDEX) {
-				throw NotImplementedException(
-				    "PostHog: INSERT ... RETURNING with omitted/default columns is not yet implemented");
-			}
-		}
 	}
 	if (op.on_conflict_info.on_conflict_condition || op.on_conflict_info.do_update_condition ||
 	    !op.on_conflict_info.set_columns.empty()) {
@@ -322,18 +313,9 @@ PhysicalOperator &PostHogCatalog::PlanInsert(ClientContext &context, PhysicalPla
 
 	auto &table = op.table.Cast<PostHogTableEntry>();
 	vector<string> column_names;
-	vector<idx_t> return_input_index_map;
-	if (op.return_chunk) {
-		return_input_index_map.reserve(op.table.GetColumns().PhysicalColumnCount());
-	}
 	if (op.column_index_map.empty()) {
-		idx_t input_idx = 0;
 		for (auto &column : op.table.GetColumns().Physical()) {
 			column_names.push_back(column.Name());
-			if (op.return_chunk) {
-				return_input_index_map.push_back(input_idx);
-			}
-			input_idx++;
 		}
 	} else {
 		idx_t mapped_column_count = 0;
@@ -354,9 +336,6 @@ PhysicalOperator &PostHogCatalog::PlanInsert(ClientContext &context, PhysicalPla
 				throw InternalException("PostHog: duplicate mapped insert column index %llu", mapped_index);
 			}
 			column_names[mapped_index] = column.Name();
-			if (op.return_chunk) {
-				return_input_index_map.push_back(mapped_index);
-			}
 		}
 		for (idx_t i = 0; i < column_names.size(); i++) {
 			if (column_names[i].empty()) {
@@ -392,10 +371,9 @@ PhysicalOperator &PostHogCatalog::PlanInsert(ClientContext &context, PhysicalPla
 		}
 	}
 
-	auto &insert =
-	    planner.Make<PhysicalPostHogInsert>(op.types, *this, table.GetSchemaName(), table.name, std::move(column_names),
-	                                        op.return_chunk, on_conflict_do_nothing, std::move(on_conflict_clause),
-	                                        std::move(return_input_index_map), op.estimated_cardinality);
+	auto &insert = planner.Make<PhysicalPostHogInsert>(op.types, *this, table.GetSchemaName(), table.name,
+	                                                   std::move(column_names), on_conflict_do_nothing,
+	                                                   std::move(on_conflict_clause), op.estimated_cardinality);
 	insert.children.push_back(*plan);
 	return insert;
 }
