@@ -38,6 +38,7 @@ A skill is a set of local instructions to follow that is stored in a `SKILL.md` 
 
 ### Available skills
 - `issue-gate`: GitHub issue preflight workflow for new tasks. Use before starting any new implementation task to create/claim/abort based on issue state. (file: `skills/issue-gate/SKILL.md`)
+- `red-team`: SQL injection and input validation audit for the DuckHog SQL proxy pipeline. Use after modifying any rewriter, serializer, or SQL-generation code. (file: `skills/red-team/SKILL.md`)
 
 ### Trigger rules
 - Run `$issue-gate` before starting new implementation work.
