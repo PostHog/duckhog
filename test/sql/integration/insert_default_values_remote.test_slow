@@ -133,11 +133,11 @@ SELECT count FROM remote_flight.roadmap_rm18.typed_defaults;
 statement ok
 CREATE TABLE remote_flight.roadmap_rm18.ret(x INT DEFAULT 7, y VARCHAR DEFAULT 'seven');
 
-# DEFAULT VALUES + RETURNING is not yet supported in the DuckHog extension
+# INSERT ... RETURNING is not supported (DuckLake limitation)
 statement error
 INSERT INTO remote_flight.roadmap_rm18.ret DEFAULT VALUES RETURNING *;
 ----
-INSERT ... RETURNING with omitted/default columns is not yet implemented
+INSERT ... RETURNING is not supported
 
 # --- Plain DEFAULT VALUES still works ---
 
