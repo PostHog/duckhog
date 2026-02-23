@@ -284,6 +284,25 @@ column names).
 
 **Test:** `time_travel_remote.test_slow` — schema evolution section.
 
+## L4. ON CONFLICT is permanently unsupported on DuckLake
+
+ON CONFLICT (DO NOTHING, DO UPDATE) requires PK/UNIQUE constraints, which
+DuckLake will never support. DuckLake's architecture uses append-only Parquet
+files and does not enforce uniqueness constraints.
+
+References:
+- [ducklake#66](https://github.com/duckdb/ducklake/issues/66) — no unique constraint support
+- [ducklake#290](https://github.com/duckdb/ducklake/issues/290) — PK/UNIQUE request closed
+- [ducklake#323](https://github.com/duckdb/ducklake/discussions/323) — unenforced PK/FK is metadata-only for query optimization
+
+**Alternative:** Use `MERGE INTO`, which DuckHog supports (RM09).
+
+**Test:** `insert_on_conflict_remote.test_slow` documents the error behavior.
+ON CONFLICT on non-DuckLake backends (memory catalog) remains a roadmap target
+(RM23).
+
+---
+
 ## L2. PK/UNIQUE constraint metadata not synced to client
 
 `DESCRIBE` shows `NULL` for key columns. `information_schema` has 0 constraint
