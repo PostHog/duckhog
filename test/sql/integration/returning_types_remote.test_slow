@@ -1,11 +1,6 @@
 # name: test/sql/integration/returning_types_remote.test_slow
-# description: RETURNING clause with various data types
+# description: INSERT ... RETURNING is not supported; DELETE RETURNING limitation documented
 # group: [integration]
-
-#
-# Tests ArrowScalarToValue in arrow_value.cpp which only handles:
-# INT, BIGINT, SMALLINT, TINYINT, unsigned variants, DOUBLE, FLOAT, BOOLEAN, VARCHAR
-# Types not in the switch statement will throw NotImplementedException.
 
 require duckhog
 
@@ -27,166 +22,64 @@ statement ok
 CREATE SCHEMA remote_flight.ret_types;
 
 # ============================================================
-# INTEGER types — all should work (supported by ArrowScalarToValue)
+# INSERT ... RETURNING is not supported (DuckLake limitation)
 # ============================================================
 
 statement ok
 CREATE TABLE remote_flight.ret_types.int_types(ti TINYINT, si SMALLINT, i INTEGER, bi BIGINT);
 
-query IIII
+statement error
 INSERT INTO remote_flight.ret_types.int_types VALUES (42, 1000, 100000, 9999999999) RETURNING *;
 ----
-42	1000	100000	9999999999
-
-query IIII
-INSERT INTO remote_flight.ret_types.int_types VALUES (-128, -32768, -2147483648, -9223372036854775808) RETURNING *;
-----
--128	-32768	-2147483648	-9223372036854775808
-
-query IIII
-INSERT INTO remote_flight.ret_types.int_types VALUES (NULL, NULL, NULL, NULL) RETURNING *;
-----
-NULL	NULL	NULL	NULL
-
-# ============================================================
-# FLOAT / DOUBLE — should work
-# ============================================================
+INSERT ... RETURNING is not supported
 
 statement ok
 CREATE TABLE remote_flight.ret_types.float_types(f FLOAT, d DOUBLE);
 
-query RR
+statement error
 INSERT INTO remote_flight.ret_types.float_types VALUES (3.14, 2.718281828) RETURNING *;
 ----
-3.14	2.718281828
-
-query RR
-INSERT INTO remote_flight.ret_types.float_types VALUES (NULL, NULL) RETURNING *;
-----
-NULL	NULL
-
-# ============================================================
-# BOOLEAN — should work
-# ============================================================
+INSERT ... RETURNING is not supported
 
 statement ok
 CREATE TABLE remote_flight.ret_types.bool_type(b BOOLEAN);
 
-query I
+statement error
 INSERT INTO remote_flight.ret_types.bool_type VALUES (true) RETURNING *;
 ----
-true
-
-query I
-INSERT INTO remote_flight.ret_types.bool_type VALUES (false) RETURNING *;
-----
-false
-
-query I
-INSERT INTO remote_flight.ret_types.bool_type VALUES (NULL) RETURNING *;
-----
-NULL
-
-# ============================================================
-# VARCHAR — should work
-# ============================================================
+INSERT ... RETURNING is not supported
 
 statement ok
 CREATE TABLE remote_flight.ret_types.varchar_type(v VARCHAR);
 
-query T
+statement error
 INSERT INTO remote_flight.ret_types.varchar_type VALUES ('hello') RETURNING *;
 ----
-hello
-
-query T
-INSERT INTO remote_flight.ret_types.varchar_type VALUES ('') RETURNING *;
-----
-(empty)
-
-query T
-INSERT INTO remote_flight.ret_types.varchar_type VALUES (NULL) RETURNING *;
-----
-NULL
-
-query T
-INSERT INTO remote_flight.ret_types.varchar_type VALUES ('unicode: 日本語 🦆') RETURNING *;
-----
-unicode: 日本語 🦆
-
-# ============================================================
-# Multi-column RETURNING with mixed supported types
-# ============================================================
+INSERT ... RETURNING is not supported
 
 statement ok
 CREATE TABLE remote_flight.ret_types.mixed(id INT, name VARCHAR, score DOUBLE, active BOOLEAN);
 
-query ITRI
+statement error
 INSERT INTO remote_flight.ret_types.mixed VALUES (1, 'alice', 95.5, true) RETURNING *;
 ----
-1	alice	95.5	true
-
-query ITRI
-INSERT INTO remote_flight.ret_types.mixed VALUES (2, NULL, NULL, false) RETURNING *;
-----
-2	NULL	NULL	false
-
-# --- RETURNING specific columns ---
-
-query IT
-INSERT INTO remote_flight.ret_types.mixed VALUES (3, 'carol', 88.0, true) RETURNING id, name;
-----
-3	carol
-
-# --- RETURNING with expression ---
-
-query II
-INSERT INTO remote_flight.ret_types.mixed VALUES (4, 'dave', 70.0, false) RETURNING id, id * 10 AS id_times_ten;
-----
-4	40
-
-# ============================================================
-# DATE type — INSERT RETURNING
-# Note: Despite ArrowScalarToValue not explicitly handling DATE,
-# DuckDB's INSERT RETURNING path may use a different code path
-# (direct Arrow scan rather than scalar extraction).
-# ============================================================
+INSERT ... RETURNING is not supported
 
 statement ok
 CREATE TABLE remote_flight.ret_types.date_type(d DATE);
 
-statement ok
-INSERT INTO remote_flight.ret_types.date_type VALUES ('2024-01-15');
-
-query T
-SELECT d FROM remote_flight.ret_types.date_type;
-----
-2024-01-15
-
-query T
+statement error
 INSERT INTO remote_flight.ret_types.date_type VALUES ('2024-06-15') RETURNING *;
 ----
-2024-06-15
-
-# ============================================================
-# TIMESTAMP type — INSERT RETURNING
-# ============================================================
+INSERT ... RETURNING is not supported
 
 statement ok
 CREATE TABLE remote_flight.ret_types.ts_type(ts TIMESTAMP);
 
-statement ok
-INSERT INTO remote_flight.ret_types.ts_type VALUES ('2024-01-15 10:30:00');
-
-query T
-SELECT ts FROM remote_flight.ret_types.ts_type;
-----
-2024-01-15 10:30:00
-
-query T
+statement error
 INSERT INTO remote_flight.ret_types.ts_type VALUES ('2024-06-15 12:00:00') RETURNING *;
 ----
-2024-06-15 12:00:00
+INSERT ... RETURNING is not supported
 
 # ============================================================
 # DELETE RETURNING — broken on all remote catalogs
@@ -208,7 +101,7 @@ DELETE FROM remote_flight.ret_types.del_ret WHERE id = 1 RETURNING *;
 CTE needs a SELECT
 
 # ============================================================
-# Unsigned integer types via memory catalog
+# Unsigned integer types via memory catalog — also blocked
 # ============================================================
 
 statement ok
@@ -220,15 +113,10 @@ DROP TABLE IF EXISTS remote_ret_mem.unsigned_ret;
 statement ok
 CREATE TABLE remote_ret_mem.unsigned_ret(uti UTINYINT, usi USMALLINT, ui UINTEGER, ubi UBIGINT);
 
-query IIII
+statement error
 INSERT INTO remote_ret_mem.unsigned_ret VALUES (255, 65535, 4294967295, 18446744073709551615) RETURNING *;
 ----
-255	65535	4294967295	18446744073709551615
-
-query IIII
-INSERT INTO remote_ret_mem.unsigned_ret VALUES (0, 0, 0, 0) RETURNING *;
-----
-0	0	0	0
+INSERT ... RETURNING is not supported
 
 # ============================================================
 # Cleanup

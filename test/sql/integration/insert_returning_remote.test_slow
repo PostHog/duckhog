@@ -1,5 +1,5 @@
 # name: test/sql/integration/insert_returning_remote.test_slow
-# description: INSERT ... RETURNING on remote DuckLake table
+# description: INSERT ... RETURNING is not supported (DuckLake limitation)
 # group: [integration]
 
 require duckhog
@@ -21,155 +21,94 @@ DROP SCHEMA IF EXISTS remote_flight.roadmap_rm15 CASCADE;
 statement ok
 CREATE SCHEMA remote_flight.roadmap_rm15;
 
-# ============================================================
-# Basic RETURNING *
-# ============================================================
-
 statement ok
 CREATE TABLE remote_flight.roadmap_rm15.t(i INT, v VARCHAR);
 
-query IT
+# ============================================================
+# INSERT ... RETURNING is not supported (DuckLake limitation)
+# DuckLake does not support RETURNING on any DML verb.
+# The previous chunk-echo implementation was semantically wrong
+# (echoed client input, not server state).
+# ============================================================
+
+statement error
 INSERT INTO remote_flight.roadmap_rm15.t VALUES (1, 'hello') RETURNING *;
 ----
-1	hello
+INSERT ... RETURNING is not supported
 
-# --- Verify data actually persisted ---
-
-query IT
-SELECT i, v FROM remote_flight.roadmap_rm15.t;
-----
-1	hello
-
-# ============================================================
-# RETURNING single column
-# ============================================================
-
-query I
+statement error
 INSERT INTO remote_flight.roadmap_rm15.t VALUES (2, 'world') RETURNING i;
 ----
-2
+INSERT ... RETURNING is not supported
 
-query T
+statement error
 INSERT INTO remote_flight.roadmap_rm15.t VALUES (3, 'foo') RETURNING v;
 ----
-foo
+INSERT ... RETURNING is not supported
 
-# ============================================================
-# RETURNING with expression
-# ============================================================
-
-query I
+statement error
 INSERT INTO remote_flight.roadmap_rm15.t VALUES (4, 'bar') RETURNING i * 10;
 ----
-40
+INSERT ... RETURNING is not supported
 
-query T
+statement error
 INSERT INTO remote_flight.roadmap_rm15.t VALUES (5, 'baz') RETURNING upper(v);
 ----
-BAZ
+INSERT ... RETURNING is not supported
 
-query I
-INSERT INTO remote_flight.roadmap_rm15.t VALUES (6, 'qux') RETURNING i + 100 AS computed;
-----
-106
-
-# ============================================================
-# RETURNING multiple rows
-# ============================================================
-
-query IT
+statement error
 INSERT INTO remote_flight.roadmap_rm15.t VALUES (10, 'a'), (20, 'b'), (30, 'c') RETURNING *;
 ----
-10	a
-20	b
-30	c
+INSERT ... RETURNING is not supported
 
-query I
-INSERT INTO remote_flight.roadmap_rm15.t VALUES (40, 'x'), (50, 'y') RETURNING i;
-----
-40
-50
-
-# ============================================================
-# RETURNING with NULL values
-# ============================================================
-
-query IT
+statement error
 INSERT INTO remote_flight.roadmap_rm15.t VALUES (NULL, NULL) RETURNING *;
 ----
-NULL	NULL
-
-query IT
-INSERT INTO remote_flight.roadmap_rm15.t VALUES (99, NULL) RETURNING *;
-----
-99	NULL
+INSERT ... RETURNING is not supported
 
 # ============================================================
-# RETURNING from multi-column table
+# Multi-column table
 # ============================================================
 
 statement ok
 CREATE TABLE remote_flight.roadmap_rm15.multi(a INT, b VARCHAR, c DOUBLE, d BOOLEAN);
 
-query ITRI
+statement error
 INSERT INTO remote_flight.roadmap_rm15.multi VALUES (1, 'test', 3.14, true) RETURNING *;
 ----
-1	test	3.14	true
+INSERT ... RETURNING is not supported
 
-query TR
+statement error
 INSERT INTO remote_flight.roadmap_rm15.multi VALUES (2, 'more', 2.71, false) RETURNING b, c;
 ----
-more	2.71
+INSERT ... RETURNING is not supported
 
 # ============================================================
-# RETURNING in transaction with ROLLBACK
+# RETURNING in transaction — error should not affect transaction
 # ============================================================
 
 statement ok
 BEGIN;
 
-query IT
+statement error
 INSERT INTO remote_flight.roadmap_rm15.t VALUES (999, 'txn_row') RETURNING *;
 ----
-999	txn_row
+INSERT ... RETURNING is not supported
 
 statement ok
 ROLLBACK;
 
-# Row should not exist after rollback
-query I
-SELECT COUNT(*) FROM remote_flight.roadmap_rm15.t WHERE i = 999;
-----
-0
-
 # ============================================================
-# RETURNING in transaction with COMMIT
+# Plain INSERT (no RETURNING) still works
 # ============================================================
 
 statement ok
-BEGIN;
+INSERT INTO remote_flight.roadmap_rm15.t VALUES (1, 'hello');
 
 query IT
-INSERT INTO remote_flight.roadmap_rm15.t VALUES (888, 'committed') RETURNING *;
+SELECT i, v FROM remote_flight.roadmap_rm15.t;
 ----
-888	committed
-
-statement ok
-COMMIT;
-
-query T
-SELECT v FROM remote_flight.roadmap_rm15.t WHERE i = 888;
-----
-committed
-
-# ============================================================
-# Verify total row count
-# ============================================================
-
-query I
-SELECT COUNT(*) FROM remote_flight.roadmap_rm15.t;
-----
-14
+1	hello
 
 # ============================================================
 # Cleanup

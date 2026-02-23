@@ -1,5 +1,5 @@
 # name: test/sql/integration/insert_returning_explicit_columns_remote.test_slow
-# description: INSERT ... RETURNING with explicit column lists on remote DuckLake table
+# description: INSERT ... RETURNING with explicit column lists is not supported (DuckLake limitation)
 # group: [integration]
 
 require duckhog
@@ -21,102 +21,65 @@ DROP SCHEMA IF EXISTS remote_flight.roadmap_rm22 CASCADE;
 statement ok
 CREATE SCHEMA remote_flight.roadmap_rm22;
 
-# ============================================================
-# Basic explicit column INSERT + RETURNING
-# ============================================================
-
 statement ok
 CREATE TABLE remote_flight.roadmap_rm22.t(i INT, j INT, v VARCHAR);
 
-query IIT
+# ============================================================
+# INSERT ... RETURNING is not supported (DuckLake limitation)
+# ============================================================
+
+statement error
 INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (1, 2, 'a') RETURNING *;
 ----
-1	2	a
+INSERT ... RETURNING is not supported
 
-# --- Reversed column order ---
-
-query IIT
+statement error
 INSERT INTO remote_flight.roadmap_rm22.t(j, i, v) VALUES (30, 20, 'b') RETURNING i, j, v;
 ----
-20	30	b
+INSERT ... RETURNING is not supported
 
-# ============================================================
-# Multiple rows with explicit columns
-# ============================================================
-
-query IIT
+statement error
 INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (10, 100, 'x'), (20, 200, 'y'), (30, 300, 'z') RETURNING *;
 ----
-10	100	x
-20	200	y
-30	300	z
+INSERT ... RETURNING is not supported
 
-# ============================================================
-# RETURNING subset of columns
-# ============================================================
-
-query T
+statement error
 INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (50, 500, 'fifty') RETURNING v;
 ----
-fifty
+INSERT ... RETURNING is not supported
 
-query I
-INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (60, 600, 'sixty') RETURNING j;
-----
-600
-
-# ============================================================
-# RETURNING with expression on explicit-column insert
-# ============================================================
-
-query I
+statement error
 INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (7, 70, 'seven') RETURNING i + j;
 ----
-77
+INSERT ... RETURNING is not supported
 
 # ============================================================
-# Verify all data persisted correctly
-# ============================================================
-
-query IIT
-SELECT i, j, v FROM remote_flight.roadmap_rm22.t ORDER BY i, j, v;
-----
-1	2	a
-7	70	seven
-10	100	x
-20	30	b
-20	200	y
-30	300	z
-50	500	fifty
-60	600	sixty
-
-query I
-SELECT COUNT(*) FROM remote_flight.roadmap_rm22.t;
-----
-8
-
-# ============================================================
-# Explicit columns with all columns specified in different orders
+# Column reordering — RETURNING still blocked
 # ============================================================
 
 statement ok
 CREATE TABLE remote_flight.roadmap_rm22.reorder(a INT, b VARCHAR, c INT);
 
-query IIT
+statement error
 INSERT INTO remote_flight.roadmap_rm22.reorder(c, a, b) VALUES (30, 10, 'mid') RETURNING *;
 ----
-10	mid	30
+INSERT ... RETURNING is not supported
+
+# ============================================================
+# Plain INSERT with explicit columns still works
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm22.t(i, j, v) VALUES (1, 2, 'a');
+
+statement ok
+INSERT INTO remote_flight.roadmap_rm22.t(j, i, v) VALUES (30, 20, 'b');
 
 query IIT
-INSERT INTO remote_flight.roadmap_rm22.reorder(b, c, a) VALUES ('rev', 60, 40) RETURNING *;
+SELECT i, j, v FROM remote_flight.roadmap_rm22.t ORDER BY i, j;
 ----
-40	rev	60
-
-query IIT
-SELECT a, b, c FROM remote_flight.roadmap_rm22.reorder ORDER BY a;
-----
-10	mid	30
-40	rev	60
+1	2	a
+20	30	b
 
 # ============================================================
 # Cleanup
