@@ -1,0 +1,532 @@
+# name: test/sql/integration/list_types_remote.test_slow
+# description: LIST type support over remote DuckLake catalog
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.list_types CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.list_types;
+
+# ============================================================
+# Basic INTEGER[] — INSERT + SELECT round-trip
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.int_list(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.int_list VALUES (1, [10, 20, 30]);
+
+query IT
+SELECT id, l FROM remote_flight.list_types.int_list;
+----
+1	[10, 20, 30]
+
+# ============================================================
+# LIST functions over Flight
+# ============================================================
+
+query I
+SELECT list_extract(l, 1) FROM remote_flight.list_types.int_list WHERE id = 1;
+----
+10
+
+query I
+SELECT len(l) FROM remote_flight.list_types.int_list WHERE id = 1;
+----
+3
+
+# ============================================================
+# Empty list, NULL list, list with NULL elements
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.list_types.int_list VALUES (2, []);
+
+statement ok
+INSERT INTO remote_flight.list_types.int_list VALUES (3, NULL);
+
+statement ok
+INSERT INTO remote_flight.list_types.int_list VALUES (4, [1, NULL, 3]);
+
+query IT
+SELECT id, l FROM remote_flight.list_types.int_list WHERE id = 2;
+----
+2	[]
+
+query IT
+SELECT id, l FROM remote_flight.list_types.int_list WHERE id = 3;
+----
+3	NULL
+
+query IT
+SELECT id, l FROM remote_flight.list_types.int_list WHERE id = 4;
+----
+4	[1, NULL, 3]
+
+# ============================================================
+# VARCHAR[]
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.varchar_list(id INT, tags VARCHAR[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.varchar_list VALUES (1, ['alpha', 'beta']);
+
+query IT
+SELECT id, tags FROM remote_flight.list_types.varchar_list;
+----
+1	[alpha, beta]
+
+query T
+SELECT list_extract(tags, 2) FROM remote_flight.list_types.varchar_list WHERE id = 1;
+----
+beta
+
+# ============================================================
+# BIGINT[]
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.bigint_list(id INT, l BIGINT[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.bigint_list VALUES (1, [9223372036854775807, -9223372036854775808]);
+
+query IT
+SELECT id, l FROM remote_flight.list_types.bigint_list;
+----
+1	[9223372036854775807, -9223372036854775808]
+
+# ============================================================
+# DOUBLE[]
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.double_list(id INT, l DOUBLE[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.double_list VALUES (1, [1.5, 2.718281828]);
+
+query IT
+SELECT id, l FROM remote_flight.list_types.double_list;
+----
+1	[1.5, 2.718281828]
+
+# ============================================================
+# BOOLEAN[]
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.bool_list(id INT, l BOOLEAN[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.bool_list VALUES (1, [true, false, NULL]);
+
+query IT
+SELECT id, l FROM remote_flight.list_types.bool_list;
+----
+1	[true, false, NULL]
+
+# ============================================================
+# DATE[]
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.date_list(id INT, l DATE[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.date_list VALUES (1, ['2024-01-15'::DATE, '2024-06-15'::DATE]);
+
+query IT
+SELECT id, l FROM remote_flight.list_types.date_list;
+----
+1	[2024-01-15, 2024-06-15]
+
+# ============================================================
+# TIMESTAMP[]
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.ts_list(id INT, l TIMESTAMP[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.ts_list VALUES (1, ['2024-01-15 10:30:00'::TIMESTAMP]);
+
+query IT
+SELECT id, l FROM remote_flight.list_types.ts_list;
+----
+1	['2024-01-15 10:30:00']
+
+# ============================================================
+# Multi-row INSERT with LIST
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.list_types.varchar_list VALUES (2, ['x']), (3, ['y', 'z']);
+
+query IT
+SELECT id, tags FROM remote_flight.list_types.varchar_list ORDER BY id;
+----
+1	[alpha, beta]
+2	[x]
+3	[y, z]
+
+# ============================================================
+# Mixed columns: scalar + LIST
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.mixed(id INT, name VARCHAR, scores DOUBLE[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.mixed VALUES (1, 'alice', [95.5, 88.0]);
+
+query ITT
+SELECT id, name, scores FROM remote_flight.list_types.mixed;
+----
+1	alice	[95.5, 88.0]
+
+statement ok
+INSERT INTO remote_flight.list_types.mixed VALUES (2, 'bob', NULL), (3, 'carol', []);
+
+query ITT
+SELECT id, name, scores FROM remote_flight.list_types.mixed ORDER BY id;
+----
+1	alice	[95.5, 88.0]
+2	bob	NULL
+3	carol	[]
+
+# ============================================================
+# Multiple LIST columns in one table
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.multi_list(id INT, tags VARCHAR[], nums INTEGER[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.multi_list VALUES (1, ['a', 'b'], [10, 20]);
+
+query ITT
+SELECT id, tags, nums FROM remote_flight.list_types.multi_list;
+----
+1	[a, b]	[10, 20]
+
+# ============================================================
+# UPDATE with LIST values
+# ============================================================
+
+statement ok
+UPDATE remote_flight.list_types.int_list SET l = [99, 100] WHERE id = 1;
+
+query IT
+SELECT id, l FROM remote_flight.list_types.int_list WHERE id = 1;
+----
+1	[99, 100]
+
+# ============================================================
+# DELETE with LIST-based condition
+# ============================================================
+
+statement ok
+DELETE FROM remote_flight.list_types.int_list WHERE len(l) = 0;
+
+query I
+SELECT COUNT(*) FROM remote_flight.list_types.int_list WHERE id = 2;
+----
+0
+
+# ============================================================
+# Nested LIST (INTEGER[][])
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.nested(id INT, ll INTEGER[][]);
+
+statement ok
+INSERT INTO remote_flight.list_types.nested VALUES (1, [[1, 2], [3, 4]]);
+
+query IT
+SELECT id, ll FROM remote_flight.list_types.nested;
+----
+1	[[1, 2], [3, 4]]
+
+query T
+SELECT list_extract(ll, 1) FROM remote_flight.list_types.nested WHERE id = 1;
+----
+[1, 2]
+
+# ============================================================
+# VARCHAR[][] (nested list of strings)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.nested_varchar(id INT, ll VARCHAR[][]);
+
+statement ok
+INSERT INTO remote_flight.list_types.nested_varchar VALUES (1, [['a', 'b'], ['c']]);
+
+query IT
+SELECT id, ll FROM remote_flight.list_types.nested_varchar;
+----
+1	[[a, b], [c]]
+
+# ============================================================
+# Single-element list
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.single_elem(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.single_elem VALUES (1, [42]);
+
+query IT
+SELECT id, l FROM remote_flight.list_types.single_elem;
+----
+1	[42]
+
+query I
+SELECT list_extract(l, 1) FROM remote_flight.list_types.single_elem;
+----
+42
+
+# ============================================================
+# Large list (many elements)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.large_list(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.large_list
+  SELECT 1, list(i) FROM range(500) t(i);
+
+query I
+SELECT len(l) FROM remote_flight.list_types.large_list WHERE id = 1;
+----
+500
+
+query I
+SELECT list_extract(l, 1) FROM remote_flight.list_types.large_list WHERE id = 1;
+----
+0
+
+query I
+SELECT list_extract(l, 500) FROM remote_flight.list_types.large_list WHERE id = 1;
+----
+499
+
+# ============================================================
+# VARCHAR[] with special characters
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.list_types.varchar_list VALUES (10, ['it''s', 'hello world', '日本語', '🦆']);
+
+# Note: single-quote in list element is rendered as 'it\'s' over Flight
+# (different from native DuckLake which renders it as it's).
+# This is a cosmetic Duckgres/Arrow rendering difference, not a data bug.
+query IT
+SELECT id, tags FROM remote_flight.list_types.varchar_list WHERE id = 10;
+----
+10	['it\'s', hello world, 日本語, 🦆]
+
+# ============================================================
+# List comparison operators in WHERE
+# ============================================================
+
+# Equality
+query IT
+SELECT id, l FROM remote_flight.list_types.int_list WHERE l = [99, 100];
+----
+1	[99, 100]
+
+query I
+SELECT COUNT(*) FROM remote_flight.list_types.int_list WHERE l = [999];
+----
+0
+
+# Use a fresh table for comparison tests to avoid dependency on prior mutations
+statement ok
+CREATE TABLE remote_flight.list_types.cmp(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.cmp VALUES
+  (1, [1, 2, 3]),
+  (2, [1, 2, 4]),
+  (3, [2, 0]),
+  (4, [1, 2]),
+  (5, NULL);
+
+# Greater-than (lexicographic)
+query IT
+SELECT id, l FROM remote_flight.list_types.cmp WHERE l > [1, 2, 3] ORDER BY id;
+----
+2	[1, 2, 4]
+3	[2, 0]
+
+# Less-than
+query IT
+SELECT id, l FROM remote_flight.list_types.cmp WHERE l < [1, 2, 3] ORDER BY id;
+----
+4	[1, 2]
+
+# Greater-or-equal
+query I
+SELECT COUNT(*) FROM remote_flight.list_types.cmp WHERE l >= [1, 2, 3];
+----
+3
+
+# Less-or-equal
+query I
+SELECT COUNT(*) FROM remote_flight.list_types.cmp WHERE l <= [1, 2, 3];
+----
+2
+
+# Not-equal
+query I
+SELECT COUNT(*) FROM remote_flight.list_types.cmp WHERE l != [1, 2, 3] AND l IS NOT NULL;
+----
+3
+
+# ORDER BY on list column (lexicographic)
+query IT
+SELECT id, l FROM remote_flight.list_types.cmp WHERE l IS NOT NULL ORDER BY l;
+----
+4	[1, 2]
+1	[1, 2, 3]
+2	[1, 2, 4]
+3	[2, 0]
+
+# NULL list element equality: [NULL] = [NULL] is true in DuckDB
+statement ok
+INSERT INTO remote_flight.list_types.int_list VALUES (20, [NULL]);
+
+query IT
+SELECT id, l FROM remote_flight.list_types.int_list WHERE l = [NULL];
+----
+20	[NULL]
+
+# ============================================================
+# list_contains / list_sort
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.list_types.int_list VALUES (10, [30, 10, 20]);
+
+query T
+SELECT list_sort(l) FROM remote_flight.list_types.int_list WHERE id = 10;
+----
+[10, 20, 30]
+
+query T
+SELECT list_contains(l, 20) FROM remote_flight.list_types.int_list WHERE id = 10;
+----
+true
+
+query T
+SELECT list_contains(l, 999) FROM remote_flight.list_types.int_list WHERE id = 10;
+----
+false
+
+# ============================================================
+# UPDATE SET with list function
+# ============================================================
+
+statement ok
+UPDATE remote_flight.list_types.int_list SET l = list_concat(l, [999]) WHERE id = 10;
+
+query IT
+SELECT id, l FROM remote_flight.list_types.int_list WHERE id = 10;
+----
+10	[30, 10, 20, 999]
+
+# ============================================================
+# INSERT...SELECT with LIST (remote → remote)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.list_copy(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.list_copy
+  SELECT id, l FROM remote_flight.list_types.int_list WHERE id = 1;
+
+query IT
+SELECT id, l FROM remote_flight.list_types.list_copy;
+----
+1	[99, 100]
+
+# ============================================================
+# INSERT...SELECT with LIST (local → remote)
+# ============================================================
+
+statement ok
+CREATE TABLE local_list_src(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO local_list_src VALUES (50, [500, 600]);
+
+statement ok
+INSERT INTO remote_flight.list_types.list_copy SELECT * FROM local_list_src;
+
+query IT
+SELECT id, l FROM remote_flight.list_types.list_copy ORDER BY id;
+----
+1	[99, 100]
+50	[500, 600]
+
+statement ok
+DROP TABLE local_list_src;
+
+# ============================================================
+# Transaction rollback with LIST data
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.list_types.txn_list(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO remote_flight.list_types.txn_list VALUES (1, [10, 20]);
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.list_types.txn_list VALUES (2, [30, 40]);
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT COUNT(*) FROM remote_flight.list_types.txn_list;
+----
+1
+
+query IT
+SELECT id, l FROM remote_flight.list_types.txn_list;
+----
+1	[10, 20]
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.list_types CASCADE;

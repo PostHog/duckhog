@@ -151,6 +151,131 @@ SELECT COUNT(*) FROM dl.main.t WHERE id = 2;
 0
 
 # ============================================================
+# List comparison operators (lexicographic)
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_cmp;
+
+statement ok
+CREATE TABLE dl.main.t_cmp(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO dl.main.t_cmp VALUES
+  (1, [1, 2, 3]),
+  (2, [1, 2, 4]),
+  (3, [2, 0]),
+  (4, [1, 2]),
+  (5, NULL);
+
+query IT
+SELECT id, l FROM dl.main.t_cmp WHERE l > [1, 2, 3] ORDER BY id;
+----
+2	[1, 2, 4]
+3	[2, 0]
+
+query IT
+SELECT id, l FROM dl.main.t_cmp WHERE l < [1, 2, 3] ORDER BY id;
+----
+4	[1, 2]
+
+query I
+SELECT COUNT(*) FROM dl.main.t_cmp WHERE l >= [1, 2, 3];
+----
+3
+
+query I
+SELECT COUNT(*) FROM dl.main.t_cmp WHERE l <= [1, 2, 3];
+----
+2
+
+query I
+SELECT COUNT(*) FROM dl.main.t_cmp WHERE l != [1, 2, 3] AND l IS NOT NULL;
+----
+3
+
+# ORDER BY on list column
+query IT
+SELECT id, l FROM dl.main.t_cmp WHERE l IS NOT NULL ORDER BY l;
+----
+4	[1, 2]
+1	[1, 2, 3]
+2	[1, 2, 4]
+3	[2, 0]
+
+# [NULL] = [NULL] is true in DuckDB
+query I
+SELECT COUNT(*) FROM (SELECT [NULL]::INTEGER[] AS l) WHERE l = [NULL];
+----
+1
+
+# ============================================================
+# list_contains / list_sort
+# ============================================================
+
+query T
+SELECT list_sort([30, 10, 20]);
+----
+[10, 20, 30]
+
+query T
+SELECT list_contains([10, 20, 30], 20);
+----
+true
+
+query T
+SELECT list_contains([10, 20, 30], 999);
+----
+false
+
+# ============================================================
+# INSERT...SELECT with LIST
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_list_copy;
+
+statement ok
+CREATE TABLE dl.main.t_list_copy(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO dl.main.t_list_copy SELECT id, l FROM dl.main.t_cmp WHERE id <= 2;
+
+query IT
+SELECT id, l FROM dl.main.t_list_copy ORDER BY id;
+----
+1	[1, 2, 3]
+2	[1, 2, 4]
+
+# ============================================================
+# Large list (many elements)
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_large;
+
+statement ok
+CREATE TABLE dl.main.t_large(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO dl.main.t_large SELECT 1, list(i) FROM range(500) t(i);
+
+query I
+SELECT len(l) FROM dl.main.t_large WHERE id = 1;
+----
+500
+
+query I
+SELECT list_extract(l, 1) FROM dl.main.t_large WHERE id = 1;
+----
+0
+
+query I
+SELECT list_extract(l, 500) FROM dl.main.t_large WHERE id = 1;
+----
+499
+
+# ============================================================
 # BIGINT[]
 # ============================================================
 
@@ -312,6 +437,15 @@ SELECT list_extract(ll, 1) FROM dl.main.t_nested WHERE id = 1;
 # ============================================================
 # Cleanup
 # ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_large;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_list_copy;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_cmp;
 
 statement ok
 DROP TABLE IF EXISTS dl.main.t_nested;
