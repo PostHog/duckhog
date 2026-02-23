@@ -51,10 +51,7 @@ Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
 - [`rm14_nested_types_remote.test_slow`](sql/roadmap/rm14_nested_types_remote.test_slow) — [#37](https://github.com/PostHog/duckhog/issues/37)
-- [`rm16_on_conflict_do_nothing_remote.test_slow`](sql/roadmap/rm16_on_conflict_do_nothing_remote.test_slow) — [#38](https://github.com/PostHog/duckhog/issues/38)
-- [`rm17_on_conflict_do_update_remote.test_slow`](sql/roadmap/rm17_on_conflict_do_update_remote.test_slow) — [#39](https://github.com/PostHog/duckhog/issues/39)
-- [`rm19_on_conflict_do_nothing_returning_remote.test_slow`](sql/roadmap/rm19_on_conflict_do_nothing_returning_remote.test_slow) — [#40](https://github.com/PostHog/duckhog/issues/40)
-- [`rm23_on_conflict_rewrite_path_remote.test_slow`](sql/roadmap/rm23_on_conflict_rewrite_path_remote.test_slow) — [#44](https://github.com/PostHog/duckhog/issues/44)
+- [`rm23_on_conflict_rewrite_path_remote.test_slow`](sql/roadmap/rm23_on_conflict_rewrite_path_remote.test_slow) — [#44](https://github.com/PostHog/duckhog/issues/44) — memory catalog only (non-DuckLake)
 
 Non-test-file targets:
 - DML rewriter CTE support (UPDATE/DELETE) — [#45](https://github.com/PostHog/duckhog/issues/45)
@@ -74,6 +71,13 @@ Graduated targets (now part of normal integration suite):
 - [`insert_returning_remote.test_slow`](sql/integration/insert_returning_remote.test_slow) (RM15)
 - [`insert_default_values_remote.test_slow`](sql/integration/insert_default_values_remote.test_slow) (RM18)
 - [`insert_defaults_returning_remote.test_slow`](sql/integration/insert_defaults_returning_remote.test_slow) (RM20, RM21, RM22) — [#41](https://github.com/PostHog/duckhog/issues/41), [#42](https://github.com/PostHog/duckhog/issues/42), [#43](https://github.com/PostHog/duckhog/issues/43); RM20/RM21 closed as limitation L1 (RETURNING + omitted columns requires upstream DuckLake INSERT RETURNING support)
+
+Retired targets (will never be supported on DuckLake):
+- RM16 (ON CONFLICT DO NOTHING) — [#38](https://github.com/PostHog/duckhog/issues/38) — DuckLake will never support PK/UNIQUE constraints ([ducklake#66](https://github.com/duckdb/ducklake/issues/66), [ducklake#290](https://github.com/duckdb/ducklake/issues/290))
+- RM17 (ON CONFLICT DO UPDATE) — [#39](https://github.com/PostHog/duckhog/issues/39) — same as RM16
+- RM19 (ON CONFLICT DO NOTHING RETURNING) — [#40](https://github.com/PostHog/duckhog/issues/40) — same as RM16; also blocked by DuckLake lacking RETURNING support
+
+DuckLake's upsert alternative is MERGE INTO, which DuckHog already supports (RM09).
 
 ## Design Rules
 
