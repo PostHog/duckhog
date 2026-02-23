@@ -50,7 +50,7 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- [`rm14_nested_types_remote.test_slow`](sql/roadmap/rm14_nested_types_remote.test_slow) — [#37](https://github.com/PostHog/duckhog/issues/37)
+- [`rm14_nested_types_remote.test_slow`](sql/roadmap/rm14_nested_types_remote.test_slow) — [#37](https://github.com/PostHog/duckhog/issues/37) — LIST works (covered by [`list_types_remote.test_slow`](sql/integration/list_types_remote.test_slow)); blocked on STRUCT (values zeroed) and MAP (segfault) over Arrow Flight
 - [`rm23_on_conflict_rewrite_path_remote.test_slow`](sql/roadmap/rm23_on_conflict_rewrite_path_remote.test_slow) — [#44](https://github.com/PostHog/duckhog/issues/44) — memory catalog only (non-DuckLake)
 
 Non-test-file targets:
