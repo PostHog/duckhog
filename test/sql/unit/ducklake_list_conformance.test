@@ -1,0 +1,347 @@
+# name: test/sql/unit/ducklake_list_conformance.test
+# description: Verify native DuckLake LIST type behavior that DuckHog integration tests rely on.
+# group: [unit]
+
+#              Conformance tests run DuckDB + DuckLake directly — no DuckHog, no Duckgres.
+#              They document our assumptions about native DuckLake behavior so that when
+#              an integration test fails, we can tell whether DuckLake changed underneath
+#              us or whether our proxy is broken.
+
+require parquet
+
+statement ok
+INSTALL ducklake;
+
+statement ok
+LOAD ducklake;
+
+# Use a file unique to this test file to avoid cross-file DuckLake metadata reuse.
+statement ok
+ATTACH 'ducklake:__TEST_DIR__/ducklake_list_conformance_meta.db' AS dl;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t;
+
+# ============================================================
+# CREATE TABLE with LIST column + INSERT round-trip
+# ============================================================
+
+statement ok
+CREATE TABLE dl.main.t(id INT, l INTEGER[]);
+
+statement ok
+INSERT INTO dl.main.t VALUES (1, [10, 20, 30]);
+
+query IT
+SELECT id, l FROM dl.main.t;
+----
+1	[10, 20, 30]
+
+# ============================================================
+# LIST functions: list_extract, list_length, list_concat
+# ============================================================
+
+query I
+SELECT list_extract(l, 1) FROM dl.main.t WHERE id = 1;
+----
+10
+
+query I
+SELECT len(l) FROM dl.main.t WHERE id = 1;
+----
+3
+
+query T
+SELECT list_concat(l, [40, 50]) FROM dl.main.t WHERE id = 1;
+----
+[10, 20, 30, 40, 50]
+
+# ============================================================
+# Empty list, NULL list, list with NULL elements
+# ============================================================
+
+statement ok
+INSERT INTO dl.main.t VALUES (2, []);
+
+statement ok
+INSERT INTO dl.main.t VALUES (3, NULL);
+
+statement ok
+INSERT INTO dl.main.t VALUES (4, [1, NULL, 3]);
+
+query IT
+SELECT id, l FROM dl.main.t WHERE id = 2;
+----
+2	[]
+
+query IT
+SELECT id, l FROM dl.main.t WHERE id = 3;
+----
+3	NULL
+
+query IT
+SELECT id, l FROM dl.main.t WHERE id = 4;
+----
+4	[1, NULL, 3]
+
+query I
+SELECT len(l) FROM dl.main.t WHERE id = 2;
+----
+0
+
+# ============================================================
+# VARCHAR[]
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_vl;
+
+statement ok
+CREATE TABLE dl.main.t_vl(id INT, tags VARCHAR[]);
+
+statement ok
+INSERT INTO dl.main.t_vl VALUES (1, ['alpha', 'beta']);
+
+query IT
+SELECT id, tags FROM dl.main.t_vl;
+----
+1	[alpha, beta]
+
+query T
+SELECT list_extract(tags, 2) FROM dl.main.t_vl WHERE id = 1;
+----
+beta
+
+# ============================================================
+# Multi-row INSERT
+# ============================================================
+
+statement ok
+INSERT INTO dl.main.t_vl VALUES (2, ['x']), (3, ['y', 'z']);
+
+query IT
+SELECT id, tags FROM dl.main.t_vl ORDER BY id;
+----
+1	[alpha, beta]
+2	[x]
+3	[y, z]
+
+# ============================================================
+# UPDATE with LIST values
+# ============================================================
+
+statement ok
+UPDATE dl.main.t SET l = [99, 100] WHERE id = 1;
+
+query IT
+SELECT id, l FROM dl.main.t WHERE id = 1;
+----
+1	[99, 100]
+
+# ============================================================
+# DELETE with LIST-based condition
+# ============================================================
+
+statement ok
+DELETE FROM dl.main.t WHERE len(l) = 0;
+
+query I
+SELECT COUNT(*) FROM dl.main.t WHERE id = 2;
+----
+0
+
+# ============================================================
+# BIGINT[]
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_bigint;
+
+statement ok
+CREATE TABLE dl.main.t_bigint(id INT, l BIGINT[]);
+
+statement ok
+INSERT INTO dl.main.t_bigint VALUES (1, [9223372036854775807, -9223372036854775808]);
+
+query IT
+SELECT id, l FROM dl.main.t_bigint;
+----
+1	[9223372036854775807, -9223372036854775808]
+
+# ============================================================
+# DOUBLE[]
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_double;
+
+statement ok
+CREATE TABLE dl.main.t_double(id INT, l DOUBLE[]);
+
+statement ok
+INSERT INTO dl.main.t_double VALUES (1, [1.5, 2.718281828]);
+
+query IT
+SELECT id, l FROM dl.main.t_double;
+----
+1	[1.5, 2.718281828]
+
+# ============================================================
+# BOOLEAN[]
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_bool;
+
+statement ok
+CREATE TABLE dl.main.t_bool(id INT, l BOOLEAN[]);
+
+statement ok
+INSERT INTO dl.main.t_bool VALUES (1, [true, false, NULL]);
+
+query IT
+SELECT id, l FROM dl.main.t_bool;
+----
+1	[true, false, NULL]
+
+# ============================================================
+# DATE[]
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_date;
+
+statement ok
+CREATE TABLE dl.main.t_date(id INT, l DATE[]);
+
+statement ok
+INSERT INTO dl.main.t_date VALUES (1, ['2024-01-15'::DATE, '2024-06-15'::DATE]);
+
+query IT
+SELECT id, l FROM dl.main.t_date;
+----
+1	[2024-01-15, 2024-06-15]
+
+# ============================================================
+# TIMESTAMP[]
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_ts;
+
+statement ok
+CREATE TABLE dl.main.t_ts(id INT, l TIMESTAMP[]);
+
+statement ok
+INSERT INTO dl.main.t_ts VALUES (1, ['2024-01-15 10:30:00'::TIMESTAMP]);
+
+query IT
+SELECT id, l FROM dl.main.t_ts;
+----
+1	['2024-01-15 10:30:00']
+
+# ============================================================
+# VARCHAR[][] (nested list of strings)
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_nested_varchar;
+
+statement ok
+CREATE TABLE dl.main.t_nested_varchar(id INT, ll VARCHAR[][]);
+
+statement ok
+INSERT INTO dl.main.t_nested_varchar VALUES (1, [['a', 'b'], ['c']]);
+
+query IT
+SELECT id, ll FROM dl.main.t_nested_varchar;
+----
+1	[[a, b], [c]]
+
+# ============================================================
+# Multiple LIST columns in one table
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_multi_list;
+
+statement ok
+CREATE TABLE dl.main.t_multi_list(id INT, tags VARCHAR[], scores DOUBLE[]);
+
+statement ok
+INSERT INTO dl.main.t_multi_list VALUES (1, ['x', 'y'], [9.5, 8.0]);
+
+query ITT
+SELECT id, tags, scores FROM dl.main.t_multi_list;
+----
+1	[x, y]	[9.5, 8.0]
+
+statement ok
+INSERT INTO dl.main.t_multi_list VALUES (2, [], []), (3, NULL, [1.0]);
+
+query ITT
+SELECT id, tags, scores FROM dl.main.t_multi_list ORDER BY id;
+----
+1	[x, y]	[9.5, 8.0]
+2	[]	[]
+3	NULL	[1.0]
+
+# ============================================================
+# Nested LIST (INTEGER[][])
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_nested;
+
+statement ok
+CREATE TABLE dl.main.t_nested(id INT, ll INTEGER[][]);
+
+statement ok
+INSERT INTO dl.main.t_nested VALUES (1, [[1, 2], [3, 4]]);
+
+query IT
+SELECT id, ll FROM dl.main.t_nested;
+----
+1	[[1, 2], [3, 4]]
+
+query T
+SELECT list_extract(ll, 1) FROM dl.main.t_nested WHERE id = 1;
+----
+[1, 2]
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_nested;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_nested_varchar;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_multi_list;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_bigint;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_double;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_bool;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_date;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_ts;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_vl;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t;
+
+statement ok
+DETACH dl;

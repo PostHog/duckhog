@@ -265,6 +265,61 @@ TEST_CASE("Insert SQL builder - TIMESTAMP", "[duckhog][insert-sql]") {
 }
 
 // ============================================================
+// LIST type coverage
+// ============================================================
+
+TEST_CASE("Insert SQL builder - LIST of integers", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::INTEGER)},
+	          {Value::LIST(LogicalType::INTEGER, {Value::INTEGER(1), Value::INTEGER(2), Value::INTEGER(3)})});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES ([1, 2, 3]);");
+}
+
+TEST_CASE("Insert SQL builder - empty LIST", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::INTEGER)},
+	          {Value::LIST(LogicalType::INTEGER, {})});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES ([]);");
+}
+
+TEST_CASE("Insert SQL builder - LIST with NULLs", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::INTEGER)},
+	          {Value::LIST(LogicalType::INTEGER,
+	                       {Value::INTEGER(1), Value(LogicalType::INTEGER), Value::INTEGER(3)})});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES ([1, NULL, 3]);");
+}
+
+TEST_CASE("Insert SQL builder - LIST of VARCHAR", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::VARCHAR)},
+	          {Value::LIST(LogicalType::VARCHAR, {Value("a"), Value("b")})});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES (['a', 'b']);");
+}
+
+TEST_CASE("Insert SQL builder - NULL LIST value", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::INTEGER)},
+	          {Value(LogicalType::LIST(LogicalType::INTEGER))});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES (NULL);");
+}
+
+TEST_CASE("Insert SQL builder - multi-row with LIST", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	auto list_type = LogicalType::LIST(LogicalType::INTEGER);
+	InitChunkMultiRow(chunk, {LogicalType::INTEGER, list_type},
+	                  {{Value::INTEGER(1), Value::LIST(LogicalType::INTEGER, {Value::INTEGER(10), Value::INTEGER(20)})},
+	                   {Value::INTEGER(2), Value::LIST(LogicalType::INTEGER, {Value::INTEGER(30)})}});
+	auto sql = BuildInsertSQL(TABLE, {"i", "l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (i, l) VALUES (1, [10, 20]), (2, [30]);");
+}
+
+// ============================================================
 // Validation / error cases
 // ============================================================
 
