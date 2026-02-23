@@ -38,7 +38,7 @@ SELECT id, l FROM dl.main.t;
 1	[10, 20, 30]
 
 # ============================================================
-# LIST functions: list_extract, list_length, list_concat
+# LIST functions: list_extract, len, list_concat
 # ============================================================
 
 query I
