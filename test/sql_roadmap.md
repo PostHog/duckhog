@@ -1,6 +1,6 @@
 # SQL Roadmap Suite Plan (DuckHog-Only, DuckLake-Referenced)
 
-Last updated: `2026-02-20`
+Last updated: `2026-02-23`
 
 ## Goal
 
@@ -68,14 +68,16 @@ Graduated targets (now part of normal integration suite):
 - [`merge_remote.test_slow`](sql/integration/merge_remote.test_slow) (RM09) — [#32](https://github.com/PostHog/duckhog/issues/32)
 - [`time_travel_remote.test_slow`](sql/integration/time_travel_remote.test_slow) (RM10) — [#33](https://github.com/PostHog/duckhog/issues/33)
 - [`table_functions_remote.test_slow`](sql/integration/table_functions_remote.test_slow) (RM11, RM12, RM13) — [#34](https://github.com/PostHog/duckhog/issues/34), [#35](https://github.com/PostHog/duckhog/issues/35), [#36](https://github.com/PostHog/duckhog/issues/36)
-- [`insert_returning_remote.test_slow`](sql/integration/insert_returning_remote.test_slow) (RM15)
 - [`insert_default_values_remote.test_slow`](sql/integration/insert_default_values_remote.test_slow) (RM18)
-- [`insert_defaults_returning_remote.test_slow`](sql/integration/insert_defaults_returning_remote.test_slow) (RM20, RM21, RM22) — [#41](https://github.com/PostHog/duckhog/issues/41), [#42](https://github.com/PostHog/duckhog/issues/42), [#43](https://github.com/PostHog/duckhog/issues/43); RM20/RM21 closed as limitation L1 (RETURNING + omitted columns requires upstream DuckLake INSERT RETURNING support)
 
 Retired targets (will never be supported on DuckLake):
+- RM15 (INSERT RETURNING) — DuckLake does not support RETURNING on any DML verb; chunk-echo was semantically wrong (echoed client input, not server state). Test file kept as `statement error` coverage.
 - RM16 (ON CONFLICT DO NOTHING) — [#38](https://github.com/PostHog/duckhog/issues/38) — DuckLake will never support PK/UNIQUE constraints ([ducklake#66](https://github.com/duckdb/ducklake/issues/66), [ducklake#290](https://github.com/duckdb/ducklake/issues/290))
 - RM17 (ON CONFLICT DO UPDATE) — [#39](https://github.com/PostHog/duckhog/issues/39) — same as RM16
 - RM19 (ON CONFLICT DO NOTHING RETURNING) — [#40](https://github.com/PostHog/duckhog/issues/40) — same as RM16; also blocked by DuckLake lacking RETURNING support
+- RM20 (DEFAULT VALUES + RETURNING) — [#41](https://github.com/PostHog/duckhog/issues/41) — subsumes L1 limitation; RETURNING itself is not supported
+- RM21 (Partial columns + RETURNING) — [#42](https://github.com/PostHog/duckhog/issues/42) — same as RM20
+- RM22 (Explicit columns + RETURNING) — [#43](https://github.com/PostHog/duckhog/issues/43) — same as RM20
 
 DuckLake's upsert alternative is MERGE INTO, which DuckHog already supports (RM09).
 

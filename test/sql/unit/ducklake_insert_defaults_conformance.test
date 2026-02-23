@@ -131,7 +131,6 @@ NULL	10
 
 # ============================================================
 # DuckLake does not support RETURNING on INSERT
-# (DuckHog implements RETURNING by intercepting the chunk)
 # ============================================================
 
 statement error
