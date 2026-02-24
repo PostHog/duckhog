@@ -1,6 +1,6 @@
 # name: test/sql/integration/security/injection_dml.test_slow
 # description: RED-TEAM — SQL injection via DML rewriter paths (DELETE, UPDATE, MERGE)
-# group: [integration]
+# group: [security]
 
 require duckhog
 

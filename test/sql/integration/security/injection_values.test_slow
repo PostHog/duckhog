@@ -1,6 +1,6 @@
 # name: test/sql/integration/security/injection_values.test_slow
 # description: RED-TEAM — SQL injection via INSERT/UPDATE values
-# group: [integration]
+# group: [security]
 
 require duckhog
 

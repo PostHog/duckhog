@@ -64,7 +64,8 @@ unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream
 	if (remote_catalog.empty()) {
 		table_ref = QuoteIdent(bind_data->schema_name) + "." + QuoteIdent(bind_data->table_name);
 	} else {
-		table_ref = QuoteIdent(remote_catalog) + "." + QuoteIdent(bind_data->schema_name) + "." + QuoteIdent(bind_data->table_name);
+		table_ref = QuoteIdent(remote_catalog) + "." + QuoteIdent(bind_data->schema_name) + "." +
+		            QuoteIdent(bind_data->table_name);
 	}
 	// Append AT clause if present (e.g. time travel: AT (VERSION => 1))
 	if (!bind_data->at_clause_sql.empty()) {

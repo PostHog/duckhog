@@ -1,6 +1,6 @@
 # name: test/sql/integration/security/injection_ddl.test_slow
 # description: RED-TEAM — SQL injection via DDL paths (CREATE VIEW, CTAS, RENAME, PARTITION ALTER)
-# group: [integration]
+# group: [security]
 
 require duckhog
 
