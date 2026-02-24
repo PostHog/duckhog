@@ -70,10 +70,10 @@ Graduated targets (now part of normal integration suite):
 - [`table_functions_remote.test_slow`](sql/integration/table_functions_remote.test_slow) (RM11, RM12, RM13) — [#34](https://github.com/PostHog/duckhog/issues/34), [#35](https://github.com/PostHog/duckhog/issues/35), [#36](https://github.com/PostHog/duckhog/issues/36)
 - [`insert_default_values_remote.test_slow`](sql/integration/insert_default_values_remote.test_slow) (RM18)
 
-Retired targets (will never be supported on DuckLake):
+Retired targets:
 - RM15 (INSERT RETURNING) — DuckLake does not support RETURNING on any DML verb; chunk-echo was semantically wrong (echoed client input, not server state). Test file kept as `statement error` coverage.
-- RM16 (ON CONFLICT DO NOTHING) — [#38](https://github.com/PostHog/duckhog/issues/38) — DuckLake will never support PK/UNIQUE constraints ([ducklake#66](https://github.com/duckdb/ducklake/issues/66), [ducklake#290](https://github.com/duckdb/ducklake/issues/290))
-- RM17 (ON CONFLICT DO UPDATE) — [#39](https://github.com/PostHog/duckhog/issues/39) — same as RM16
+- RM16 (ON CONFLICT DO NOTHING) — [#38](https://github.com/PostHog/duckhog/issues/38) — duplicate of RM23; both tested `hog:memory` with ON CONFLICT DO NOTHING. Blocked by L2 (constraint metadata not synced to local binder). On DuckLake catalogs, additionally blocked because DuckLake will never support PK/UNIQUE constraints ([ducklake#66](https://github.com/duckdb/ducklake/issues/66), [ducklake#290](https://github.com/duckdb/ducklake/issues/290))
+- RM17 (ON CONFLICT DO UPDATE) — [#39](https://github.com/PostHog/duckhog/issues/39) — same blockers as RM16; RM23 covers the rewrite path for all ON CONFLICT variants
 - RM19 (ON CONFLICT DO NOTHING RETURNING) — [#40](https://github.com/PostHog/duckhog/issues/40) — same as RM16; also blocked by DuckLake lacking RETURNING support
 - RM20 (DEFAULT VALUES + RETURNING) — [#41](https://github.com/PostHog/duckhog/issues/41) — subsumes L1 limitation; RETURNING itself is not supported
 - RM21 (Partial columns + RETURNING) — [#42](https://github.com/PostHog/duckhog/issues/42) — same as RM20

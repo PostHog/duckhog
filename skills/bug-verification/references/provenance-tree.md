@@ -91,3 +91,4 @@ DuckHog issues or test errors:
 | "DuckLake loses rows on large INSERT" | DuckHog chunk boundary bug in `posthog_insert.cpp`. psql inserts all rows correctly. |
 | "BOOLEAN renders as 0/1 through DuckLake" | Test used `query II` (integer format specifier) instead of `query TI`. BOOLEAN works correctly through Arrow Flight. |
 | "INSERT RETURNING broken on DuckLake" | DuckHog code at `posthog_catalog.cpp:309` throws NotImplementedException for partial column RETURNING. Not upstream. |
+| "RM16 retired because DuckLake lacks PK/UNIQUE" | Test used `hog:memory` (which supports PK server-side), not DuckLake. Real blocker was L2 (constraint metadata not synced to local binder). |
