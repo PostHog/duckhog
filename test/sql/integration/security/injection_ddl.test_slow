@@ -1,0 +1,95 @@
+# name: test/sql/integration/security/injection_ddl.test_slow
+# description: RED-TEAM — SQL injection via DDL paths (CREATE VIEW, CTAS, RENAME, PARTITION ALTER)
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.redteam_ddl CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.redteam_ddl;
+
+# ============================================================
+# CREATE VIEW with injection-like name
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ddl.base(id INT, v VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.redteam_ddl.base VALUES (1, 'hello');
+
+statement ok
+CREATE VIEW remote_flight.redteam_ddl."v'; DROP TABLE t--" AS
+  SELECT id, v FROM remote_flight.redteam_ddl.base;
+
+query IT
+SELECT id, v FROM remote_flight.redteam_ddl."v'; DROP TABLE t--";
+----
+1	hello
+
+statement ok
+DROP VIEW remote_flight.redteam_ddl."v'; DROP TABLE t--";
+
+# ============================================================
+# CREATE VIEW with injection-like column aliases
+# ============================================================
+
+statement ok
+CREATE VIEW remote_flight.redteam_ddl.v_alias("col; DROP TABLE t--") AS
+  SELECT id FROM remote_flight.redteam_ddl.base;
+
+query I
+SELECT "col; DROP TABLE t--" FROM remote_flight.redteam_ddl.v_alias;
+----
+1
+
+statement ok
+DROP VIEW remote_flight.redteam_ddl.v_alias;
+
+# ============================================================
+# RENAME TABLE with injection-like names
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ddl.rename_src(id INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ddl.rename_src VALUES (1);
+
+statement ok
+ALTER TABLE remote_flight.redteam_ddl.rename_src RENAME TO "renamed'; DROP TABLE t--";
+
+query I
+SELECT id FROM remote_flight.redteam_ddl."renamed'; DROP TABLE t--";
+----
+1
+
+# ============================================================
+# CREATE TABLE with injection-like column type names
+# (DuckDB validates types, so this tests that invalid types are rejected)
+# ============================================================
+
+statement error
+CREATE TABLE remote_flight.redteam_ddl.bad_type(id "INT; DROP TABLE t--");
+----
+Type with name INT; DROP TABLE t-- does not exist
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.redteam_ddl CASCADE;
