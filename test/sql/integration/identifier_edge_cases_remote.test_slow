@@ -248,13 +248,8 @@ SELECT "this_is_a_very_long_column_name_that_exceeds_typical_limits_aaaa" FROM r
 # Column name with double quotes (tests arrow_stream.cpp Produce() quoting)
 # ============================================================
 
-# BUG: arrow_stream.cpp:Produce() wraps column names in " but does NOT escape
-# internal " characters. A column named col"quote gets sent as:
-#   SELECT "col"quote" FROM ...
-# which is a syntax error on the remote side.
-#
-# This is a DuckHog bug — Produce() needs to escape " as "" inside identifiers.
-# Until fixed, tables with " in column names will fail on SELECT.
+# Fixed (D5): arrow_stream.cpp Produce() now uses QuoteIdent() which
+# properly escapes embedded double-quotes in identifiers.
 
 statement ok
 CREATE TABLE remote_flight.ident_test.dquote("col""quote" INT);
@@ -262,10 +257,10 @@ CREATE TABLE remote_flight.ident_test.dquote("col""quote" INT);
 statement ok
 INSERT INTO remote_flight.ident_test.dquote VALUES (99);
 
-statement error
+query I
 SELECT "col""quote" FROM remote_flight.ident_test.dquote;
 ----
-syntax error
+99
 
 # ============================================================
 # Cleanup
