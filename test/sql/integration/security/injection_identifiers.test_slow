@@ -23,10 +23,9 @@ CREATE SCHEMA remote_flight.redteam_ident;
 
 # ============================================================
 # Double-quote in column name
-# BUG: arrow_stream.cpp uses manual ""+name+"" quoting which doesn't
-# escape embedded double-quotes. SELECT sends "has"dq" instead of
-# "has""dq", causing a parse error on the remote side.
-# Fix: use QuoteIdent() / KeywordHelper::WriteOptionallyQuoted()
+# Previously broken (D5): arrow_stream.cpp used manual ""+name+""
+# quoting which didn't escape embedded double-quotes.
+# Fixed by switching to QuoteIdent() / WriteOptionallyQuoted().
 # ============================================================
 
 statement ok
@@ -35,11 +34,10 @@ CREATE TABLE remote_flight.redteam_ident.dq_col(id INT, "has""dq" INT);
 statement ok
 INSERT INTO remote_flight.redteam_ident.dq_col VALUES (1, 42);
 
-# This should return (1, 42) but fails due to broken identifier quoting
-statement error
+query II
 SELECT id, "has""dq" FROM remote_flight.redteam_ident.dq_col;
 ----
-syntax error
+1	42
 
 # ============================================================
 # Single-quote in column name
