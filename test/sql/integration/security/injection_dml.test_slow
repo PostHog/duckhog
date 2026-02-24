@@ -1,0 +1,147 @@
+# name: test/sql/integration/security/injection_dml.test_slow
+# description: RED-TEAM — SQL injection via DML rewriter paths (DELETE, UPDATE, MERGE)
+# group: [security]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.redteam_dml CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.redteam_dml;
+
+# ============================================================
+# DELETE with injection in WHERE string literal
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_dml.t(id INT, v VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.redteam_dml.t VALUES (1, 'keep'), (2, 'delete_me'), (3, '''; DROP TABLE t--');
+
+statement ok
+DELETE FROM remote_flight.redteam_dml.t WHERE v = '''; DROP TABLE t--';
+
+query I
+SELECT COUNT(*) FROM remote_flight.redteam_dml.t;
+----
+2
+
+# ============================================================
+# UPDATE with injection in SET expression
+# ============================================================
+
+statement ok
+UPDATE remote_flight.redteam_dml.t SET v = '''; DROP TABLE t--' WHERE id = 1;
+
+query IT
+SELECT id, v FROM remote_flight.redteam_dml.t WHERE id = 1;
+----
+1	'; DROP TABLE t--
+
+# ============================================================
+# DELETE with injection-like table name
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_dml."x'; DELETE FROM t--"(id INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_dml."x'; DELETE FROM t--" VALUES (1), (2);
+
+query I
+DELETE FROM remote_flight.redteam_dml."x'; DELETE FROM t--" WHERE id = 1;
+----
+1
+
+query I
+SELECT COUNT(*) FROM remote_flight.redteam_dml."x'; DELETE FROM t--";
+----
+1
+
+# ============================================================
+# UPDATE with injection-like column names
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_dml.inj_cols(id INT, "val; DROP TABLE t--" INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_dml.inj_cols VALUES (1, 10);
+
+statement ok
+UPDATE remote_flight.redteam_dml.inj_cols SET "val; DROP TABLE t--" = 20 WHERE id = 1;
+
+query II
+SELECT id, "val; DROP TABLE t--" FROM remote_flight.redteam_dml.inj_cols WHERE id = 1;
+----
+1	20
+
+# ============================================================
+# MERGE with injection-like identifiers
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_dml.merge_target(id INT, v VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.redteam_dml.merge_target VALUES (1, 'old');
+
+statement ok
+CREATE TABLE remote_flight.redteam_dml.merge_source(id INT, v VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.redteam_dml.merge_source VALUES (1, 'updated'), (2, 'new');
+
+statement ok
+MERGE INTO remote_flight.redteam_dml.merge_target AS t
+USING remote_flight.redteam_dml.merge_source AS s
+ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET v = s.v
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.v);
+
+query IT
+SELECT id, v FROM remote_flight.redteam_dml.merge_target ORDER BY id;
+----
+1	updated
+2	new
+
+# ============================================================
+# MERGE with injection in source data
+# ============================================================
+
+statement ok
+TRUNCATE TABLE remote_flight.redteam_dml.merge_source;
+
+statement ok
+INSERT INTO remote_flight.redteam_dml.merge_source VALUES (3, '''; DROP TABLE t--');
+
+statement ok
+MERGE INTO remote_flight.redteam_dml.merge_target AS t
+USING remote_flight.redteam_dml.merge_source AS s
+ON t.id = s.id
+WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.v);
+
+query IT
+SELECT id, v FROM remote_flight.redteam_dml.merge_target WHERE id = 3;
+----
+3	'; DROP TABLE t--
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.redteam_dml CASCADE;

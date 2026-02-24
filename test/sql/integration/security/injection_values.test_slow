@@ -1,0 +1,164 @@
+# name: test/sql/integration/security/injection_values.test_slow
+# description: RED-TEAM — SQL injection via INSERT/UPDATE values
+# group: [security]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.redteam_vals CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.redteam_vals;
+
+# ============================================================
+# Classic SQL injection in string value
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_vals.t(id INT, v VARCHAR);
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.t VALUES (1, '''; DROP TABLE t--');
+
+query IT
+SELECT id, v FROM remote_flight.redteam_vals.t WHERE id = 1;
+----
+1	'; DROP TABLE t--
+
+# ============================================================
+# Double single-quote escaping
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.t VALUES (2, 'it''s');
+
+query IT
+SELECT id, v FROM remote_flight.redteam_vals.t WHERE id = 2;
+----
+2	it's
+
+# ============================================================
+# Triple single-quotes
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.t VALUES (3, 'it''''s');
+
+query IT
+SELECT id, v FROM remote_flight.redteam_vals.t WHERE id = 3;
+----
+3	it''s
+
+# ============================================================
+# Backslash sequences
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.t VALUES (4, 'back\slash');
+
+query IT
+SELECT id, v FROM remote_flight.redteam_vals.t WHERE id = 4;
+----
+4	back\slash
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.t VALUES (5, 'line1\nline2');
+
+query IT
+SELECT id, v FROM remote_flight.redteam_vals.t WHERE id = 5;
+----
+5	line1\nline2
+
+# ============================================================
+# UNION injection attempt in value
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.t VALUES (6, ''' UNION SELECT * FROM pg_catalog.pg_tables--');
+
+query IT
+SELECT id, v FROM remote_flight.redteam_vals.t WHERE id = 6;
+----
+6	' UNION SELECT * FROM pg_catalog.pg_tables--
+
+# ============================================================
+# Empty string vs NULL
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.t VALUES (7, '');
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.t VALUES (8, NULL);
+
+query IT
+SELECT id, v FROM remote_flight.redteam_vals.t WHERE id = 7;
+----
+7	(empty)
+
+query IT
+SELECT id, v FROM remote_flight.redteam_vals.t WHERE id = 8;
+----
+8	NULL
+
+# ============================================================
+# SQL injection in UPDATE SET value
+# ============================================================
+
+statement ok
+UPDATE remote_flight.redteam_vals.t SET v = '''; DROP TABLE t--' WHERE id = 7;
+
+query IT
+SELECT id, v FROM remote_flight.redteam_vals.t WHERE id = 7;
+----
+7	'; DROP TABLE t--
+
+# ============================================================
+# SQL injection in WHERE clause value
+# ============================================================
+
+query I
+SELECT COUNT(*) FROM remote_flight.redteam_vals.t WHERE v = '''; DROP TABLE t--';
+----
+2
+
+# ============================================================
+# SQL injection in LIST values
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_vals.tl(id INT, l VARCHAR[]);
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.tl VALUES (1, ['''; DROP TABLE t--']);
+
+query IT
+SELECT id, l FROM remote_flight.redteam_vals.tl WHERE id = 1;
+----
+1	['\'; DROP TABLE t--']
+
+statement ok
+INSERT INTO remote_flight.redteam_vals.tl VALUES (2, ['a''b', 'c']);
+
+query IT
+SELECT id, l FROM remote_flight.redteam_vals.tl WHERE id = 2;
+----
+2	['a\'b', c]
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.redteam_vals CASCADE;

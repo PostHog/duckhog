@@ -11,6 +11,7 @@
 #include "catalog/posthog_catalog.hpp"
 #include "catalog/remote_scan.hpp"
 #include "duckdb/common/exception.hpp"
+#include "execution/posthog_sql_utils.hpp"
 
 #include <arrow/c/bridge.h>
 
@@ -47,13 +48,13 @@ unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream
 		// counting.  Project the first catalog column as a cheap placeholder to
 		// get valid batches from the Flight SQL backend.
 		D_ASSERT(!bind_data->column_names.empty());
-		columns_str = "\"" + bind_data->column_names[0] + "\"";
+		columns_str = QuoteIdent(bind_data->column_names[0]);
 	} else {
 		for (size_t i = 0; i < columns.size(); i++) {
 			if (i > 0) {
 				columns_str += ", ";
 			}
-			columns_str += "\"" + columns[i] + "\"";
+			columns_str += QuoteIdent(columns[i]);
 		}
 	}
 	// Build 3-part qualified query: "catalog"."schema"."table" [AT (...)]
@@ -61,9 +62,10 @@ unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream
 	const auto &remote_catalog = bind_data->catalog.GetRemoteCatalog();
 	string table_ref;
 	if (remote_catalog.empty()) {
-		table_ref = "\"" + bind_data->schema_name + "\".\"" + bind_data->table_name + "\"";
+		table_ref = QuoteIdent(bind_data->schema_name) + "." + QuoteIdent(bind_data->table_name);
 	} else {
-		table_ref = "\"" + remote_catalog + "\".\"" + bind_data->schema_name + "\".\"" + bind_data->table_name + "\"";
+		table_ref = QuoteIdent(remote_catalog) + "." + QuoteIdent(bind_data->schema_name) + "." +
+		            QuoteIdent(bind_data->table_name);
 	}
 	// Append AT clause if present (e.g. time travel: AT (VERSION => 1))
 	if (!bind_data->at_clause_sql.empty()) {

@@ -1,0 +1,170 @@
+# name: test/sql/integration/security/injection_identifiers.test_slow
+# description: RED-TEAM — SQL injection via identifier names (table, column, schema)
+# group: [security]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.redteam_ident CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.redteam_ident;
+
+# ============================================================
+# Double-quote in column name
+# Previously broken (D5): arrow_stream.cpp used manual ""+name+""
+# quoting which didn't escape embedded double-quotes.
+# Fixed by switching to QuoteIdent() / WriteOptionallyQuoted().
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ident.dq_col(id INT, "has""dq" INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ident.dq_col VALUES (1, 42);
+
+query II
+SELECT id, "has""dq" FROM remote_flight.redteam_ident.dq_col;
+----
+1	42
+
+# ============================================================
+# Single-quote in column name
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ident.sq_col(id INT, "it's" INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ident.sq_col VALUES (1, 99);
+
+query II
+SELECT id, "it's" FROM remote_flight.redteam_ident.sq_col;
+----
+1	99
+
+# ============================================================
+# SQL injection attempt in table name
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ident."Robert'; DROP TABLE t--"(id INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ident."Robert'; DROP TABLE t--" VALUES (1);
+
+query I
+SELECT id FROM remote_flight.redteam_ident."Robert'; DROP TABLE t--";
+----
+1
+
+statement ok
+DROP TABLE remote_flight.redteam_ident."Robert'; DROP TABLE t--";
+
+# ============================================================
+# SQL injection attempt in column name
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ident.inj_col(id INT, "x; DROP TABLE t--" INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ident.inj_col VALUES (1, 7);
+
+query II
+SELECT id, "x; DROP TABLE t--" FROM remote_flight.redteam_ident.inj_col;
+----
+1	7
+
+# ============================================================
+# Reserved words as identifiers
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ident."select"("from" INT, "where" INT, "order" INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ident."select" VALUES (1, 2, 3);
+
+query III
+SELECT "from", "where", "order" FROM remote_flight.redteam_ident."select";
+----
+1	2	3
+
+# ============================================================
+# Unicode identifiers
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ident."日本語テーブル"(id INT, "колонка" INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ident."日本語テーブル" VALUES (1, 42);
+
+query II
+SELECT id, "колонка" FROM remote_flight.redteam_ident."日本語テーブル";
+----
+1	42
+
+# ============================================================
+# Emoji in identifiers
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ident."🦆"(id INT, "🎯" INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ident."🦆" VALUES (1, 100);
+
+query II
+SELECT id, "🎯" FROM remote_flight.redteam_ident."🦆";
+----
+1	100
+
+# ============================================================
+# Spaces and special chars in identifiers
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ident."my table"(id INT, "my col" INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ident."my table" VALUES (1, 55);
+
+query II
+SELECT id, "my col" FROM remote_flight.redteam_ident."my table";
+----
+1	55
+
+# ============================================================
+# Backslash in identifiers
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.redteam_ident."back\slash"(id INT, "col\n" INT);
+
+statement ok
+INSERT INTO remote_flight.redteam_ident."back\slash" VALUES (1, 77);
+
+query II
+SELECT id, "col\n" FROM remote_flight.redteam_ident."back\slash";
+----
+1	77
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.redteam_ident CASCADE;
