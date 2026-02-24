@@ -161,6 +161,27 @@ Add the bug to `docs/RELATED_BUGS.md` using the established format:
 Include: component, severity, reproduction SQL, root cause analysis,
 verification method, workaround, and test file reference.
 
+## Catalog-Aware Attribution
+
+When retiring roadmap items, closing issues, or documenting limitations, always
+verify **which catalog** the test or reproduction uses. Capabilities differ:
+
+| Catalog | PK/UNIQUE | RETURNING | ON CONFLICT | STRUCT/MAP |
+|---------|-----------|-----------|-------------|------------|
+| `hog:memory` | Yes (server-side) | No | Blocked by L2 | TBD |
+| `hog:ducklake` | Never ([ducklake#66](https://github.com/duckdb/ducklake/issues/66)) | No | Never | TBD |
+
+A feature blocked on `hog:ducklake` may still be viable on `hog:memory` (or vice
+versa). Attribute the blocker to the correct layer:
+
+- **L2 (metadata sync)**: Local binder can't see server-side constraints → blocks ON CONFLICT on *both* catalogs
+- **DuckLake limitation**: Server doesn't support the feature at all → blocks only DuckLake catalogs
+- **Duckgres/Arrow limitation**: Serialization or execution issue → blocks all catalogs
+
+**Example of getting this wrong**: RM16 was retired as "DuckLake will never support
+PK/UNIQUE" but the test used `hog:memory`, where PK/UNIQUE works server-side. The
+real blocker was L2 (constraint metadata not synced to local binder).
+
 ## Common False Positives
 
 These patterns frequently look like bugs but aren't:
