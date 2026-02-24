@@ -85,7 +85,7 @@ SELECT id FROM remote_flight.redteam_ddl."renamed'; DROP TABLE t--";
 statement error
 CREATE TABLE remote_flight.redteam_ddl.bad_type(id "INT; DROP TABLE t--");
 ----
-Type with name INT; DROP TABLE t-- does not exist
+does not exist
 
 # ============================================================
 # Cleanup

@@ -163,6 +163,13 @@ list-issues:
         echo "$unclaimed" | jq -r "$fmt" | column -t -s $'\t'
     fi
 
+# === Security ===
+
+# Run red-team SQL injection audit via Claude Code CLI
+[group('security')]
+red-team:
+    claude --print "Execute the red-team skill from skills/red-team/SKILL.md. Follow all steps. Output the summary report table at the end."
+
 # === Setup ===
 
 # One-time setup: install deps, vcpkg, and submodules

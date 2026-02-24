@@ -26,7 +26,7 @@ Maps each source file to the user inputs it handles and the escaping method used
 | File | Function | User input | Escaping | Notes |
 |------|----------|-----------|----------|-------|
 | `posthog_sql_utils.cpp` | `BuildInsertSQL` | All column values | `Value::ToSQLString()` | Handles strings, numbers, NULL, LIST, etc. |
-| `RenderAtClauseSQL` | Time travel values | VERSION (int), TIMESTAMP (string) | Integer pass-through, string single-quote escaped | Manual `'` → `''` escaping for non-integral types |
+| `posthog_table_entry.cpp` | `RenderAtClauseSQL` | Time travel values | Integer pass-through, string `'` → `''` escaped | Manual escaping for non-integral types |
 
 ## Connection Handling
 
