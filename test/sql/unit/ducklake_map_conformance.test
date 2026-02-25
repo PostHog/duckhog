@@ -1,0 +1,339 @@
+# name: test/sql/unit/ducklake_map_conformance.test
+# description: Verify native DuckLake MAP type behavior that DuckHog integration tests rely on.
+# group: [unit]
+
+#              Conformance tests run DuckDB + DuckLake directly — no DuckHog, no Duckgres.
+#              They document our assumptions about native DuckLake behavior so that when
+#              an integration test fails, we can tell whether DuckLake changed underneath
+#              us or whether our proxy is broken.
+
+require parquet
+
+statement ok
+INSTALL ducklake;
+
+statement ok
+LOAD ducklake;
+
+statement ok
+ATTACH 'ducklake:__TEST_DIR__/ducklake_map_conformance_meta.db' AS dl;
+
+# ============================================================
+# Basic MAP — CREATE + INSERT round-trip
+# ============================================================
+
+statement ok
+CREATE TABLE dl.main.t_basic(id INT, m MAP(VARCHAR, INTEGER));
+
+statement ok
+INSERT INTO dl.main.t_basic VALUES (1, MAP {'a': 1, 'b': 2});
+
+query IT
+SELECT id, m FROM dl.main.t_basic;
+----
+1	{a=1, b=2}
+
+# ============================================================
+# MAP element access
+# ============================================================
+
+query I
+SELECT element_at(m, 'a') FROM dl.main.t_basic WHERE id = 1;
+----
+[1]
+
+query I
+SELECT element_at(m, 'b') FROM dl.main.t_basic WHERE id = 1;
+----
+[2]
+
+# Non-existent key
+query T
+SELECT element_at(m, 'z') FROM dl.main.t_basic WHERE id = 1;
+----
+[]
+
+# ============================================================
+# NULL map, empty map
+# ============================================================
+
+statement ok
+INSERT INTO dl.main.t_basic VALUES (2, NULL);
+
+statement ok
+INSERT INTO dl.main.t_basic VALUES (3, MAP {});
+
+query IT
+SELECT id, m FROM dl.main.t_basic WHERE id = 2;
+----
+2	NULL
+
+query IT
+SELECT id, m FROM dl.main.t_basic WHERE id = 3;
+----
+3	{}
+
+# ============================================================
+# MAP with NULL values
+# ============================================================
+
+statement ok
+INSERT INTO dl.main.t_basic VALUES (4, MAP {'x': NULL, 'y': 10});
+
+query IT
+SELECT id, m FROM dl.main.t_basic WHERE id = 4;
+----
+4	{x=NULL, y=10}
+
+# ============================================================
+# MAP(INTEGER, VARCHAR)
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_int_key;
+
+statement ok
+CREATE TABLE dl.main.t_int_key(id INT, m MAP(INTEGER, VARCHAR));
+
+statement ok
+INSERT INTO dl.main.t_int_key VALUES (1, MAP {1: 'one', 2: 'two'});
+
+query IT
+SELECT id, m FROM dl.main.t_int_key;
+----
+1	{1=one, 2=two}
+
+query T
+SELECT element_at(m, 1) FROM dl.main.t_int_key WHERE id = 1;
+----
+[one]
+
+# ============================================================
+# MAP(VARCHAR, VARCHAR)
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_str_str;
+
+statement ok
+CREATE TABLE dl.main.t_str_str(id INT, m MAP(VARCHAR, VARCHAR));
+
+statement ok
+INSERT INTO dl.main.t_str_str VALUES (1, MAP {'key1': 'val1', 'key2': 'val2'});
+
+query IT
+SELECT id, m FROM dl.main.t_str_str;
+----
+1	{key1=val1, key2=val2}
+
+# ============================================================
+# MAP functions: map_keys, map_values, cardinality
+# ============================================================
+
+query T
+SELECT map_keys(m) FROM dl.main.t_basic WHERE id = 1;
+----
+[a, b]
+
+query T
+SELECT map_values(m) FROM dl.main.t_basic WHERE id = 1;
+----
+[1, 2]
+
+query I
+SELECT cardinality(m) FROM dl.main.t_basic WHERE id = 1;
+----
+2
+
+query I
+SELECT cardinality(m) FROM dl.main.t_basic WHERE id = 3;
+----
+0
+
+# ============================================================
+# Mixed scalar + MAP columns
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_mixed;
+
+statement ok
+CREATE TABLE dl.main.t_mixed(name VARCHAR, attrs MAP(VARCHAR, VARCHAR), score DOUBLE);
+
+statement ok
+INSERT INTO dl.main.t_mixed VALUES
+    ('alice', MAP {'role': 'admin', 'dept': 'eng'}, 95.5),
+    ('bob', MAP {'role': 'user'}, 87.3);
+
+query TTR
+SELECT name, attrs, score FROM dl.main.t_mixed ORDER BY name;
+----
+alice	{role=admin, dept=eng}	95.5
+bob	{role=user}	87.3
+
+# ============================================================
+# UPDATE with MAP values
+# ============================================================
+
+statement ok
+UPDATE dl.main.t_basic SET m = MAP {'c': 3} WHERE id = 1;
+
+query IT
+SELECT id, m FROM dl.main.t_basic WHERE id = 1;
+----
+1	{c=3}
+
+# ============================================================
+# DELETE with MAP condition
+# ============================================================
+
+statement ok
+DELETE FROM dl.main.t_basic WHERE cardinality(m) = 0;
+
+query I
+SELECT COUNT(*) FROM dl.main.t_basic WHERE id = 3;
+----
+0
+
+# ============================================================
+# Multi-row INSERT
+# ============================================================
+
+statement ok
+INSERT INTO dl.main.t_basic VALUES
+    (10, MAP {'p': 100}),
+    (11, MAP {'q': 200, 'r': 300});
+
+query IT
+SELECT id, m FROM dl.main.t_basic WHERE id >= 10 ORDER BY id;
+----
+10	{p=100}
+11	{q=200, r=300}
+
+# ============================================================
+# INSERT...SELECT with MAP
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_map_copy;
+
+statement ok
+CREATE TABLE dl.main.t_map_copy(id INT, m MAP(VARCHAR, INTEGER));
+
+statement ok
+INSERT INTO dl.main.t_map_copy SELECT id, m FROM dl.main.t_basic WHERE id = 1;
+
+query IT
+SELECT id, m FROM dl.main.t_map_copy;
+----
+1	{c=3}
+
+# ============================================================
+# MAP with many entries
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_large_map;
+
+statement ok
+CREATE TABLE dl.main.t_large_map(id INT, m MAP(INTEGER, INTEGER));
+
+statement ok
+INSERT INTO dl.main.t_large_map
+  SELECT 1, map(list(i), list(i * 10)) FROM range(50) t(i);
+
+query I
+SELECT cardinality(m) FROM dl.main.t_large_map WHERE id = 1;
+----
+50
+
+# ============================================================
+# Nested: MAP inside STRUCT
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_struct_map;
+
+statement ok
+CREATE TABLE dl.main.t_struct_map(id INT, s STRUCT(label VARCHAR, props MAP(VARCHAR, INTEGER)));
+
+statement ok
+INSERT INTO dl.main.t_struct_map VALUES (1, {'label': 'item1', 'props': MAP {'weight': 10, 'height': 20}});
+
+query IT
+SELECT id, s FROM dl.main.t_struct_map;
+----
+1	{'label': item1, 'props': {weight=10, height=20}}
+
+query T
+SELECT s.label FROM dl.main.t_struct_map WHERE id = 1;
+----
+item1
+
+# ============================================================
+# Nested: LIST of MAPs
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_list_map;
+
+statement ok
+CREATE TABLE dl.main.t_list_map(id INT, ms MAP(VARCHAR, INTEGER)[]);
+
+statement ok
+INSERT INTO dl.main.t_list_map VALUES (1, [MAP {'a': 1}, MAP {'b': 2}]);
+
+query IT
+SELECT id, ms FROM dl.main.t_list_map;
+----
+1	[{a=1}, {b=2}]
+
+query I
+SELECT len(ms) FROM dl.main.t_list_map WHERE id = 1;
+----
+2
+
+# ============================================================
+# MAP equality in WHERE
+# ============================================================
+
+query IT
+SELECT id, m FROM dl.main.t_basic WHERE m = MAP {'c': 3};
+----
+1	{c=3}
+
+query I
+SELECT COUNT(*) FROM dl.main.t_basic WHERE m = MAP {'nonexistent': 0};
+----
+0
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_list_map;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_struct_map;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_large_map;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_map_copy;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_mixed;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_str_str;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_int_key;
+
+statement ok
+DROP TABLE IF EXISTS dl.main.t_basic;
+
+statement ok
+DETACH dl;

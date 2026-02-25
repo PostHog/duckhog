@@ -265,6 +265,252 @@ TEST_CASE("Insert SQL builder - TIMESTAMP", "[duckhog][insert-sql]") {
 }
 
 // ============================================================
+// LIST type coverage
+// ============================================================
+
+TEST_CASE("Insert SQL builder - LIST of integers", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::INTEGER)},
+	          {Value::LIST(LogicalType::INTEGER, {Value::INTEGER(1), Value::INTEGER(2), Value::INTEGER(3)})});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES ([1, 2, 3]);");
+}
+
+TEST_CASE("Insert SQL builder - empty LIST", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::INTEGER)}, {Value::LIST(LogicalType::INTEGER, {})});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES ([]);");
+}
+
+TEST_CASE("Insert SQL builder - LIST with NULLs", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::INTEGER)},
+	          {Value::LIST(LogicalType::INTEGER, {Value::INTEGER(1), Value(LogicalType::INTEGER), Value::INTEGER(3)})});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES ([1, NULL, 3]);");
+}
+
+TEST_CASE("Insert SQL builder - LIST of VARCHAR", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::VARCHAR)},
+	          {Value::LIST(LogicalType::VARCHAR, {Value("a"), Value("b")})});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES (['a', 'b']);");
+}
+
+TEST_CASE("Insert SQL builder - NULL LIST value", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	InitChunk(chunk, {LogicalType::LIST(LogicalType::INTEGER)}, {Value(LogicalType::LIST(LogicalType::INTEGER))});
+	auto sql = BuildInsertSQL(TABLE, {"l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (l) VALUES (NULL);");
+}
+
+TEST_CASE("Insert SQL builder - multi-row with LIST", "[duckhog][insert-sql]") {
+	DataChunk chunk;
+	auto list_type = LogicalType::LIST(LogicalType::INTEGER);
+	InitChunkMultiRow(chunk, {LogicalType::INTEGER, list_type},
+	                  {{Value::INTEGER(1), Value::LIST(LogicalType::INTEGER, {Value::INTEGER(10), Value::INTEGER(20)})},
+	                   {Value::INTEGER(2), Value::LIST(LogicalType::INTEGER, {Value::INTEGER(30)})}});
+	auto sql = BuildInsertSQL(TABLE, {"i", "l"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (i, l) VALUES (1, [10, 20]), (2, [30]);");
+}
+
+// ============================================================
+// STRUCT type coverage
+// ============================================================
+
+TEST_CASE("Insert SQL builder - basic STRUCT", "[duckhog][insert-sql]") {
+	auto struct_type = LogicalType::STRUCT({{"i", LogicalType::INTEGER}, {"j", LogicalType::INTEGER}});
+	DataChunk chunk;
+	InitChunk(chunk, {struct_type}, {Value::STRUCT({{"i", Value::INTEGER(10)}, {"j", Value::INTEGER(20)}})});
+	auto sql = BuildInsertSQL(TABLE, {"s"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (s) VALUES ({'i': 10, 'j': 20});");
+}
+
+TEST_CASE("Insert SQL builder - STRUCT with VARCHAR fields", "[duckhog][insert-sql]") {
+	auto struct_type = LogicalType::STRUCT({{"name", LogicalType::VARCHAR}, {"city", LogicalType::VARCHAR}});
+	DataChunk chunk;
+	InitChunk(chunk, {struct_type}, {Value::STRUCT({{"name", Value("alice")}, {"city", Value("NYC")}})});
+	auto sql = BuildInsertSQL(TABLE, {"s"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (s) VALUES ({'name': 'alice', 'city': 'NYC'});");
+}
+
+TEST_CASE("Insert SQL builder - NULL STRUCT", "[duckhog][insert-sql]") {
+	auto struct_type = LogicalType::STRUCT({{"i", LogicalType::INTEGER}, {"j", LogicalType::INTEGER}});
+	DataChunk chunk;
+	InitChunk(chunk, {struct_type}, {Value(struct_type)});
+	auto sql = BuildInsertSQL(TABLE, {"s"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (s) VALUES (NULL);");
+}
+
+TEST_CASE("Insert SQL builder - STRUCT with NULL fields", "[duckhog][insert-sql]") {
+	auto struct_type = LogicalType::STRUCT({{"i", LogicalType::INTEGER}, {"j", LogicalType::INTEGER}});
+	DataChunk chunk;
+	InitChunk(chunk, {struct_type}, {Value::STRUCT({{"i", Value(LogicalType::INTEGER)}, {"j", Value::INTEGER(42)}})});
+	auto sql = BuildInsertSQL(TABLE, {"s"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (s) VALUES ({'i': NULL, 'j': 42});");
+}
+
+TEST_CASE("Insert SQL builder - nested STRUCT", "[duckhog][insert-sql]") {
+	auto inner_type = LogicalType::STRUCT({{"x", LogicalType::INTEGER}, {"y", LogicalType::INTEGER}});
+	auto outer_type = LogicalType::STRUCT({{"inner_s", inner_type}, {"label", LogicalType::VARCHAR}});
+	DataChunk chunk;
+	InitChunk(chunk, {outer_type},
+	          {Value::STRUCT({{"inner_s", Value::STRUCT({{"x", Value::INTEGER(1)}, {"y", Value::INTEGER(2)}})},
+	                          {"label", Value("origin")}})});
+	auto sql = BuildInsertSQL(TABLE, {"s"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (s) VALUES ({'inner_s': {'x': 1, 'y': 2}, 'label': 'origin'});");
+}
+
+TEST_CASE("Insert SQL builder - STRUCT with LIST field", "[duckhog][insert-sql]") {
+	auto struct_type =
+	    LogicalType::STRUCT({{"tags", LogicalType::LIST(LogicalType::VARCHAR)}, {"count", LogicalType::INTEGER}});
+	DataChunk chunk;
+	InitChunk(chunk, {struct_type},
+	          {Value::STRUCT({{"tags", Value::LIST(LogicalType::VARCHAR, {Value("a"), Value("b")})},
+	                          {"count", Value::INTEGER(2)}})});
+	auto sql = BuildInsertSQL(TABLE, {"s"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (s) VALUES ({'tags': ['a', 'b'], 'count': 2});");
+}
+
+TEST_CASE("Insert SQL builder - STRUCT with single-quote in field name", "[duckhog][insert-sql]") {
+	auto struct_type = LogicalType::STRUCT({{"it's", LogicalType::INTEGER}});
+	DataChunk chunk;
+	InitChunk(chunk, {struct_type}, {Value::STRUCT({{"it's", Value::INTEGER(1)}})});
+	auto sql = BuildInsertSQL(TABLE, {"s"}, chunk);
+	// Field names are single-quoted in struct literals
+	REQUIRE(sql.find("'it''s': 1") != string::npos);
+}
+
+// ============================================================
+// MAP type coverage
+// ============================================================
+
+TEST_CASE("Insert SQL builder - basic MAP", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	DataChunk chunk;
+	InitChunk(chunk, {map_type},
+	          {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("a")}, {Value::INTEGER(1)})});
+	auto sql = BuildInsertSQL(TABLE, {"m"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (m) VALUES (MAP {'a': 1});");
+}
+
+TEST_CASE("Insert SQL builder - MAP with multiple entries", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	DataChunk chunk;
+	InitChunk(chunk, {map_type},
+	          {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("a"), Value("b")},
+	                      {Value::INTEGER(1), Value::INTEGER(2)})});
+	auto sql = BuildInsertSQL(TABLE, {"m"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (m) VALUES (MAP {'a': 1, 'b': 2});");
+}
+
+TEST_CASE("Insert SQL builder - empty MAP", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	DataChunk chunk;
+	InitChunk(chunk, {map_type}, {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {}, {})});
+	auto sql = BuildInsertSQL(TABLE, {"m"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (m) VALUES (MAP {});");
+}
+
+TEST_CASE("Insert SQL builder - NULL MAP", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	DataChunk chunk;
+	InitChunk(chunk, {map_type}, {Value(map_type)});
+	auto sql = BuildInsertSQL(TABLE, {"m"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (m) VALUES (NULL);");
+}
+
+TEST_CASE("Insert SQL builder - MAP with NULL value", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	DataChunk chunk;
+	InitChunk(chunk, {map_type},
+	          {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("x")}, {Value(LogicalType::INTEGER)})});
+	auto sql = BuildInsertSQL(TABLE, {"m"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (m) VALUES (MAP {'x': NULL});");
+}
+
+TEST_CASE("Insert SQL builder - MAP with integer keys", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::INTEGER, LogicalType::VARCHAR);
+	DataChunk chunk;
+	InitChunk(chunk, {map_type},
+	          {Value::MAP(LogicalType::INTEGER, LogicalType::VARCHAR, {Value::INTEGER(1), Value::INTEGER(2)},
+	                      {Value("one"), Value("two")})});
+	auto sql = BuildInsertSQL(TABLE, {"m"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (m) VALUES (MAP {1: 'one', 2: 'two'});");
+}
+
+TEST_CASE("Insert SQL builder - MAP inside STRUCT", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	auto struct_type = LogicalType::STRUCT({{"label", LogicalType::VARCHAR}, {"props", map_type}});
+	DataChunk chunk;
+	InitChunk(chunk, {struct_type},
+	          {Value::STRUCT({{"label", Value("item1")},
+	                          {"props", Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("weight")},
+	                                               {Value::INTEGER(10)})}})});
+	auto sql = BuildInsertSQL(TABLE, {"s"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (s) VALUES ({'label': 'item1', 'props': MAP {'weight': 10}});");
+}
+
+TEST_CASE("Insert SQL builder - LIST of STRUCTs", "[duckhog][insert-sql]") {
+	auto struct_type = LogicalType::STRUCT({{"name", LogicalType::VARCHAR}, {"qty", LogicalType::INTEGER}});
+	auto list_type = LogicalType::LIST(struct_type);
+	DataChunk chunk;
+	InitChunk(chunk, {list_type},
+	          {Value::LIST(struct_type, {Value::STRUCT({{"name", Value("apple")}, {"qty", Value::INTEGER(5)}}),
+	                                     Value::STRUCT({{"name", Value("banana")}, {"qty", Value::INTEGER(3)}})})});
+	auto sql = BuildInsertSQL(TABLE, {"items"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (items) VALUES ([{'name': 'apple', 'qty': 5}, {'name': 'banana', "
+	               "'qty': 3}]);");
+}
+
+TEST_CASE("Insert SQL builder - LIST of MAPs", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	auto list_type = LogicalType::LIST(map_type);
+	DataChunk chunk;
+	InitChunk(
+	    chunk, {list_type},
+	    {Value::LIST(map_type,
+	                 {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("a")}, {Value::INTEGER(1)}),
+	                  Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("b")}, {Value::INTEGER(2)})})});
+	auto sql = BuildInsertSQL(TABLE, {"ms"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (ms) VALUES ([MAP {'a': 1}, MAP {'b': 2}]);");
+}
+
+// ============================================================
+// Nested type edge cases — SQL injection / quoting
+// ============================================================
+
+TEST_CASE("Insert SQL builder - MAP with single-quote in VARCHAR key", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	DataChunk chunk;
+	InitChunk(chunk, {map_type},
+	          {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("it's")}, {Value::INTEGER(1)})});
+	auto sql = BuildInsertSQL(TABLE, {"m"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (m) VALUES (MAP {'it''s': 1});");
+}
+
+TEST_CASE("Insert SQL builder - STRUCT with single-quote in VARCHAR value", "[duckhog][insert-sql]") {
+	auto struct_type = LogicalType::STRUCT({{"name", LogicalType::VARCHAR}});
+	DataChunk chunk;
+	InitChunk(chunk, {struct_type}, {Value::STRUCT({{"name", Value("O'Reilly")}})});
+	auto sql = BuildInsertSQL(TABLE, {"s"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (s) VALUES ({'name': 'O''Reilly'});");
+}
+
+TEST_CASE("Insert SQL builder - MAP with SQL injection in key", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	DataChunk chunk;
+	InitChunk(
+	    chunk, {map_type},
+	    {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("'; DROP TABLE t; --")}, {Value::INTEGER(1)})});
+	auto sql = BuildInsertSQL(TABLE, {"m"}, chunk);
+	// Key must be safely quoted
+	REQUIRE(sql.find("'''; DROP TABLE t; --'") != string::npos);
+}
+
+// ============================================================
 // Validation / error cases
 // ============================================================
 

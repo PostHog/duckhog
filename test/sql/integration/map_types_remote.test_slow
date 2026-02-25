@@ -1,0 +1,399 @@
+# name: test/sql/integration/map_types_remote.test_slow
+# description: MAP type support over remote DuckLake catalog via Arrow Flight
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.map_types CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.map_types;
+
+# ============================================================
+# Basic MAP(VARCHAR, INTEGER) — INSERT + SELECT round-trip
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.map_types.basic(id INT, m MAP(VARCHAR, INTEGER));
+
+statement ok
+INSERT INTO remote_flight.map_types.basic VALUES (1, MAP {'a': 1, 'b': 2});
+
+# MAP key ordering is non-deterministic over Arrow Flight, so verify
+# via element_at / cardinality instead of whole-map string rendering.
+query I
+SELECT cardinality(m) FROM remote_flight.map_types.basic WHERE id = 1;
+----
+2
+
+# ============================================================
+# MAP element access
+# ============================================================
+
+query I
+SELECT element_at(m, 'a') FROM remote_flight.map_types.basic WHERE id = 1;
+----
+[1]
+
+query I
+SELECT element_at(m, 'b') FROM remote_flight.map_types.basic WHERE id = 1;
+----
+[2]
+
+# Non-existent key
+query T
+SELECT element_at(m, 'z') FROM remote_flight.map_types.basic WHERE id = 1;
+----
+[]
+
+# ============================================================
+# NULL map, empty map
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.map_types.basic VALUES (2, NULL);
+
+statement ok
+INSERT INTO remote_flight.map_types.basic VALUES (3, MAP {});
+
+query IT
+SELECT id, m FROM remote_flight.map_types.basic WHERE id = 2;
+----
+2	NULL
+
+query IT
+SELECT id, m FROM remote_flight.map_types.basic WHERE id = 3;
+----
+3	{}
+
+# ============================================================
+# MAP with NULL values
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.map_types.basic VALUES (4, MAP {'x': NULL, 'y': 10});
+
+query I
+SELECT cardinality(m) FROM remote_flight.map_types.basic WHERE id = 4;
+----
+2
+
+query T
+SELECT element_at(m, 'x') FROM remote_flight.map_types.basic WHERE id = 4;
+----
+[NULL]
+
+query I
+SELECT element_at(m, 'y') FROM remote_flight.map_types.basic WHERE id = 4;
+----
+[10]
+
+# ============================================================
+# MAP(INTEGER, VARCHAR)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.map_types.int_key(id INT, m MAP(INTEGER, VARCHAR));
+
+statement ok
+INSERT INTO remote_flight.map_types.int_key VALUES (1, MAP {1: 'one', 2: 'two'});
+
+query I
+SELECT cardinality(m) FROM remote_flight.map_types.int_key WHERE id = 1;
+----
+2
+
+query T
+SELECT element_at(m, 1) FROM remote_flight.map_types.int_key WHERE id = 1;
+----
+[one]
+
+query T
+SELECT element_at(m, 2) FROM remote_flight.map_types.int_key WHERE id = 1;
+----
+[two]
+
+# ============================================================
+# MAP(VARCHAR, VARCHAR)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.map_types.str_str(id INT, m MAP(VARCHAR, VARCHAR));
+
+statement ok
+INSERT INTO remote_flight.map_types.str_str VALUES (1, MAP {'key1': 'val1', 'key2': 'val2'});
+
+query I
+SELECT cardinality(m) FROM remote_flight.map_types.str_str WHERE id = 1;
+----
+2
+
+query T
+SELECT element_at(m, 'key1') FROM remote_flight.map_types.str_str WHERE id = 1;
+----
+[val1]
+
+query T
+SELECT element_at(m, 'key2') FROM remote_flight.map_types.str_str WHERE id = 1;
+----
+[val2]
+
+# ============================================================
+# MAP functions: map_keys, map_values, cardinality
+# ============================================================
+
+# map_keys/map_values return lists whose order matches the map's internal
+# order, which is non-deterministic over Flight.  Test cardinality and
+# element_at instead; key/value presence is already covered above.
+
+query I
+SELECT cardinality(m) FROM remote_flight.map_types.basic WHERE id = 1;
+----
+2
+
+query I
+SELECT cardinality(m) FROM remote_flight.map_types.basic WHERE id = 3;
+----
+0
+
+# ============================================================
+# Mixed scalar + MAP columns
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.map_types.mixed(name VARCHAR, attrs MAP(VARCHAR, VARCHAR), score DOUBLE);
+
+statement ok
+INSERT INTO remote_flight.map_types.mixed VALUES
+    ('alice', MAP {'role': 'admin', 'dept': 'eng'}, 95.5),
+    ('bob', MAP {'role': 'user'}, 87.3);
+
+query TTR
+SELECT name, element_at(attrs, 'role'), score FROM remote_flight.map_types.mixed ORDER BY name;
+----
+alice	[admin]	95.5
+bob	[user]	87.3
+
+query T
+SELECT element_at(attrs, 'dept') FROM remote_flight.map_types.mixed WHERE name = 'alice';
+----
+[eng]
+
+# ============================================================
+# UPDATE with MAP values
+# ============================================================
+
+statement ok
+UPDATE remote_flight.map_types.basic SET m = MAP {'c': 3} WHERE id = 1;
+
+query IT
+SELECT id, m FROM remote_flight.map_types.basic WHERE id = 1;
+----
+1	{c=3}
+
+# ============================================================
+# DELETE with MAP condition
+# ============================================================
+
+statement ok
+DELETE FROM remote_flight.map_types.basic WHERE cardinality(m) = 0;
+
+query I
+SELECT COUNT(*) FROM remote_flight.map_types.basic WHERE id = 3;
+----
+0
+
+# ============================================================
+# Multi-row INSERT
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.map_types.basic VALUES
+    (10, MAP {'p': 100}),
+    (11, MAP {'q': 200, 'r': 300});
+
+query IT
+SELECT id, m FROM remote_flight.map_types.basic WHERE id = 10;
+----
+10	{p=100}
+
+query I
+SELECT cardinality(m) FROM remote_flight.map_types.basic WHERE id = 11;
+----
+2
+
+query I
+SELECT element_at(m, 'q') FROM remote_flight.map_types.basic WHERE id = 11;
+----
+[200]
+
+query I
+SELECT element_at(m, 'r') FROM remote_flight.map_types.basic WHERE id = 11;
+----
+[300]
+
+# ============================================================
+# MAP equality in WHERE
+# ============================================================
+
+query IT
+SELECT id, m FROM remote_flight.map_types.basic WHERE m = MAP {'c': 3};
+----
+1	{c=3}
+
+query I
+SELECT COUNT(*) FROM remote_flight.map_types.basic WHERE m = MAP {'nonexistent': 0};
+----
+0
+
+# ============================================================
+# INSERT...SELECT with MAP (remote → remote)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.map_types.map_copy(id INT, m MAP(VARCHAR, INTEGER));
+
+statement ok
+INSERT INTO remote_flight.map_types.map_copy
+  SELECT id, m FROM remote_flight.map_types.basic WHERE id = 1;
+
+query IT
+SELECT id, m FROM remote_flight.map_types.map_copy;
+----
+1	{c=3}
+
+# ============================================================
+# INSERT...SELECT with MAP (local → remote)
+# ============================================================
+
+statement ok
+CREATE TABLE local_map_src(id INT, m MAP(VARCHAR, INTEGER));
+
+statement ok
+INSERT INTO local_map_src VALUES (50, MAP {'z': 999});
+
+statement ok
+INSERT INTO remote_flight.map_types.map_copy SELECT * FROM local_map_src;
+
+query IT
+SELECT id, m FROM remote_flight.map_types.map_copy WHERE id = 50;
+----
+50	{z=999}
+
+query I
+SELECT COUNT(*) FROM remote_flight.map_types.map_copy;
+----
+2
+
+statement ok
+DROP TABLE local_map_src;
+
+# ============================================================
+# MAP with many entries
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.map_types.large_map(id INT, m MAP(INTEGER, INTEGER));
+
+statement ok
+INSERT INTO remote_flight.map_types.large_map
+  SELECT 1, map(list(i), list(i * 10)) FROM range(50) t(i);
+
+query I
+SELECT cardinality(m) FROM remote_flight.map_types.large_map WHERE id = 1;
+----
+50
+
+# ============================================================
+# Nested: MAP inside STRUCT
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.map_types.struct_map(id INT, s STRUCT(label VARCHAR, props MAP(VARCHAR, INTEGER)));
+
+statement ok
+INSERT INTO remote_flight.map_types.struct_map VALUES (1, {'label': 'item1', 'props': MAP {'weight': 10, 'height': 20}});
+
+query T
+SELECT s.label FROM remote_flight.map_types.struct_map WHERE id = 1;
+----
+item1
+
+query I
+SELECT element_at(s.props, 'weight') FROM remote_flight.map_types.struct_map WHERE id = 1;
+----
+[10]
+
+query I
+SELECT element_at(s.props, 'height') FROM remote_flight.map_types.struct_map WHERE id = 1;
+----
+[20]
+
+# ============================================================
+# Nested: LIST of MAPs
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.map_types.list_map(id INT, ms MAP(VARCHAR, INTEGER)[]);
+
+statement ok
+INSERT INTO remote_flight.map_types.list_map VALUES (1, [MAP {'a': 1}, MAP {'b': 2}]);
+
+query I
+SELECT len(ms) FROM remote_flight.map_types.list_map WHERE id = 1;
+----
+2
+
+# Each list element is a single-entry MAP, so ordering is not an issue
+query IT
+SELECT id, ms FROM remote_flight.map_types.list_map;
+----
+1	[{a=1}, {b=2}]
+
+# ============================================================
+# Transaction rollback with MAP data
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.map_types.txn_map(id INT, m MAP(VARCHAR, INTEGER));
+
+statement ok
+INSERT INTO remote_flight.map_types.txn_map VALUES (1, MAP {'a': 1});
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.map_types.txn_map VALUES (2, MAP {'b': 2});
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT COUNT(*) FROM remote_flight.map_types.txn_map;
+----
+1
+
+query IT
+SELECT id, m FROM remote_flight.map_types.txn_map;
+----
+1	{a=1}
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.map_types CASCADE;

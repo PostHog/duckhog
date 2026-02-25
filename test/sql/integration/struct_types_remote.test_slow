@@ -1,0 +1,290 @@
+# name: test/sql/integration/struct_types_remote.test_slow
+# description: STRUCT type support over remote DuckLake catalog via Arrow Flight
+# group: [integration]
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.struct_types CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.struct_types;
+
+# ============================================================
+# Basic STRUCT — INSERT + SELECT round-trip
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.struct_types.basic(id INT, s STRUCT(i INTEGER, j INTEGER));
+
+statement ok
+INSERT INTO remote_flight.struct_types.basic VALUES
+    (1, {'i': 10, 'j': 20}),
+    (2, {'i': 30, 'j': 40}),
+    (3, NULL);
+
+# Whole-column SELECT — values must NOT be zeroed (apache/arrow#32276)
+query IT
+SELECT id, s FROM remote_flight.struct_types.basic ORDER BY id;
+----
+1	{'i': 10, 'j': 20}
+2	{'i': 30, 'j': 40}
+3	NULL
+
+# Field access
+query III
+SELECT id, s.i, s.j FROM remote_flight.struct_types.basic ORDER BY id;
+----
+1	10	20
+2	30	40
+3	NULL	NULL
+
+# ============================================================
+# STRUCT with NULL fields (not NULL struct)
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.struct_types.basic VALUES (4, {'i': NULL, 'j': 42});
+
+query III
+SELECT id, s.i, s.j FROM remote_flight.struct_types.basic WHERE id = 4;
+----
+4	NULL	42
+
+# ============================================================
+# STRUCT with VARCHAR fields
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.struct_types.varchar_struct(id INT, s STRUCT(name VARCHAR, city VARCHAR));
+
+statement ok
+INSERT INTO remote_flight.struct_types.varchar_struct VALUES (1, {'name': 'alice', 'city': 'NYC'});
+
+query IT
+SELECT id, s FROM remote_flight.struct_types.varchar_struct;
+----
+1	{'name': alice, 'city': NYC}
+
+query ITT
+SELECT id, s.name, s.city FROM remote_flight.struct_types.varchar_struct;
+----
+1	alice	NYC
+
+# ============================================================
+# Mixed scalar + STRUCT columns
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.struct_types.mixed(
+    name VARCHAR,
+    info STRUCT(age INTEGER, city VARCHAR),
+    score DOUBLE
+);
+
+statement ok
+INSERT INTO remote_flight.struct_types.mixed VALUES
+    ('alice', {'age': 30, 'city': 'NYC'}, 95.5),
+    ('bob', {'age': 25, 'city': 'LA'}, 87.3);
+
+query TITR
+SELECT name, info.age, info.city, score FROM remote_flight.struct_types.mixed ORDER BY name;
+----
+alice	30	NYC	95.5
+bob	25	LA	87.3
+
+# ============================================================
+# UPDATE with STRUCT values
+# ============================================================
+
+statement ok
+UPDATE remote_flight.struct_types.basic SET s = {'i': 99, 'j': 100} WHERE id = 1;
+
+query IT
+SELECT id, s FROM remote_flight.struct_types.basic WHERE id = 1;
+----
+1	{'i': 99, 'j': 100}
+
+# ============================================================
+# DELETE with STRUCT field condition
+# ============================================================
+
+statement ok
+DELETE FROM remote_flight.struct_types.basic WHERE s.j = 42;
+
+query I
+SELECT COUNT(*) FROM remote_flight.struct_types.basic WHERE id = 4;
+----
+0
+
+# ============================================================
+# Nested STRUCT (STRUCT inside STRUCT)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.struct_types.nested(id INT, s STRUCT(inner_s STRUCT(x INTEGER, y INTEGER), label VARCHAR));
+
+statement ok
+INSERT INTO remote_flight.struct_types.nested VALUES (1, {'inner_s': {'x': 1, 'y': 2}, 'label': 'origin'});
+
+query IT
+SELECT id, s FROM remote_flight.struct_types.nested;
+----
+1	{'inner_s': {'x': 1, 'y': 2}, 'label': origin}
+
+query II
+SELECT s.inner_s.x, s.inner_s.y FROM remote_flight.struct_types.nested WHERE id = 1;
+----
+1	2
+
+# ============================================================
+# STRUCT with LIST field
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.struct_types.struct_list(id INT, s STRUCT(tags VARCHAR[], count INTEGER));
+
+statement ok
+INSERT INTO remote_flight.struct_types.struct_list VALUES (1, {'tags': ['a', 'b', 'c'], 'count': 3});
+
+query IT
+SELECT id, s FROM remote_flight.struct_types.struct_list;
+----
+1	{'tags': [a, b, c], 'count': 3}
+
+query I
+SELECT s.count FROM remote_flight.struct_types.struct_list WHERE id = 1;
+----
+3
+
+# ============================================================
+# LIST of STRUCTs
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.struct_types.list_struct(id INT, items STRUCT(name VARCHAR, qty INTEGER)[]);
+
+statement ok
+INSERT INTO remote_flight.struct_types.list_struct VALUES (1, [{'name': 'apple', 'qty': 5}, {'name': 'banana', 'qty': 3}]);
+
+query IT
+SELECT id, items FROM remote_flight.struct_types.list_struct;
+----
+1	[{'name': apple, 'qty': 5}, {'name': banana, 'qty': 3}]
+
+query I
+SELECT len(items) FROM remote_flight.struct_types.list_struct WHERE id = 1;
+----
+2
+
+# ============================================================
+# Multi-row INSERT
+# ============================================================
+
+statement ok
+INSERT INTO remote_flight.struct_types.basic VALUES (10, {'i': 1, 'j': 1}), (11, {'i': 2, 'j': 2});
+
+query IT
+SELECT id, s FROM remote_flight.struct_types.basic WHERE id >= 10 ORDER BY id;
+----
+10	{'i': 1, 'j': 1}
+11	{'i': 2, 'j': 2}
+
+# ============================================================
+# STRUCT equality in WHERE
+# ============================================================
+
+query IT
+SELECT id, s FROM remote_flight.struct_types.basic WHERE s = {'i': 99, 'j': 100};
+----
+1	{'i': 99, 'j': 100}
+
+query I
+SELECT COUNT(*) FROM remote_flight.struct_types.basic WHERE s = {'i': 0, 'j': 0};
+----
+0
+
+# ============================================================
+# INSERT...SELECT with STRUCT (remote → remote)
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.struct_types.struct_copy(id INT, s STRUCT(i INTEGER, j INTEGER));
+
+statement ok
+INSERT INTO remote_flight.struct_types.struct_copy
+  SELECT id, s FROM remote_flight.struct_types.basic WHERE id = 1;
+
+query IT
+SELECT id, s FROM remote_flight.struct_types.struct_copy;
+----
+1	{'i': 99, 'j': 100}
+
+# ============================================================
+# INSERT...SELECT with STRUCT (local → remote)
+# ============================================================
+
+statement ok
+CREATE TABLE local_struct_src(id INT, s STRUCT(i INTEGER, j INTEGER));
+
+statement ok
+INSERT INTO local_struct_src VALUES (50, {'i': 500, 'j': 600});
+
+statement ok
+INSERT INTO remote_flight.struct_types.struct_copy SELECT * FROM local_struct_src;
+
+query IT
+SELECT id, s FROM remote_flight.struct_types.struct_copy ORDER BY id;
+----
+1	{'i': 99, 'j': 100}
+50	{'i': 500, 'j': 600}
+
+statement ok
+DROP TABLE local_struct_src;
+
+# ============================================================
+# Transaction rollback with STRUCT data
+# ============================================================
+
+statement ok
+CREATE TABLE remote_flight.struct_types.txn_struct(id INT, s STRUCT(i INTEGER, j INTEGER));
+
+statement ok
+INSERT INTO remote_flight.struct_types.txn_struct VALUES (1, {'i': 10, 'j': 20});
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO remote_flight.struct_types.txn_struct VALUES (2, {'i': 30, 'j': 40});
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT COUNT(*) FROM remote_flight.struct_types.txn_struct;
+----
+1
+
+query IT
+SELECT id, s FROM remote_flight.struct_types.txn_struct;
+----
+1	{'i': 10, 'j': 20}
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.struct_types CASCADE;
