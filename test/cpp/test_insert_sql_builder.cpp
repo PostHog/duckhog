@@ -489,9 +489,9 @@ TEST_CASE("Insert SQL builder - STRUCT with single-quote in VARCHAR value", "[du
 TEST_CASE("Insert SQL builder - MAP with SQL injection in key", "[duckhog][insert-sql]") {
 	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
 	DataChunk chunk;
-	InitChunk(chunk, {map_type},
-	          {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("'; DROP TABLE t; --")},
-	                      {Value::INTEGER(1)})});
+	InitChunk(
+	    chunk, {map_type},
+	    {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("'; DROP TABLE t; --")}, {Value::INTEGER(1)})});
 	auto sql = BuildInsertSQL(TABLE, {"m"}, chunk);
 	// Key must be safely quoted
 	REQUIRE(sql.find("'''; DROP TABLE t; --'") != string::npos);
