@@ -465,6 +465,19 @@ TEST_CASE("Insert SQL builder - LIST of STRUCTs", "[duckhog][insert-sql]") {
 	               "'qty': 3}]);");
 }
 
+TEST_CASE("Insert SQL builder - LIST of MAPs", "[duckhog][insert-sql]") {
+	auto map_type = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::INTEGER);
+	auto list_type = LogicalType::LIST(map_type);
+	DataChunk chunk;
+	InitChunk(
+	    chunk, {list_type},
+	    {Value::LIST(map_type,
+	                 {Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("a")}, {Value::INTEGER(1)}),
+	                  Value::MAP(LogicalType::VARCHAR, LogicalType::INTEGER, {Value("b")}, {Value::INTEGER(2)})})});
+	auto sql = BuildInsertSQL(TABLE, {"ms"}, chunk);
+	REQUIRE(sql == "INSERT INTO ducklake.myschema.t (ms) VALUES ([MAP {'a': 1}, MAP {'b': 2}]);");
+}
+
 // ============================================================
 // Nested type edge cases — SQL injection / quoting
 // ============================================================

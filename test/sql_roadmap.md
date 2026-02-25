@@ -68,7 +68,7 @@ Graduated targets (now part of normal integration suite):
 - [`time_travel_remote.test_slow`](sql/integration/time_travel_remote.test_slow) (RM10) — [#33](https://github.com/PostHog/duckhog/issues/33)
 - [`table_functions_remote.test_slow`](sql/integration/table_functions_remote.test_slow) (RM11, RM12, RM13) — [#34](https://github.com/PostHog/duckhog/issues/34), [#35](https://github.com/PostHog/duckhog/issues/35), [#36](https://github.com/PostHog/duckhog/issues/36)
 - [`insert_default_values_remote.test_slow`](sql/integration/insert_default_values_remote.test_slow) (RM18)
-- [`struct_types_remote.test_slow`](sql/integration/struct_types_remote.test_slow), [`map_types_remote.test_slow`](sql/integration/map_types_remote.test_slow) (RM14) — [#37](https://github.com/PostHog/duckhog/issues/37) — LIST/STRUCT/MAP nested types; Duckgres Arrow Flight fix + DuckHog `ValueToInsertSQL` serializer
+- [`list_types_remote.test_slow`](sql/integration/list_types_remote.test_slow), [`struct_types_remote.test_slow`](sql/integration/struct_types_remote.test_slow), [`map_types_remote.test_slow`](sql/integration/map_types_remote.test_slow) (RM14) — [#37](https://github.com/PostHog/duckhog/issues/37) — LIST/STRUCT/MAP nested types; Duckgres Arrow Flight fix + DuckHog `ValueToInsertSQL` serializer
 
 Retired targets (will never be supported on DuckLake):
 - RM15 (INSERT RETURNING) — DuckLake does not support RETURNING on any DML verb; chunk-echo was semantically wrong (echoed client input, not server state). Test file kept as `statement error` coverage.
