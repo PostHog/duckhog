@@ -50,7 +50,7 @@ Artifacts:
 Each roadmap test file contains one target capability so failures are isolated.
 
 Current targets:
-- [`rm23_on_conflict_rewrite_path_remote.test_slow`](sql/roadmap/rm23_on_conflict_rewrite_path_remote.test_slow) — [#44](https://github.com/PostHog/duckhog/issues/44) — memory catalog only (non-DuckLake)
+_(none)_
 
 Non-test-file targets:
 - DML rewriter CTE support (UPDATE/DELETE) — [#45](https://github.com/PostHog/duckhog/issues/45)
@@ -71,6 +71,7 @@ Graduated targets (now part of normal integration suite):
 - [`list_types_remote.test_slow`](sql/integration/list_types_remote.test_slow), [`struct_types_remote.test_slow`](sql/integration/struct_types_remote.test_slow), [`map_types_remote.test_slow`](sql/integration/map_types_remote.test_slow) (RM14) — [#37](https://github.com/PostHog/duckhog/issues/37) — LIST/STRUCT/MAP nested types; Duckgres Arrow Flight fix + DuckHog `ValueToInsertSQL` serializer
 
 Retired targets:
+- RM23 (ON CONFLICT rewrite path) — [#44](https://github.com/PostHog/duckhog/issues/44) — memory catalog only; DuckLake will never support PK/UNIQUE constraints, so ON CONFLICT is only relevant for `hog:memory` which is not a production target
 - RM15 (INSERT RETURNING) — DuckLake does not support RETURNING on any DML verb; chunk-echo was semantically wrong (echoed client input, not server state). Test file kept as `statement error` coverage.
 - RM16 (ON CONFLICT DO NOTHING) — [#38](https://github.com/PostHog/duckhog/issues/38) — duplicate of RM23; both tested `hog:memory` with ON CONFLICT DO NOTHING. Blocked by L2 (constraint metadata not synced to local binder). On DuckLake catalogs, additionally blocked because DuckLake will never support PK/UNIQUE constraints ([ducklake#66](https://github.com/duckdb/ducklake/issues/66), [ducklake#290](https://github.com/duckdb/ducklake/issues/290))
 - RM17 (ON CONFLICT DO UPDATE) — [#39](https://github.com/PostHog/duckhog/issues/39) — same blockers as RM16; RM23 covers the rewrite path for all ON CONFLICT variants
