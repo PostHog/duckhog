@@ -1,10 +1,10 @@
 # DuckHog DuckDB Extension
 
-A DuckDB extension that enables direct SQL queries against PostHog data warehouse.
+A DuckDB extension for querying Arrow Flight SQL servers directly from DuckDB using standard SQL — including PostHog's own managed data warehouse via [Duckgres](https://github.com/PostHog/duckgres).
 
-## Overview
+Data is transferred using Apache Arrow's columnar format over the Flight SQL protocol, and the extension supports both basic and bearer token auth. This makes it compatible with any Flight SQL server exposing DuckLake-based catalogs and tables.
 
-This extension allows you to attach a PostHog data source (https://github.com/PostHog/duckgres/) in DuckDB and query it using standard SQL. Data is transferred efficiently using Apache Arrow's columnar format via the Flight SQL protocol.
+For a production-ready deployment with minimal setup, we recommend pairing DuckHog with [Duckgres](https://github.com/PostHog/duckgres), a PostHog-backed server that handles auth, connection pooling, and DuckLake integration out of the box.
 
 ## Features
 
