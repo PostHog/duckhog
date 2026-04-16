@@ -150,8 +150,7 @@ static unique_ptr<FunctionData> RemoteTableFunctionBind(ClientContext &context, 
 		throw IOException("PostHog: Failed to export Arrow schema for remote table function: " + status.ToString());
 	}
 
-	ArrowTableFunction::PopulateArrowTableSchema(DBConfig::GetConfig(context), bind_data->arrow_table,
-	                                             bind_data->schema_root.arrow_schema);
+	ArrowTableFunction::PopulateArrowTableSchema(context, bind_data->arrow_table, bind_data->schema_root.arrow_schema);
 	names = bind_data->arrow_table.GetNames();
 	return_types = bind_data->arrow_table.GetTypes();
 	bind_data->all_types = return_types;
@@ -184,8 +183,7 @@ static unique_ptr<FunctionData> RemoteTableChangesBindArgs(ClientContext &contex
 		throw IOException("PostHog: Failed to export Arrow schema for remote table function: " + status.ToString());
 	}
 
-	ArrowTableFunction::PopulateArrowTableSchema(DBConfig::GetConfig(context), bind_data->arrow_table,
-	                                             bind_data->schema_root.arrow_schema);
+	ArrowTableFunction::PopulateArrowTableSchema(context, bind_data->arrow_table, bind_data->schema_root.arrow_schema);
 	names = bind_data->arrow_table.GetNames();
 	return_types = bind_data->arrow_table.GetTypes();
 	bind_data->all_types = return_types;
@@ -228,7 +226,7 @@ static unique_ptr<GlobalTableFunctionState> RemoteTableFunctionInitGlobal(Client
 		result->projection_ids = input.projection_ids;
 		for (const auto &col_idx : input.column_ids) {
 			if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
-				result->scanned_types.emplace_back(LogicalType(LogicalType::ROW_TYPE));
+				result->scanned_types.emplace_back(LogicalType::ROW_TYPE);
 			} else {
 				result->scanned_types.push_back(bind_data.all_types[col_idx]);
 			}

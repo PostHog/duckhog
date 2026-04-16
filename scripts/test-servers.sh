@@ -114,6 +114,16 @@ build_duckgres_flight_args() {
     fi
 }
 
+build_duckgres_worker_args() {
+    DUCKGRES_WORKER_ARGS=()
+
+    if duckgres_supports_flag "process-min-workers"; then
+        DUCKGRES_WORKER_ARGS+=(--process-min-workers "$DUCKGRES_WORKERS")
+    elif duckgres_supports_flag "min-workers"; then
+        DUCKGRES_WORKER_ARGS+=(--min-workers "$DUCKGRES_WORKERS")
+    fi
+}
+
 require_go() {
     if ! command -v go &> /dev/null; then
         log_error "Go not found. Please install Go."
@@ -417,6 +427,7 @@ start_duckgres() {
         "DUCKGRES_FLIGHT_HOST=${FLIGHT_HOST}"
         "DUCKGRES_FLIGHT_PORT=${FLIGHT_PORT}"
         "DUCKGRES_MAX_WORKERS=${DUCKGRES_MAX_WORKERS}"
+        "DUCKGRES_PROCESS_MAX_WORKERS=${DUCKGRES_MAX_WORKERS}"
     )
 
     if pid_is_running "$PID_DUCKGRES_FILE"; then
@@ -425,6 +436,7 @@ start_duckgres() {
     fi
 
     build_duckgres_flight_args
+    build_duckgres_worker_args
 
     ensure_port_free "$PG_HOST" "$PG_PORT" "Duckgres PG"
     if [ "${DUCKGRES_EXPOSES_FLIGHT}" -eq 1 ] && [ "${FLIGHT_HOST}:${FLIGHT_PORT}" != "${PG_HOST}:${PG_PORT}" ]; then
@@ -437,12 +449,12 @@ start_duckgres() {
         --mode control-plane
         --host "$PG_HOST"
         --port "$PG_PORT"
-        --min-workers "$DUCKGRES_WORKERS"
         --socket-dir "$DUCKGRES_SOCKET_DIR"
         --data-dir "$DUCKGRES_DATA_DIR"
         --cert "$DUCKGRES_CERT"
         --key "$DUCKGRES_KEY"
     )
+    duckgres_args+=("${DUCKGRES_WORKER_ARGS[@]}")
     duckgres_args+=("${DUCKGRES_FLIGHT_ARGS[@]}")
 
     log_info "Starting Duckgres control-plane..."

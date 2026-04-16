@@ -91,8 +91,8 @@ unique_ptr<GlobalSourceState> PhysicalPostHogInsert::GetGlobalSourceState(Client
 	return make_uniq<PostHogInsertSourceState>();
 }
 
-SourceResultType PhysicalPostHogInsert::GetData(ExecutionContext &context, DataChunk &chunk,
-                                                OperatorSourceInput &input) const {
+SourceResultType PhysicalPostHogInsert::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+                                                        OperatorSourceInput &input) const {
 	(void)context;
 	auto &source_state = input.global_state.Cast<PostHogInsertSourceState>();
 	if (source_state.finished) {

@@ -22,6 +22,7 @@
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/parser/statement/delete_statement.hpp"
 #include "duckdb/parser/statement/merge_into_statement.hpp"
+#include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/statement/update_statement.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
 #include "duckdb/parser/tokens.hpp"
@@ -43,6 +44,21 @@ void RemoveTrailingSemicolon(string &sql) {
 }
 
 void RewriteTableRefCatalog(TableRef &table_ref, const string &attached_catalog, const string &remote_catalog);
+void RewriteExpression(unique_ptr<ParsedExpression> &expr, const string &attached_catalog,
+                       const string &remote_catalog);
+void RewriteQueryNode(QueryNode &node, const string &attached_catalog, const string &remote_catalog);
+
+void RewriteCTEMap(CommonTableExpressionMap &cte_map, const string &attached_catalog, const string &remote_catalog) {
+	for (auto &entry : cte_map.map) {
+		auto &cte = *entry.second;
+		for (auto &key_target : cte.key_targets) {
+			RewriteExpression(key_target, attached_catalog, remote_catalog);
+		}
+		if (cte.query && cte.query->node) {
+			RewriteQueryNode(*cte.query->node, attached_catalog, remote_catalog);
+		}
+	}
+}
 
 void RewriteColumnRef(ColumnRefExpression &colref, const string &attached_catalog, const string &remote_catalog) {
 	if (colref.column_names.size() < 3) {
@@ -95,6 +111,16 @@ void RewriteTableRefCatalog(TableRef &table_ref, const string &attached_catalog,
 	}
 }
 
+void RewriteQueryNode(QueryNode &node, const string &attached_catalog, const string &remote_catalog) {
+	RewriteCTEMap(node.cte_map, attached_catalog, remote_catalog);
+	ParsedExpressionIterator::EnumerateQueryNodeChildren(
+	    node,
+	    [&](unique_ptr<ParsedExpression> &child_expr) {
+		    RewriteExpression(child_expr, attached_catalog, remote_catalog);
+	    },
+	    [&](TableRef &child_ref) { RewriteTableRefCatalog(child_ref, attached_catalog, remote_catalog); });
+}
+
 void RewriteTableRef(unique_ptr<TableRef> &table_ref, const string &attached_catalog, const string &remote_catalog) {
 	if (!table_ref) {
 		return;
@@ -139,7 +165,7 @@ PostHogRewrittenDeleteSQL RewriteRemoteDeleteSQL(const string &query, const stri
 	for (auto &expr : rewritten_stmt.returning_list) {
 		RewriteExpression(expr, attached_catalog, remote_catalog);
 	}
-	// TODO: Add support for CTE expressions, currently will fail on the remote side.
+	RewriteCTEMap(rewritten_stmt.cte_map, attached_catalog, remote_catalog);
 
 	PostHogRewrittenDeleteSQL result;
 	result.has_returning_clause = !rewritten_stmt.returning_list.empty();
@@ -193,7 +219,7 @@ PostHogRewrittenUpdateSQL RewriteRemoteUpdateSQL(const string &query, const stri
 	for (auto &expr : rewritten_stmt.returning_list) {
 		RewriteExpression(expr, attached_catalog, remote_catalog);
 	}
-	// TODO: Add support for CTE expressions, currently will fail on the remote side.
+	RewriteCTEMap(rewritten_stmt.cte_map, attached_catalog, remote_catalog);
 
 	PostHogRewrittenUpdateSQL result;
 	result.has_returning_clause = !rewritten_stmt.returning_list.empty();
@@ -262,6 +288,7 @@ PostHogRewrittenMergeSQL RewriteRemoteMergeSQL(const string &query, const string
 	for (auto &expr : rewritten.returning_list) {
 		RewriteExpression(expr, attached_catalog, remote_catalog);
 	}
+	RewriteCTEMap(rewritten.cte_map, attached_catalog, remote_catalog);
 
 	PostHogRewrittenMergeSQL result;
 	result.has_returning_clause = !rewritten.returning_list.empty();
@@ -321,10 +348,7 @@ string BuildRemoteCreateViewSQL(const CreateViewInfo &info, const string &attach
 
 	// Rewrite catalog references inside the view's SELECT query.
 	if (copied->query && copied->query->node) {
-		ParsedExpressionIterator::EnumerateQueryNodeChildren(
-		    *copied->query->node,
-		    [&](unique_ptr<ParsedExpression> &child) { RewriteExpression(child, attached_catalog, remote_catalog); },
-		    [&](TableRef &child_ref) { RewriteTableRefCatalog(child_ref, attached_catalog, remote_catalog); });
+		RewriteQueryNode(*copied->query->node, attached_catalog, remote_catalog);
 	}
 
 	return copied->ToString();

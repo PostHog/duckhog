@@ -23,7 +23,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register the storage extension for "hog:" protocol
 	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
-	config.storage_extensions["hog"] = make_uniq<PostHogStorageExtension>();
+	StorageExtension::Register(config, "hog", make_shared_ptr<PostHogStorageExtension>());
 
 	// Register a simple version function to verify the extension loads
 	auto duckhog_version_func = ScalarFunction("duckhog_version", {}, LogicalType::VARCHAR, DuckhogVersionScalarFun);

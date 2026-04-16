@@ -72,13 +72,13 @@ public:
 
 private:
 	// Load tables from remote server (lazy loading)
-	void LoadTablesIfNeeded();
+	void LoadTablesIfNeeded(ClientContext &context);
 
 	// Create a table entry for a remote table
-	void CreateTableEntry(const string &table_name);
+	void CreateTableEntry(ClientContext &context, const string &table_name);
 
 	// Get or create a table entry
-	optional_ptr<PostHogTableEntry> GetOrCreateTable(const string &table_name);
+	optional_ptr<PostHogTableEntry> GetOrCreateTable(ClientContext &context, const string &table_name);
 
 	PostHogCatalog &posthog_catalog_;
 
