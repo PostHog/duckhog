@@ -36,6 +36,21 @@ jobs:
       VCPKG_CACHING_AWS_ENDPOINT_URL: ${{ secrets.VCPKG_CACHING_AWS_ENDPOINT_URL }}
       VCPKG_CACHING_AWS_DEFAULT_REGION: ${{ secrets.VCPKG_CACHING_AWS_DEFAULT_REGION }}
 
+  duckdb-next-build:
+    name: Build extension binaries (DuckDB main)
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+    continue-on-error: true
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
+    with:
+      duckdb_version: main
+      ci_tools_version: main
+      extra_toolchains: parser_tools
+      # Early warning job only: keep the same unsupported WASM exclusions as the stable build.
+      exclude_archs: wasm_mvp;wasm_eh;wasm_threads
+      # Avoid private cache coupling for the DuckDB-main canary job.
+      vcpkg_binary_sources: clear;http,https://vcpkg-cache.duckdb.org,read
+      extension_name: duckhog
+
   duckdb-stable-build-pr:
     name: Build extension binaries (PR)
     if: ${{ github.event_name == 'pull_request' }}

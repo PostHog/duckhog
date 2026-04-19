@@ -73,3 +73,8 @@ ccache_dir/
 # Local CI scratch artifacts
 docker_env.txt
 local_vcpkg_installation/
+
+# Local DuckDB/extension test artifacts
+:memory:.files/
+data/extensions/
+test/sql/unit/*.db

@@ -21,3 +21,9 @@ For figuring out how and why the C++ API changed, we recommend using the followi
 - DuckDB's [Release Notes](https://github.com/duckdb/duckdb/releases)
 - DuckDB's history of [Core extension patches](https://github.com/duckdb/duckdb/commits/main/.github/patches/extensions)
 - The git history of the relevant C++ Header file of the API that has changed
+
+# DuckHog notes for the DuckDB 1.5 jump
+- Expect planner/catalog churn around custom storage registration and remote scan planning.
+- Re-check schema/table entry APIs when bumping DuckDB: the 1.5 update required aligning entry constructors and scan plumbing with the newer internal signatures.
+- Re-run the SQLLogic DML coverage after compile fixes land. The 1.5 update changed planner/binder behavior for remote `UPDATE`, `DELETE`, `TRUNCATE`, and `MERGE` paths even when the generated SQL stayed conceptually the same.
+- Keep a `duckdb-next-build` style CI job pointed at DuckDB `main` so extension breakage shows up before the next stable release cut.
