@@ -20,7 +20,7 @@ jobs:
   duckdb-stable-build-main:
     name: Build extension binaries (main)
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@ec20f45aabeb9fcfcfa044dda249597f066d4826
     with:
       duckdb_version: v1.5.2
       ci_tools_version: v1.5-variegata
@@ -40,7 +40,7 @@ jobs:
     name: Build extension binaries (DuckDB main)
     if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
     continue-on-error: true
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@1d3a50b3414534f6787e28c1c5efaafb4beb4e8f
     with:
       duckdb_version: main
       ci_tools_version: main
@@ -54,7 +54,7 @@ jobs:
   duckdb-stable-build-pr:
     name: Build extension binaries (PR)
     if: ${{ github.event_name == 'pull_request' }}
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@ec20f45aabeb9fcfcfa044dda249597f066d4826
     with:
       duckdb_version: v1.5.2
       ci_tools_version: v1.5-variegata
@@ -72,7 +72,7 @@ jobs:
 
   code-quality-check:
     name: Code Quality Check
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.5-variegata
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@ec20f45aabeb9fcfcfa044dda249597f066d4826
     with:
       duckdb_version: v1.5.2
       ci_tools_version: v1.5-variegata
