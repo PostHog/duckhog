@@ -1,6 +1,9 @@
 name: Linux ARM64 Debug Build
 
 on:
+  push:
+    branches:
+      - codex/duckdb-1.5-upgrade
   workflow_dispatch:
 
 permissions:
