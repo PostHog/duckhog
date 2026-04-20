@@ -1,0 +1,184 @@
+name: Linux ARM64 Debug Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DUCKDB_VERSION: v1.5.2
+  CI_TOOLS_REF: ec20f45aabeb9fcfcfa044dda249597f066d4826
+  VCPKG_COMMIT: 84bab45d415d22042bd0b9081aea57f362da3f35
+  VCPKG_BINARY_SOURCES: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read
+
+jobs:
+  linux-arm64-debug:
+    name: Linux ARM64 Debug
+    runs-on: ubuntu-24.04-arm
+    env:
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      VCPKG_TARGET_TRIPLET: arm64-linux-release
+      VCPKG_HOST_TRIPLET: arm64-linux-release
+      AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_RO_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.VCPKG_CACHING_RO_AWS_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL: ${{ secrets.VCPKG_CACHING_AWS_ENDPOINT_URL }}
+      AWS_DEFAULT_REGION: ${{ secrets.VCPKG_CACHING_AWS_DEFAULT_REGION }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      GEN: ninja
+      BUILD_SHELL: 1
+      DUCKDB_PLATFORM: linux_arm64
+    steps:
+      - name: Free disk space 1
+        uses: endersonmenezes/free-disk-space@713d134e243b926eba4a5cce0cf608bfd1efb89a
+        continue-on-error: true
+        with:
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_folders: "/usr/local/share/powershell /usr/share/swift"
+          testing: false
+
+      - name: Free disk space 2
+        continue-on-error: true
+        run: |
+          docker images -a -q > package.list
+          if [ -s package.list ]; then
+            echo "To be deleted"
+            cat package.list
+            echo "---"
+            docker rmi $(cat package.list)
+          fi
+          rm package.list
+
+      - name: Restart docker to run on /mnt
+        run: sudo systemctl stop docker
+
+      - name: Configure Docker with custom data directory
+        run: |
+          sudo mkdir -p /mnt/docker-data
+          echo '{ "data-root": "/mnt/docker-data" }' | sudo tee /etc/docker/daemon.json
+
+      - name: Start Docker with updated storage path
+        run: sudo systemctl start docker
+
+      - name: Verify Docker storage path
+        run: docker info | grep "Docker Root Dir"
+
+      - name: Checkout current repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Checkout Extension CI tools
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          path: extension-ci-tools
+          ref: ${{ env.CI_TOOLS_REF }}
+          repository: duckdb/extension-ci-tools
+          fetch-depth: 0
+
+      - name: Checkout DuckDB to version
+        run: |
+          DUCKDB_GIT_VERSION=${{ env.DUCKDB_VERSION }} make set_duckdb_version
+
+      - name: Build Docker image
+        shell: bash
+        run: |
+          docker build \
+            --build-arg 'vcpkg_url=https://github.com/microsoft/vcpkg.git' \
+            --build-arg 'vcpkg_commit=${{ env.VCPKG_COMMIT }}' \
+            --build-arg 'extra_toolchains=;parser_tools;' \
+            -t duckdb/linux_arm64 \
+            ./extension-ci-tools/docker/linux_arm64
+
+      - name: Create env file for docker
+        run: |
+          cat <<-EOF > docker_env.txt
+          VCPKG_BINARY_SOURCES=$VCPKG_BINARY_SOURCES
+          USE_MERGED_VCPKG_MANIFEST=
+          AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+          AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+          AWS_ENDPOINT_URL=$AWS_ENDPOINT_URL
+          AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION
+          AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+          VCPKG_TARGET_TRIPLET=$VCPKG_TARGET_TRIPLET
+          VCPKG_OVERLAY_TRIPLETS=/duckdb_build_dir/extension-ci-tools/toolchains
+          VCPKG_OVERLAY_PORTS=/duckdb_build_dir/extension-ci-tools/vcpkg_ports
+          BUILD_SHELL=$BUILD_SHELL
+          OPENSSL_ROOT_DIR=/duckdb_build_dir/build/release/vcpkg_installed/$VCPKG_TARGET_TRIPLET
+          OPENSSL_DIR=/duckdb_build_dir/build/release/vcpkg_installed/$VCPKG_TARGET_TRIPLET
+          OPENSSL_USE_STATIC_LIBS=true
+          DUCKDB_PLATFORM=$DUCKDB_PLATFORM
+          DUCKDB_GIT_VERSION=${{ env.DUCKDB_VERSION }}
+          ENABLE_EXTENSION_AUTOINSTALL=1
+          ENABLE_EXTENSION_AUTOLOADING=1
+          EXTENSION_NAME=duckhog
+          EXTENSION_CANONICAL=
+          LINUX_CI_IN_DOCKER=1
+          CCACHE_MAXSIZE=1G
+          CCACHE_NOCOMPRESS=1
+          SUBSET_EXTENSIONS_TESTS=regular
+          EOF
+
+      - name: Run configure (outside Docker)
+        shell: bash
+        env:
+          DUCKDB_GIT_VERSION: ${{ env.DUCKDB_VERSION }}
+          LINUX_CI_IN_DOCKER: 0
+        run: make configure_ci
+
+      - name: Run configure (inside Docker)
+        shell: bash
+        run: |
+          docker rm -f duckhog-arm64-configure >/dev/null 2>&1 || true
+          docker run --name duckhog-arm64-configure \
+            --env-file=docker_env.txt \
+            -v "$PWD":/duckdb_build_dir \
+            duckdb/linux_arm64 make configure_ci
+
+      - name: Build extension (inside Docker)
+        run: |
+          docker rm -f duckhog-arm64-build >/dev/null 2>&1 || true
+          docker run --name duckhog-arm64-build \
+            --env-file=docker_env.txt \
+            -v "$PWD":/duckdb_build_dir \
+            duckdb/linux_arm64 make release
+
+      - name: Collect ARM64 failure logs
+        if: failure()
+        run: |
+          mkdir -p ci-failure-logs
+
+          docker logs duckhog-arm64-build > ci-failure-logs/docker-build.log 2>&1 || true
+          docker logs duckhog-arm64-configure > ci-failure-logs/docker-configure.log 2>&1 || true
+
+          cp build/release/vcpkg-manifest-install.log ci-failure-logs/ 2>/dev/null || true
+
+          for file in \
+            /vcpkg/buildtrees/arrow/config-arm64-linux-release-rel-CMakeCache.txt.log \
+            /vcpkg/buildtrees/arrow/config-arm64-linux-release-rel-CMakeConfigureLog.yaml.log \
+            /vcpkg/buildtrees/arrow/config-arm64-linux-release-out.log \
+            /vcpkg/buildtrees/arrow/config-arm64-linux-release-err.log \
+            /vcpkg/buildtrees/arrow/config-arm64-linux-release-rel-ninja.log \
+            /vcpkg/buildtrees/arrow/stdout-arm64-linux-release.log
+          do
+            docker cp "duckhog-arm64-build:${file}" "ci-failure-logs/$(basename "$file")" 2>/dev/null || true
+          done
+
+      - name: Upload ARM64 failure logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-arm64-arrow-failure-logs
+          path: ci-failure-logs
+          if-no-files-found: warn
+
+      - name: Cleanup containers
+        if: always()
+        run: |
+          docker rm -f duckhog-arm64-build duckhog-arm64-configure >/dev/null 2>&1 || true
