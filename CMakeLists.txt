@@ -20,6 +20,13 @@ set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 project(${TARGET_NAME})
 include_directories(src/include src)
 
+# Workaround: DuckDB v1.5.2 plan_serializer hits a duplicate-symbol link error
+# (BufferedFileWriter::DEFAULT_OPEN_FLAGS) under gcc-toolset-14 on Linux ARM64 Debug.
+# It's a DuckDB dev tool unused by this extension; remove once upstream fixes the ODR.
+if(TARGET plan_serializer)
+    set_target_properties(plan_serializer PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif()
+
 # Extension sources
 set(EXTENSION_SOURCES
     src/duckhog_extension.cpp
