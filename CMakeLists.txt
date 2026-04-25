@@ -104,8 +104,15 @@ if(${BUILD_UNITTESTS})
     target_include_directories(test_duckhog_cpp PRIVATE src/include src
         ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/catch
         ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/test/include)
+    # Guard with if(TARGET unittest) — DuckDB only builds the unittest binary
+    # in its full-tree build mode. Extension-only builds (e.g. tidy-check) skip
+    # duckdb/test/CMakeLists.txt entirely, so the deferred call must be a no-op
+    # there instead of erroring.
     cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL
-        target_link_libraries unittest PRIVATE test_duckhog_cpp)
+        cmake_language EVAL CODE
+        "if(TARGET unittest)
+            target_link_libraries(unittest PRIVATE test_duckhog_cpp)
+        endif()")
 endif()
 
 install(
