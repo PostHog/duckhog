@@ -80,7 +80,15 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME}
     protobuf::libprotobuf
 )
 
-# C++ unit tests (compiled into DuckDB's unittest binary via ALL_OBJECT_FILES)
+# C++ unit tests linked into DuckDB's `unittest` binary.
+# We cannot append to ALL_OBJECT_FILES here: this CMakeLists runs before
+# duckdb's src/ and test/ subdirectories, so an early append also lands in
+# libduckdb_static / duckdb.dll / libduckdb.dylib — and the test sources
+# reference Catch symbols that only exist in the unittest executable, so
+# strict Windows MSVC / macOS clang linkers reject the library link
+# (Linux GNU ld tolerates the unresolved symbols in shared libs).
+# Instead, defer linking the object library into `unittest` until after
+# duckdb/test/CMakeLists.txt has created that target.
 if(${BUILD_UNITTESTS})
     add_library_unity(test_duckhog_cpp OBJECT
         test/cpp/test_create_view_rewriter.cpp
@@ -96,9 +104,8 @@ if(${BUILD_UNITTESTS})
     target_include_directories(test_duckhog_cpp PRIVATE src/include src
         ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/catch
         ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/test/include)
-    set(ALL_OBJECT_FILES
-        ${ALL_OBJECT_FILES} $<TARGET_OBJECTS:test_duckhog_cpp>
-        PARENT_SCOPE)
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL
+        target_link_libraries unittest PRIVATE test_duckhog_cpp)
 endif()
 
 install(
