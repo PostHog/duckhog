@@ -111,7 +111,7 @@ if(${BUILD_UNITTESTS})
     cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL
         cmake_language EVAL CODE
         "if(TARGET unittest)
-            target_link_libraries(unittest PRIVATE test_duckhog_cpp)
+            target_link_libraries(unittest test_duckhog_cpp)
         endif()")
 endif()
 
