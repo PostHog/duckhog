@@ -23,9 +23,11 @@ include_directories(src/include src)
 # Workaround: DuckDB v1.5.2 plan_serializer hits a duplicate-symbol link error
 # (BufferedFileWriter::DEFAULT_OPEN_FLAGS) under gcc-toolset-14 on Linux ARM64 Debug.
 # It's a DuckDB dev tool unused by this extension; remove once upstream fixes the ODR.
-if(TARGET plan_serializer)
-    set_target_properties(plan_serializer PROPERTIES EXCLUDE_FROM_ALL TRUE)
-endif()
+# This file is processed by extension_build_tools.cmake before duckdb's tools/
+# subdirectory is added, so the target doesn't exist yet — defer the property set
+# until end of the top-level directory, by which time plan_serializer is defined.
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL
+    set_target_properties plan_serializer PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 # Extension sources
 set(EXTENSION_SOURCES
