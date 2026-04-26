@@ -22,7 +22,9 @@ env:
 jobs:
   linux-arm64-debug:
     name: Linux ARM64 Debug
-    runs-on: ubuntu-24.04-arm
+    runs-on:
+      - self-hosted
+      - depot-ubuntu-24.04-arm-64
     env:
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       VCPKG_TARGET_TRIPLET: arm64-linux-release
