@@ -16,8 +16,10 @@ statement ok
 LOAD ducklake;
 
 # Use an in-memory DuckLake catalog so repeated local runs do not inherit on-disk metadata.
+# DATA_PATH must be explicit: derived path from ':memory:' contains a colon, which
+# is invalid in Windows file paths (colons are reserved for drive letters).
 statement ok
-ATTACH 'ducklake::memory:' AS dl (DATA_INLINING_ROW_LIMIT 0);
+ATTACH 'ducklake::memory:' AS dl (DATA_INLINING_ROW_LIMIT 0, DATA_PATH '__TEST_DIR__/dl_table_functions');
 
 statement ok
 DROP TABLE IF EXISTS dl.main.t;
