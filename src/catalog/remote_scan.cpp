@@ -8,6 +8,7 @@
 
 #include "catalog/remote_scan.hpp"
 #include "catalog/posthog_catalog.hpp"
+#include "catalog/posthog_table_entry.hpp"
 #include "storage/posthog_transaction.hpp"
 
 #include "duckdb/common/exception.hpp"
@@ -31,10 +32,10 @@ struct PostHogRemoteScanGlobalState : public ArrowScanGlobalState {
 // Bind Data
 //===----------------------------------------------------------------------===//
 
-PostHogRemoteScanBindData::PostHogRemoteScanBindData(PostHogCatalog &catalog_p, const string &schema_name_p,
-                                                     const string &table_name_p)
+PostHogRemoteScanBindData::PostHogRemoteScanBindData(PostHogCatalog &catalog_p, PostHogTableEntry &table_p,
+                                                     const string &schema_name_p, const string &table_name_p)
     : ArrowScanFunctionData(&PostHogArrowStream::Produce, reinterpret_cast<uintptr_t>(this)), catalog(catalog_p),
-      schema_name(schema_name_p), table_name(table_name_p) {
+      table(table_p), schema_name(schema_name_p), table_name(table_name_p) {
 }
 
 PostHogRemoteScanBindData::~PostHogRemoteScanBindData() {
@@ -58,11 +59,12 @@ unique_ptr<FunctionData> PostHogRemoteScan::Bind(ClientContext &context, TableFu
 	throw NotImplementedException("PostHog remote_scan should not be called directly");
 }
 
-unique_ptr<FunctionData> PostHogRemoteScan::CreateBindData(PostHogCatalog &catalog, const string &schema_name,
+unique_ptr<FunctionData> PostHogRemoteScan::CreateBindData(ClientContext &context, PostHogCatalog &catalog,
+                                                           PostHogTableEntry &table, const string &schema_name,
                                                            const string &table_name, const vector<string> &column_names,
                                                            const vector<LogicalType> &column_types,
                                                            const std::shared_ptr<arrow::Schema> &arrow_schema) {
-	auto bind_data = make_uniq<PostHogRemoteScanBindData>(catalog, schema_name, table_name);
+	auto bind_data = make_uniq<PostHogRemoteScanBindData>(catalog, table, schema_name, table_name);
 
 	bind_data->column_names = column_names;
 	bind_data->column_types = column_types;
@@ -96,8 +98,7 @@ unique_ptr<FunctionData> PostHogRemoteScan::CreateBindData(PostHogCatalog &catal
 	}
 
 	// Populate arrow_table (keyed {0, 1, ..., N-1}) and all_types from the full schema.
-	ArrowTableFunction::PopulateArrowTableSchema(DBConfig::GetConfig(catalog.GetDatabase()), bind_data->arrow_table,
-	                                             bind_data->schema_root.arrow_schema);
+	ArrowTableFunction::PopulateArrowTableSchema(context, bind_data->arrow_table, bind_data->schema_root.arrow_schema);
 	bind_data->all_types = bind_data->arrow_table.GetTypes();
 
 	return bind_data;
@@ -144,7 +145,7 @@ unique_ptr<GlobalTableFunctionState> PostHogRemoteScan::InitGlobal(ClientContext
 		result->projection_ids = input.projection_ids;
 		for (const auto &col_idx : input.column_ids) {
 			if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
-				result->scanned_types.emplace_back(LogicalType(LogicalType::ROW_TYPE));
+				result->scanned_types.push_back(LogicalType(LogicalType::ROW_TYPE));
 			} else {
 				result->scanned_types.push_back(bind_data.all_types[col_idx]);
 			}
@@ -179,6 +180,11 @@ double PostHogRemoteScan::Progress(ClientContext &context, const FunctionData *b
 	return 0.0;
 }
 
+BindInfo PostHogRemoteScan::GetBindInfo(const optional_ptr<FunctionData> bind_data) {
+	auto &scan_data = bind_data->Cast<PostHogRemoteScanBindData>();
+	return BindInfo(scan_data.table);
+}
+
 //===----------------------------------------------------------------------===//
 // Get Table Function
 //===----------------------------------------------------------------------===//
@@ -188,6 +194,7 @@ TableFunction PostHogRemoteScan::GetFunction() {
 	func.projection_pushdown = true;
 	func.filter_pushdown = false; // TODO: Implement filter pushdown
 	func.table_scan_progress = Progress;
+	func.get_bind_info = GetBindInfo;
 	return func;
 }
 

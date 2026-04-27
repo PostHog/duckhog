@@ -47,8 +47,8 @@ TableFunction PostHogTableEntry::GetScanFunction(ClientContext &context, unique_
 		column_types.push_back(col.Type());
 	}
 
-	bind_data = PostHogRemoteScan::CreateBindData(posthog_catalog_, schema_name_, name, column_names, column_types,
-	                                              arrow_schema_);
+	bind_data = PostHogRemoteScan::CreateBindData(context, posthog_catalog_, *this, schema_name_, name, column_names,
+	                                              column_types, arrow_schema_);
 
 	return PostHogRemoteScan::GetFunction();
 }

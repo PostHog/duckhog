@@ -7,9 +7,9 @@ as follows:
   - `./duckdb` should be set to latest tagged release
   - `./extension-ci-tools` should be set to updated branch corresponding to latest DuckDB release. So if you're building for DuckDB `v1.1.0` there will be a branch in `extension-ci-tools` named `v1.1.0` to which you should check out. 
 - Bump versions in `./github/workflows`
-  - `duckdb_version` input in `duckdb-stable-build` job in `MainDistributionPipeline.yml` should be set to latest tagged release
-  - `duckdb_version` input in `duckdb-stable-deploy` job in `MainDistributionPipeline.yml` should be set to latest tagged release
-  - the reusable workflow `duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml` for the `duckdb-stable-build` job should be set to latest tagged release
+  - `duckdb_version` inputs in `MainDistributionPipeline.yml` should be set to the latest tagged release
+  - `ci_tools_version` inputs in `MainDistributionPipeline.yml` should be set to the matching `extension-ci-tools` release line for that DuckDB release
+  - the reusable workflow refs under `duckdb/extension-ci-tools/.github/workflows/` should be updated to the matching `extension-ci-tools` release line
 
 # API changes
 DuckDB extensions built with this extension template are built against the internal C++ API of DuckDB. This API is not guaranteed to be stable.
@@ -21,3 +21,9 @@ For figuring out how and why the C++ API changed, we recommend using the followi
 - DuckDB's [Release Notes](https://github.com/duckdb/duckdb/releases)
 - DuckDB's history of [Core extension patches](https://github.com/duckdb/duckdb/commits/main/.github/patches/extensions)
 - The git history of the relevant C++ Header file of the API that has changed
+
+# DuckHog notes for the DuckDB 1.5 jump
+- Expect planner/catalog churn around custom storage registration and remote scan planning.
+- Re-check schema/table entry APIs when bumping DuckDB: the 1.5 update required aligning entry constructors and scan plumbing with the newer internal signatures.
+- Re-run the SQLLogic DML coverage after compile fixes land. The 1.5 update changed planner/binder behavior for remote `UPDATE`, `DELETE`, `TRUNCATE`, and `MERGE` paths even when the generated SQL stayed conceptually the same.
+- Keep a `duckdb-next-build` style CI job pointed at DuckDB `main` so extension breakage shows up before the next stable release cut.

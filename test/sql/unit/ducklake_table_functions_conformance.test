@@ -15,9 +15,11 @@ INSTALL ducklake;
 statement ok
 LOAD ducklake;
 
-# Use a file unique to this test file to avoid cross-file DuckLake metadata reuse.
+# Use an in-memory DuckLake catalog so repeated local runs do not inherit on-disk metadata.
+# DATA_PATH must be explicit: derived path from ':memory:' contains a colon, which
+# is invalid in Windows file paths (colons are reserved for drive letters).
 statement ok
-ATTACH 'ducklake:__TEST_DIR__/ducklake_table_functions_meta.db' AS dl;
+ATTACH 'ducklake::memory:' AS dl (DATA_INLINING_ROW_LIMIT 0, DATA_PATH '__TEST_DIR__/dl_table_functions');
 
 statement ok
 DROP TABLE IF EXISTS dl.main.t;
@@ -384,11 +386,12 @@ SELECT i, v, change_type FROM dl.table_changes('t_tc_evo', getvariable('v_tc_evo
 # (which hardcodes known signatures).
 # ============================================================
 
-# Total unique DuckLake table functions/macros: 18
+# Total unique DuckLake prefixed table functions/macros, excluding internal helpers: 18
 # The allowlist in posthog_schema_entry.cpp must match this count.
 query I
 SELECT COUNT(DISTINCT function_name) FROM duckdb_functions()
 WHERE function_name LIKE 'ducklake_%'
+  AND function_name NOT IN ('ducklake_scan', 'ducklake_settings')
   AND function_type IN ('table', 'table_macro');
 ----
 18
@@ -397,6 +400,7 @@ WHERE function_name LIKE 'ducklake_%'
 query I
 SELECT COUNT(*) FROM duckdb_functions()
 WHERE function_name LIKE 'ducklake_%'
+  AND function_name NOT IN ('ducklake_scan', 'ducklake_settings')
   AND function_type = 'table'
   AND len(parameters) = 1;
 ----

@@ -49,8 +49,8 @@ unique_ptr<GlobalSourceState> PhysicalPostHogDelete::GetGlobalSourceState(Client
 	return make_uniq<PostHogDeleteSourceState>(context, GetTypes(), return_chunk_);
 }
 
-SourceResultType PhysicalPostHogDelete::GetData(ExecutionContext &context, DataChunk &chunk,
-                                                OperatorSourceInput &input) const {
+SourceResultType PhysicalPostHogDelete::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+                                                        OperatorSourceInput &input) const {
 	auto &state = input.global_state.Cast<PostHogDeleteSourceState>();
 	if (!state.initialized) {
 		auto remote_txn_id = PostHogTransaction::Get(context.client, catalog_).remote_txn_id;

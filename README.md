@@ -17,7 +17,7 @@ For a production-ready deployment with minimal setup, we recommend pairing DuckH
 ### Installation
 
 ```sql
--- Coming soon: Install from community extensions
+-- community extension
 INSTALL duckhog FROM community;
 LOAD duckhog;
 
@@ -118,7 +118,7 @@ The extension is built on several key components:
 
 ## Requirements
 
-- DuckDB 1.4.3+
+- DuckDB 1.5.2+
 - C++17 compatible compiler
 - CMake 3.10+
 - vcpkg for dependency management

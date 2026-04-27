@@ -22,16 +22,19 @@ class Schema;
 namespace duckdb {
 
 class PostHogCatalog;
+class PostHogTableEntry;
 
 //===----------------------------------------------------------------------===//
 // Remote Scan Bind Data
 //===----------------------------------------------------------------------===//
 
 struct PostHogRemoteScanBindData : public ArrowScanFunctionData {
-	PostHogRemoteScanBindData(PostHogCatalog &catalog, const string &schema_name, const string &table_name);
+	PostHogRemoteScanBindData(PostHogCatalog &catalog, PostHogTableEntry &table, const string &schema_name,
+	                          const string &table_name);
 	~PostHogRemoteScanBindData() override;
 
 	PostHogCatalog &catalog;
+	PostHogTableEntry &table;
 	string schema_name;
 	string table_name;
 
@@ -71,7 +74,8 @@ public:
 	static TableFunction GetFunction();
 
 	// Create bind data for a specific table scan
-	static unique_ptr<FunctionData> CreateBindData(PostHogCatalog &catalog, const string &schema_name,
+	static unique_ptr<FunctionData> CreateBindData(ClientContext &context, PostHogCatalog &catalog,
+	                                               PostHogTableEntry &table, const string &schema_name,
 	                                               const string &table_name, const vector<string> &column_names,
 	                                               const vector<LogicalType> &column_types,
 	                                               const std::shared_ptr<arrow::Schema> &arrow_schema);
@@ -90,6 +94,8 @@ private:
 
 	static double Progress(ClientContext &context, const FunctionData *bind_data,
 	                       const GlobalTableFunctionState *global_state);
+
+	static BindInfo GetBindInfo(const optional_ptr<FunctionData> bind_data);
 };
 
 } // namespace duckdb

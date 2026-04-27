@@ -20,10 +20,10 @@ jobs:
   duckdb-stable-build-main:
     name: Build extension binaries (main)
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4-andium
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@ec20f45aabeb9fcfcfa044dda249597f066d4826
     with:
-      duckdb_version: v1.4.4
-      ci_tools_version: v1.4-andium
+      duckdb_version: v1.5.2
+      ci_tools_version: v1.5-variegata
       extra_toolchains: parser_tools
       # duckhog depends on Arrow Flight/FlightSQL via vcpkg.json; Arrow is unsupported on wasm32-emscripten.
       # Exclude all WASM targets to avoid deterministic vcpkg configure failures in WASM matrix jobs.
@@ -39,10 +39,10 @@ jobs:
   duckdb-stable-build-pr:
     name: Build extension binaries (PR)
     if: ${{ github.event_name == 'pull_request' }}
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4-andium
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@ec20f45aabeb9fcfcfa044dda249597f066d4826
     with:
-      duckdb_version: v1.4.4
-      ci_tools_version: v1.4-andium
+      duckdb_version: v1.5.2
+      ci_tools_version: v1.5-variegata
       extra_toolchains: parser_tools
       # duckhog depends on Arrow Flight/FlightSQL via vcpkg.json; Arrow is unsupported on wasm32-emscripten.
       # Exclude all WASM targets to avoid deterministic vcpkg configure failures in WASM matrix jobs.
@@ -57,10 +57,10 @@ jobs:
 
   code-quality-check:
     name: Code Quality Check
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.4.4
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@ec20f45aabeb9fcfcfa044dda249597f066d4826
     with:
-      duckdb_version: v1.4.4
-      ci_tools_version: v1.4.4
+      duckdb_version: v1.5.2
+      ci_tools_version: v1.5-variegata
       extension_name: duckhog
       format_checks: 'format'
 
@@ -193,7 +193,7 @@ jobs:
           path: ./ccache_dir
           key: ccache-integration-unittest-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ccache-extension-distribution-linux_amd64-v1.4.4
+            ccache-extension-distribution-linux_amd64-v1.5.2
 
       - name: Setup vcpkg
         run: |
@@ -224,7 +224,7 @@ jobs:
       - name: Download extension artifact
         uses: actions/download-artifact@v4
         with:
-          name: duckhog-v1.4.4-extension-linux_amd64
+          name: duckhog-v1.5.2-extension-linux_amd64
           path: build/release/extension/duckhog/
 
       - name: Start Duckgres control-plane

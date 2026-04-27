@@ -239,10 +239,10 @@ duckdb-stable-build-main:
   if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
   permissions:
     contents: read
-  uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.3
+  uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
   with:
-    duckdb_version: v1.4.3
-    ci_tools_version: v1.4.3
+    duckdb_version: v1.5.2
+    ci_tools_version: v1.5-variegata
     extension_name: duckhog
     vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,readwrite;http,https://vcpkg-cache.duckdb.org,read
   secrets:
@@ -255,10 +255,10 @@ duckdb-stable-build-pr:
   if: ${{ github.event_name == 'pull_request' }}
   permissions:
     contents: read
-  uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.3
+  uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
   with:
-    duckdb_version: v1.4.3
-    ci_tools_version: v1.4.3
+    duckdb_version: v1.5.2
+    ci_tools_version: v1.5-variegata
     extension_name: duckhog
     vcpkg_binary_sources: clear;x-aws,s3://duckhog-vcpkg-cache/duckhog/,read;http,https://vcpkg-cache.duckdb.org,read
   secrets:

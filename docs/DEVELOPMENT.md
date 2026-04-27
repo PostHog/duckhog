@@ -13,7 +13,7 @@ export PATH="/opt/homebrew/opt/bison/bin:$PATH"
 cd ~/projects
 git clone https://github.com/Microsoft/vcpkg.git
 cd vcpkg
-git checkout ce613c41372b23b1f51333815feb3edd87ef8a8b
+git checkout 84bab45d415d22042bd0b9081aea57f362da3f35
 ./bootstrap-vcpkg.sh -disableMetrics
 export VCPKG_TOOLCHAIN_PATH=~/projects/vcpkg/scripts/buildsystems/vcpkg.cmake
 ```
@@ -80,7 +80,7 @@ cd vcpkg
 We use a specific vcpkg commit for reproducible builds:
 
 ```bash
-git checkout ce613c41372b23b1f51333815feb3edd87ef8a8b
+git checkout 84bab45d415d22042bd0b9081aea57f362da3f35
 ```
 
 This repository also pins the vcpkg baseline in `vcpkg-configuration.json` so that

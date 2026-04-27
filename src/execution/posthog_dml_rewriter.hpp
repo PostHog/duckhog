@@ -8,7 +8,6 @@
 #pragma once
 
 #include <string>
-
 namespace duckdb {
 
 class ClientContext;

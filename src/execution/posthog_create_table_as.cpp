@@ -100,8 +100,8 @@ unique_ptr<GlobalSourceState> PhysicalPostHogCreateTableAs::GetGlobalSourceState
 	return make_uniq<PostHogCTASSourceState>();
 }
 
-SourceResultType PhysicalPostHogCreateTableAs::GetData(ExecutionContext &context, DataChunk &chunk,
-                                                       OperatorSourceInput &input) const {
+SourceResultType PhysicalPostHogCreateTableAs::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+                                                               OperatorSourceInput &input) const {
 	(void)context;
 	auto &source_state = input.global_state.Cast<PostHogCTASSourceState>();
 	if (source_state.finished) {

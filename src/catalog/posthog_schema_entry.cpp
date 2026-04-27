@@ -18,7 +18,9 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/unordered_set.hpp"
 #include "duckdb/function/table/arrow.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/main/config.hpp"
+#include "duckdb/main/database.hpp"
 #include "duckdb/parser/expression/cast_expression.hpp"
 #include "duckdb/parser/keyword_helper.hpp"
 #include "duckdb/parser/parsed_data/alter_table_info.hpp"
@@ -193,7 +195,7 @@ string QualifyTable(const string &catalog, const string &schema, const string &t
 
 } // namespace
 
-static void PopulateTableSchemaFromArrow(DBConfig &config, const std::shared_ptr<arrow::Schema> &schema,
+static void PopulateTableSchemaFromArrow(ClientContext &context, const std::shared_ptr<arrow::Schema> &schema,
                                          vector<string> &names, vector<LogicalType> &types) {
 	ArrowSchema arrow_schema;
 	auto status = arrow::ExportSchema(*schema, &arrow_schema);
@@ -202,7 +204,7 @@ static void PopulateTableSchemaFromArrow(DBConfig &config, const std::shared_ptr
 	}
 
 	ArrowTableSchema arrow_table;
-	ArrowTableFunction::PopulateArrowTableSchema(config, arrow_table, arrow_schema);
+	ArrowTableFunction::PopulateArrowTableSchema(context, arrow_table, arrow_schema);
 	names = arrow_table.GetNames();
 	types = arrow_table.GetTypes();
 
@@ -248,8 +250,7 @@ optional_ptr<CatalogEntry> PostHogSchemaEntry::CreateTable(CatalogTransaction tr
 
 	vector<string> column_names;
 	vector<LogicalType> column_types;
-	PopulateTableSchemaFromArrow(DBConfig::GetConfig(posthog_catalog_.GetDatabase()), arrow_schema, column_names,
-	                             column_types);
+	PopulateTableSchemaFromArrow(context, arrow_schema, column_names, column_types);
 
 	auto create_info = make_uniq<CreateTableInfo>(*this, remote_info.table);
 	for (idx_t i = 0; i < column_names.size(); i++) {
@@ -357,8 +358,7 @@ void PostHogSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) 
 
 	vector<string> column_names;
 	vector<LogicalType> column_types;
-	PopulateTableSchemaFromArrow(DBConfig::GetConfig(posthog_catalog_.GetDatabase()), arrow_schema, column_names,
-	                             column_types);
+	PopulateTableSchemaFromArrow(context, arrow_schema, column_names, column_types);
 
 	auto create_info = make_uniq<CreateTableInfo>(*this, effective_table_name);
 	for (idx_t i = 0; i < column_names.size(); i++) {
@@ -418,7 +418,7 @@ void PostHogSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {
 // Table Loading (Lazy)
 //===----------------------------------------------------------------------===//
 
-void PostHogSchemaEntry::LoadTablesIfNeeded() {
+void PostHogSchemaEntry::LoadTablesIfNeeded(ClientContext &context) {
 	// Note: This method is called while holding tables_mutex_ from the caller
 	// or should be called with the lock already held
 	auto op_started_at = SteadyClock::now();
@@ -468,7 +468,7 @@ void PostHogSchemaEntry::LoadTablesIfNeeded() {
 		for (const auto &table_name : table_names) {
 			if (table_cache_.find(table_name) == table_cache_.end()) {
 				POSTHOG_LOG_DEBUG("Schema '%s': hydrating table '%s'", name.c_str(), table_name.c_str());
-				CreateTableEntry(table_name);
+				CreateTableEntry(context, table_name);
 				created_count++;
 			}
 		}
@@ -487,7 +487,7 @@ void PostHogSchemaEntry::LoadTablesIfNeeded() {
 	}
 }
 
-void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
+void PostHogSchemaEntry::CreateTableEntry(ClientContext &context, const string &table_name) {
 	// Note: Called with tables_mutex_ already held
 	auto op_started_at = SteadyClock::now();
 	POSTHOG_LOG_DEBUG("Schema '%s': CreateTableEntry start table='%s'", name.c_str(), table_name.c_str());
@@ -511,8 +511,7 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
 
 		vector<string> column_names;
 		vector<LogicalType> column_types;
-		PopulateTableSchemaFromArrow(DBConfig::GetConfig(posthog_catalog_.GetDatabase()), arrow_schema, column_names,
-		                             column_types);
+		PopulateTableSchemaFromArrow(context, arrow_schema, column_names, column_types);
 
 		auto create_info = make_uniq<CreateTableInfo>(*this, table_name);
 		for (idx_t i = 0; i < column_names.size(); i++) {
@@ -533,7 +532,7 @@ void PostHogSchemaEntry::CreateTableEntry(const string &table_name) {
 	}
 }
 
-optional_ptr<PostHogTableEntry> PostHogSchemaEntry::GetOrCreateTable(const string &table_name) {
+optional_ptr<PostHogTableEntry> PostHogSchemaEntry::GetOrCreateTable(ClientContext &context, const string &table_name) {
 	// Note: Called with tables_mutex_ already held
 
 	auto it = table_cache_.find(table_name);
@@ -547,7 +546,7 @@ optional_ptr<PostHogTableEntry> PostHogSchemaEntry::GetOrCreateTable(const strin
 	}
 
 	// Create the table entry on-demand
-	CreateTableEntry(table_name);
+	CreateTableEntry(context, table_name);
 	it = table_cache_.find(table_name);
 	if (it != table_cache_.end()) {
 		return it->second.get();
@@ -572,7 +571,7 @@ void PostHogSchemaEntry::Scan(ClientContext &context, CatalogType type,
 	}
 
 	std::lock_guard<std::mutex> lock(tables_mutex_);
-	LoadTablesIfNeeded();
+	LoadTablesIfNeeded(context);
 
 	for (auto &entry : table_cache_) {
 		callback(*entry.second);
@@ -585,7 +584,8 @@ void PostHogSchemaEntry::Scan(CatalogType type, const std::function<void(Catalog
 	}
 
 	std::lock_guard<std::mutex> lock(tables_mutex_);
-	LoadTablesIfNeeded();
+	ClientContext local_context(posthog_catalog_.GetDatabase().shared_from_this());
+	LoadTablesIfNeeded(local_context);
 
 	for (auto &entry : table_cache_) {
 		callback(*entry.second);
@@ -638,10 +638,11 @@ optional_ptr<CatalogEntry> PostHogSchemaEntry::LookupEntry(CatalogTransaction tr
 	}
 
 	std::lock_guard<std::mutex> lock(tables_mutex_);
-	LoadTablesIfNeeded();
+	auto &context = transaction.GetContext();
+	LoadTablesIfNeeded(context);
 
 	// Try to get from cache, or create on-demand
-	auto table = GetOrCreateTable(lookup_info.GetEntryName());
+	auto table = GetOrCreateTable(context, lookup_info.GetEntryName());
 	if (table) {
 		return table.get();
 	}

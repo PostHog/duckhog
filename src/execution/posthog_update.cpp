@@ -49,8 +49,8 @@ unique_ptr<GlobalSourceState> PhysicalPostHogUpdate::GetGlobalSourceState(Client
 	return make_uniq<PostHogUpdateSourceState>(context, GetTypes(), return_chunk_);
 }
 
-SourceResultType PhysicalPostHogUpdate::GetData(ExecutionContext &context, DataChunk &chunk,
-                                                OperatorSourceInput &input) const {
+SourceResultType PhysicalPostHogUpdate::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+                                                        OperatorSourceInput &input) const {
 	auto &state = input.global_state.Cast<PostHogUpdateSourceState>();
 	if (!state.initialized) {
 		auto remote_txn_id = PostHogTransaction::Get(context.client, catalog_).remote_txn_id;
