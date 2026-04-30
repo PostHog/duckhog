@@ -76,10 +76,15 @@ void PostHogCatalog::Initialize(bool load_builtin) {
 		auto ping_status = flight_client_->Ping();
 		if (ping_status.ok()) {
 			POSTHOG_LOG_INFO("Flight server is reachable");
+			if (!remote_catalog_.empty()) {
+				flight_client_->ListDbSchemas(remote_catalog_);
+			}
 		} else {
 			POSTHOG_LOG_WARN("Flight server not reachable yet: %s", ping_status.ToString().c_str());
 			POSTHOG_LOG_WARN("Catalog created in disconnected mode. Queries will fail until connection is restored.");
 		}
+	} catch (const CatalogException &) {
+		throw;
 	} catch (const std::exception &e) {
 		// Log the error but don't throw - allow catalog to be created even if connection fails
 		// This enables testing the extension without a running server
@@ -154,6 +159,8 @@ void PostHogCatalog::LoadSchemasIfNeeded() {
 		// Query schemas only for this catalog's remote_catalog_
 		schema_infos = flight_client_->ListDbSchemas(remote_catalog_);
 
+	} catch (const CatalogException &) {
+		throw;
 	} catch (const std::exception &e) {
 		POSTHOG_LOG_ERROR("Failed to load schemas: %s", e.what());
 		if (IsConnectionFailureMessage(e.what())) {
