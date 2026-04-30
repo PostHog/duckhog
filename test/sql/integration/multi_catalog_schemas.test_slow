@@ -43,3 +43,10 @@ WHERE catalog_name = 'remote';
 
 statement ok
 DETACH remote;
+
+# Explicit remote catalogs must exist on the Flight SQL server. If users want
+# server-default catalog resolution they should omit the catalog with hog:?.
+statement error
+ATTACH 'hog:posthog?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS posthog_db;
+----
+Remote catalog 'posthog' does not exist
