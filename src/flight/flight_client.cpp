@@ -10,6 +10,7 @@
 #include "flight/session_token_utils.hpp"
 #include "utils/posthog_logger.hpp"
 
+#include "duckdb/common/exception/catalog_exception.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 
@@ -35,6 +36,13 @@ constexpr const char *kSessionHeader = "x-duckgres-session";
 
 int64_t ElapsedMillis(const SteadyClock::time_point &started_at) {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - started_at).count();
+}
+
+CatalogException RemoteCatalogMissingException(const std::string &catalog) {
+	return CatalogException(
+	    "PostHog: Remote catalog '%s' does not exist. Omit the catalog (use hog:?user=...) to use server-default "
+	    "catalog resolution.",
+	    catalog.c_str());
 }
 
 class SessionTokenCaptureMiddleware : public arrow::flight::ClientMiddleware {
@@ -562,10 +570,11 @@ std::vector<PostHogDbSchemaInfo> PostHogFlightClient::ListDbSchemas(const std::s
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
 	}
 
-	auto run_once = [&]() -> arrow::Result<std::vector<PostHogDbSchemaInfo>> {
+	auto run_once = [&](const std::string &metadata_catalog) -> arrow::Result<std::vector<PostHogDbSchemaInfo>> {
 		// GetDbSchemas returns information about schemas/catalogs.
 		// Parameters: options, catalog (nullptr = all), db_schema_filter_pattern (nullptr = all)
-		auto info_result = sql_client_->GetDbSchemas(GetCallOptions(), catalog.empty() ? nullptr : &catalog, nullptr);
+		auto info_result = sql_client_->GetDbSchemas(GetCallOptions(),
+		                                             metadata_catalog.empty() ? nullptr : &metadata_catalog, nullptr);
 		if (!info_result.ok()) {
 			return info_result.status();
 		}
@@ -631,7 +640,7 @@ std::vector<PostHogDbSchemaInfo> PostHogFlightClient::ListDbSchemas(const std::s
 				entry.catalog_name = read_string(catalog_col, i);
 				entry.schema_name = read_string(schema_col, i);
 
-				if (!catalog.empty() && catalog_col && entry.catalog_name != catalog) {
+				if (!metadata_catalog.empty() && catalog_col && entry.catalog_name != metadata_catalog) {
 					continue;
 				}
 				schemas.push_back(std::move(entry));
@@ -641,13 +650,36 @@ std::vector<PostHogDbSchemaInfo> PostHogFlightClient::ListDbSchemas(const std::s
 		return schemas;
 	};
 
-	auto result = run_once();
+	auto result = run_once(catalog);
 	if (!result.ok() && ShouldRetryMetadataWithFreshSession(result.status())) {
 		InvalidateSessionTokenLocked("list db schemas retry", &result.status());
-		result = run_once();
+		result = run_once(catalog);
 	}
 	if (!result.ok()) {
 		throw std::runtime_error("PostHog: Failed to list db schemas: " + result.status().ToString());
+	}
+	if (!catalog.empty() && result->empty()) {
+		POSTHOG_LOG_DEBUG("Flight ListDbSchemas catalog-filtered metadata returned no rows for '%s'; retrying "
+		                  "without catalog filter",
+		                  catalog.c_str());
+		auto unfiltered_result = run_once("");
+		if (!unfiltered_result.ok() && ShouldRetryMetadataWithFreshSession(unfiltered_result.status())) {
+			InvalidateSessionTokenLocked("list db schemas unfiltered retry", &unfiltered_result.status());
+			unfiltered_result = run_once("");
+		}
+		if (!unfiltered_result.ok()) {
+			throw std::runtime_error("PostHog: Failed to list db schemas: " + unfiltered_result.status().ToString());
+		}
+		std::vector<PostHogDbSchemaInfo> matching_schemas;
+		for (const auto &schema_info : *unfiltered_result) {
+			if (schema_info.catalog_name == catalog) {
+				matching_schemas.push_back(schema_info);
+			}
+		}
+		if (matching_schemas.empty()) {
+			throw RemoteCatalogMissingException(catalog);
+		}
+		result = arrow::Result<std::vector<PostHogDbSchemaInfo>>(std::move(matching_schemas));
 	}
 	return *result;
 }
@@ -661,12 +693,12 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
 	}
 
-	auto run_once = [&]() -> arrow::Result<std::vector<std::string>> {
+	auto run_once = [&](const std::string &metadata_catalog) -> arrow::Result<std::vector<std::string>> {
 		// GetTables returns information about tables.
 		// Parameters: catalog, schema_filter_pattern, table_name_filter_pattern, include_schema, table_types
 		auto get_tables_started_at = SteadyClock::now();
-		auto info_result = sql_client_->GetTables(GetCallOptions(), catalog.empty() ? nullptr : &catalog, &schema,
-		                                          nullptr, false, nullptr);
+		auto info_result = sql_client_->GetTables(
+		    GetCallOptions(), metadata_catalog.empty() ? nullptr : &metadata_catalog, &schema, nullptr, false, nullptr);
 		if (!info_result.ok()) {
 			return info_result.status();
 		}
@@ -720,17 +752,17 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 			}
 
 			auto row_matches_catalog = [&](int64_t row) -> bool {
-				if (catalog.empty() || !catalog_col) {
+				if (metadata_catalog.empty() || !catalog_col) {
 					return true;
 				}
 				switch (catalog_col->type_id()) {
 				case arrow::Type::STRING: {
 					auto catalog_array = std::static_pointer_cast<arrow::StringArray>(catalog_col);
-					return !catalog_array->IsNull(row) && catalog_array->GetView(row) == catalog;
+					return !catalog_array->IsNull(row) && catalog_array->GetView(row) == metadata_catalog;
 				}
 				case arrow::Type::LARGE_STRING: {
 					auto catalog_array = std::static_pointer_cast<arrow::LargeStringArray>(catalog_col);
-					return !catalog_array->IsNull(row) && catalog_array->GetView(row) == catalog;
+					return !catalog_array->IsNull(row) && catalog_array->GetView(row) == metadata_catalog;
 				}
 				default:
 					throw std::runtime_error("PostHog: Unexpected catalog_name column type: " +
@@ -770,10 +802,10 @@ std::vector<std::string> PostHogFlightClient::ListTables(const std::string &cata
 		return tables;
 	};
 
-	auto result = run_once();
+	auto result = run_once(catalog);
 	if (!result.ok() && ShouldRetryMetadataWithFreshSession(result.status())) {
 		InvalidateSessionTokenLocked("list tables retry", &result.status());
-		result = run_once();
+		result = run_once(catalog);
 	}
 	if (!result.ok()) {
 		throw std::runtime_error("PostHog: Failed to list tables: " + result.status().ToString());
@@ -795,11 +827,11 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 		throw std::runtime_error("PostHog: Not authenticated. Call Authenticate() first.");
 	}
 
-	auto run_once = [&]() -> arrow::Result<std::shared_ptr<arrow::Schema>> {
+	auto run_once = [&](const std::string &metadata_catalog) -> arrow::Result<std::shared_ptr<arrow::Schema>> {
 		// GetTables with include_schema=true returns serialized schema in the result.
 		auto get_tables_started_at = SteadyClock::now();
-		auto info_result = sql_client_->GetTables(GetCallOptions(), catalog.empty() ? nullptr : &catalog, &schema,
-		                                          &table, true, nullptr);
+		auto info_result = sql_client_->GetTables(
+		    GetCallOptions(), metadata_catalog.empty() ? nullptr : &metadata_catalog, &schema, &table, true, nullptr);
 		if (!info_result.ok()) {
 			return info_result.status();
 		}
@@ -853,18 +885,18 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 		// Find the row matching the requested table name.
 		int64_t row_idx = -1;
 		for (int64_t i = 0; i < chunk.data->num_rows(); i++) {
-			if (!catalog.empty() && catalog_col) {
+			if (!metadata_catalog.empty() && catalog_col) {
 				switch (catalog_col->type_id()) {
 				case arrow::Type::STRING: {
 					auto catalog_array = std::static_pointer_cast<arrow::StringArray>(catalog_col);
-					if (catalog_array->IsNull(i) || catalog_array->GetView(i) != catalog) {
+					if (catalog_array->IsNull(i) || catalog_array->GetView(i) != metadata_catalog) {
 						continue;
 					}
 					break;
 				}
 				case arrow::Type::LARGE_STRING: {
 					auto catalog_array = std::static_pointer_cast<arrow::LargeStringArray>(catalog_col);
-					if (catalog_array->IsNull(i) || catalog_array->GetView(i) != catalog) {
+					if (catalog_array->IsNull(i) || catalog_array->GetView(i) != metadata_catalog) {
 						continue;
 					}
 					break;
@@ -960,10 +992,10 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 		return *schema_read_result;
 	};
 
-	auto result = run_once();
+	auto result = run_once(catalog);
 	if (!result.ok() && ShouldRetryMetadataWithFreshSession(result.status())) {
 		InvalidateSessionTokenLocked("get table schema retry", &result.status());
-		result = run_once();
+		result = run_once(catalog);
 	}
 	if (!result.ok()) {
 		throw std::runtime_error("PostHog: Failed to get table schema: " + result.status().ToString());
