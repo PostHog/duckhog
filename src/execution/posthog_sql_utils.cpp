@@ -21,12 +21,14 @@
 
 namespace duckdb {
 
-/// Serialize a Value to valid SQL for INSERT statements.
+/// Serialize a Value to valid SQL.
 ///
 /// DuckDB's Value::ToSQLString() falls through to ToString() for MAP, which
 /// produces the display format {k=v, ...} — not valid SQL.  We emit
-/// MAP {'key': val, ...} instead, recursing for nested types.
-static string ValueToInsertSQL(const Value &val) {
+/// MAP {'key': val, ...} instead, recursing for nested types.  Also used by
+/// FilterToSQL so pushed-down constants on MAP/STRUCT/LIST columns serialize
+/// correctly.
+static string ValueToSQL(const Value &val) {
 	if (val.IsNull()) {
 		return val.ToSQLString();
 	}
@@ -39,10 +41,10 @@ static string ValueToInsertSQL(const Value &val) {
 			auto &entry = children[i];
 			auto &kv = StructValue::GetChildren(entry);
 			// key
-			sql += ValueToInsertSQL(kv[0]);
+			sql += ValueToSQL(kv[0]);
 			sql += ": ";
 			// value
-			sql += ValueToInsertSQL(kv[1]);
+			sql += ValueToSQL(kv[1]);
 			if (i < children.size() - 1) {
 				sql += ", ";
 			}
@@ -59,7 +61,7 @@ static string ValueToInsertSQL(const Value &val) {
 				sql += ", ";
 			}
 			sql += "'" + StringUtil::Replace(child_types[i].first, "'", "''") + "': ";
-			sql += ValueToInsertSQL(children[i]);
+			sql += ValueToSQL(children[i]);
 		}
 		sql += "}";
 		return sql;
@@ -71,7 +73,7 @@ static string ValueToInsertSQL(const Value &val) {
 			if (i > 0) {
 				sql += ", ";
 			}
-			sql += ValueToInsertSQL(children[i]);
+			sql += ValueToSQL(children[i]);
 		}
 		sql += "]";
 		return sql;
@@ -114,7 +116,7 @@ string BuildInsertSQL(const string &qualified_table, const vector<string> &colum
 			if (col_idx > 0) {
 				sql += ", ";
 			}
-			sql += ValueToInsertSQL(chunk.GetValue(col_idx, row_idx));
+			sql += ValueToSQL(chunk.GetValue(col_idx, row_idx));
 		}
 		sql += ")";
 	}
@@ -159,7 +161,7 @@ string FilterToSQL(const TableFilter &filter, const string &column_expr) {
 	switch (filter.filter_type) {
 	case TableFilterType::CONSTANT_COMPARISON: {
 		auto &cmp = filter.Cast<ConstantFilter>();
-		return column_expr + " " + ComparisonOperatorToSQL(cmp.comparison_type) + " " + cmp.constant.ToSQLString();
+		return column_expr + " " + ComparisonOperatorToSQL(cmp.comparison_type) + " " + ValueToSQL(cmp.constant);
 	}
 	case TableFilterType::IS_NULL:
 		return column_expr + " IS NULL";
@@ -168,28 +170,17 @@ string FilterToSQL(const TableFilter &filter, const string &column_expr) {
 	case TableFilterType::CONJUNCTION_AND:
 	case TableFilterType::CONJUNCTION_OR: {
 		// Empty-string convention: a child returning "" means "no SQL
-		// constraint, treat as TRUE". AND can drop TRUE children safely; OR
-		// with a TRUE child collapses to TRUE (return "") because emitting
-		// only the non-empty siblings would be stricter than the original
-		// filter — fine here because the residual filter operator above the
-		// scan still applies it, but we shouldn't emit incorrect SQL.
+		// constraint, treat as TRUE". AND drops TRUE children; OR with a TRUE
+		// child collapses to TRUE (return ""). Children that throw propagate
+		// — silently dropping a translatable-but-unhandled child of an AND
+		// would emit a more-permissive WHERE, and the residual filter does
+		// not always reapply (see PostHogRemoteScan::GetFunction).
 		const bool is_and = filter.filter_type == TableFilterType::CONJUNCTION_AND;
-		auto &conj = is_and ? static_cast<const ConjunctionFilter &>(filter.Cast<ConjunctionAndFilter>())
-		                    : static_cast<const ConjunctionFilter &>(filter.Cast<ConjunctionOrFilter>());
+		auto &conj = static_cast<const ConjunctionFilter &>(filter);
 		const char *sep = is_and ? " AND " : " OR ";
 		string out;
 		for (auto &child : conj.child_filters) {
-			string child_sql;
-			try {
-				child_sql = FilterToSQL(*child, column_expr);
-			} catch (const NotImplementedException &) {
-				// Untranslatable child: AND can drop it (residual still
-				// applies), OR collapses to TRUE.
-				if (!is_and) {
-					return string();
-				}
-				continue;
-			}
+			string child_sql = FilterToSQL(*child, column_expr);
 			if (child_sql.empty()) {
 				if (!is_and) {
 					return string();
@@ -216,7 +207,7 @@ string FilterToSQL(const TableFilter &filter, const string &column_expr) {
 			if (i > 0) {
 				out += ", ";
 			}
-			out += in_filter.values[i].ToSQLString();
+			out += ValueToSQL(in_filter.values[i]);
 		}
 		out += ")";
 		return out;
@@ -230,8 +221,7 @@ string FilterToSQL(const TableFilter &filter, const string &column_expr) {
 		// child_name is empty, dotted-name access otherwise.
 		string child_expr;
 		if (struct_filter.child_name.empty()) {
-			child_expr = "struct_extract_at(" + column_expr + ", " +
-			             std::to_string(struct_filter.child_idx + 1) + ")";
+			child_expr = "struct_extract_at(" + column_expr + ", " + std::to_string(struct_filter.child_idx + 1) + ")";
 		} else {
 			child_expr = column_expr + "." + QuoteIdent(struct_filter.child_name);
 		}

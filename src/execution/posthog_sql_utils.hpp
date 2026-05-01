@@ -30,11 +30,11 @@ string BuildInsertSQL(const string &qualified_table, const vector<string> &colum
                       const string &on_conflict_clause = "");
 
 /// Translate a TableFilter into a SQL boolean expression on `column_expr` (a
-/// quoted SQL identifier or expression). Returns an empty string for
-/// optional/dynamic/unknown filters that can be safely skipped — the residual
-/// filter operator above the scan will still apply them. Throws
-/// NotImplementedException for filter shapes whose semantics cannot be
-/// preserved by skipping.
+/// quoted SQL identifier or expression). Returns an empty string for filter
+/// shapes whose semantics permit skipping (OPTIONAL_FILTER and DYNAMIC_FILTER
+/// — the optimizer keeps a residual above the scan or applies the filter
+/// elsewhere). Throws NotImplementedException for unhandled types so callers
+/// fail loudly rather than emit a too-permissive WHERE clause.
 string FilterToSQL(const TableFilter &filter, const string &column_expr);
 
 } // namespace duckdb
