@@ -24,6 +24,9 @@ require-env DUCKHOG_USER
 require-env DUCKHOG_PASSWORD
 
 statement ok
+INSTALL json;
+
+statement ok
 LOAD json;
 
 statement ok
