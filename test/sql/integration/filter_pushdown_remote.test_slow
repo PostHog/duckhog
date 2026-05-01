@@ -1,0 +1,171 @@
+# name: test/sql/integration/filter_pushdown_remote.test_slow
+# description: Verify filters are translated into remote WHERE (not just applied locally)
+# group: [integration]
+
+#
+# Strategy: turn on JSON profiling, run the target query, then read the
+# profile and check the POSTHOG_REMOTE_SCAN operator's actual cardinality.
+# Without pushdown the scan would emit every row (8 in `t`) and the residual
+# above the scan would filter them down — so a scan cardinality equal to the
+# expected match count proves the WHERE was pushed.
+#
+# Companion correctness suites (select_remote / struct_types_remote) catch
+# wrong-SQL emission; this file catches the silent "filter never reached the
+# remote side" failure.
+
+require duckhog
+
+require-env FLIGHT_HOST
+
+require-env FLIGHT_PORT
+
+require-env DUCKHOG_USER
+
+require-env DUCKHOG_PASSWORD
+
+statement ok
+LOAD json;
+
+statement ok
+ATTACH 'hog:ducklake?user=${DUCKHOG_USER}&password=${DUCKHOG_PASSWORD}&flight_server=grpc+tls://${FLIGHT_HOST}:${FLIGHT_PORT}&tls_skip_verify=true' AS remote_flight;
+
+statement ok
+DROP SCHEMA IF EXISTS remote_flight.pushdown_test CASCADE;
+
+statement ok
+CREATE SCHEMA remote_flight.pushdown_test;
+
+# --- Seed ---
+
+statement ok
+CREATE TABLE remote_flight.pushdown_test.t(id INT, name VARCHAR, score DOUBLE);
+
+statement ok
+INSERT INTO remote_flight.pushdown_test.t VALUES
+    (1, 'alice',  95.5),
+    (2, 'bob',    82.0),
+    (3, 'carol',  78.3),
+    (4, 'dave',   91.0),
+    (5, 'eve',    NULL),
+    (6, NULL,     65.0),
+    (7, 'grace',  95.5),
+    (8, 'heidi',  50.0),
+    -- 'alice2' exists so a `LIKE 'alice'` test below detects accidental
+    -- prefix-match drift on the remote side: prefix semantics would match
+    -- both rows and bump scan cardinality from 1 to 2.
+    (9, 'alice2', 70.0);
+
+statement ok
+CREATE TABLE remote_flight.pushdown_test.s(id INT, s STRUCT(i INTEGER, j INTEGER));
+
+statement ok
+INSERT INTO remote_flight.pushdown_test.s VALUES
+    (1, {'i': 10, 'j': 20}),
+    (2, {'i': 30, 'j': 40}),
+    (3, {'i': 50, 'j': 60}),
+    (4, {'i': NULL, 'j': 42});
+
+# --- Helper: scalar macro returning the POSTHOG_REMOTE_SCAN operator's
+# actual cardinality from the most recent JSON profile dump. Joins on parent
+# id so the operator_name="POSTHOG_REMOTE_SCAN" sibling pins which node's
+# cardinality we read.
+statement ok
+CREATE OR REPLACE MACRO scan_card(profile_path) AS (
+    SELECT cards.card
+    FROM (
+        SELECT j.parent AS pid, j.value::BIGINT AS card
+        FROM read_text(profile_path) t, json_tree(t.content) j
+        WHERE j.key = 'operator_cardinality'
+    ) cards
+    JOIN (
+        SELECT k.parent AS pid
+        FROM read_text(profile_path) t2, json_tree(t2.content) k
+        WHERE k.key = 'operator_name' AND k.value = '"POSTHOG_REMOTE_SCAN"'
+    ) names USING (pid)
+);
+
+statement ok
+PRAGMA enable_profiling='json';
+
+statement ok
+PRAGMA profiling_output='__TEST_DIR__/profile.json';
+
+# ============================================================
+# Scalar IN with single value
+# ============================================================
+
+statement ok
+SELECT id FROM remote_flight.pushdown_test.t WHERE id IN (4);
+
+statement ok
+PRAGMA disable_profiling;
+
+query I
+SELECT scan_card('__TEST_DIR__/profile.json');
+----
+1
+
+# ============================================================
+# Scalar IN with multiple non-contiguous values
+# DuckDB collapses contiguous IN lists like (3,4,5) into a range filter,
+# which would scan exactly 3 rows even without IN_FILTER pushdown — so we
+# pick values that span both endpoints to actually exercise the IN-list
+# remote-SQL emission.
+# ============================================================
+
+statement ok
+PRAGMA enable_profiling='json';
+
+statement ok
+SELECT id FROM remote_flight.pushdown_test.t WHERE id IN (1, 4, 7);
+
+statement ok
+PRAGMA disable_profiling;
+
+query I
+SELECT scan_card('__TEST_DIR__/profile.json');
+----
+3
+
+# ============================================================
+# LIKE pushdown (no wildcard reduces to equality on the remote)
+# ============================================================
+
+statement ok
+PRAGMA enable_profiling='json';
+
+statement ok
+SELECT id FROM remote_flight.pushdown_test.t WHERE name LIKE 'alice';
+
+statement ok
+PRAGMA disable_profiling;
+
+query I
+SELECT scan_card('__TEST_DIR__/profile.json');
+----
+1
+
+# ============================================================
+# STRUCT field equality
+# ============================================================
+
+statement ok
+PRAGMA enable_profiling='json';
+
+statement ok
+SELECT id FROM remote_flight.pushdown_test.s WHERE s.j = 40;
+
+statement ok
+PRAGMA disable_profiling;
+
+query I
+SELECT scan_card('__TEST_DIR__/profile.json');
+----
+1
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP SCHEMA remote_flight.pushdown_test CASCADE;
