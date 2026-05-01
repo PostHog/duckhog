@@ -192,7 +192,16 @@ BindInfo PostHogRemoteScan::GetBindInfo(const optional_ptr<FunctionData> bind_da
 TableFunction PostHogRemoteScan::GetFunction() {
 	TableFunction func("posthog_remote_scan", {}, Execute, Bind, InitGlobal, InitLocal);
 	func.projection_pushdown = true;
-	func.filter_pushdown = false; // TODO: Implement filter pushdown
+	// PostHogArrowStream::Produce translates every TableFilterType DuckDB
+	// pushes into a remote WHERE clause via FilterToSQL. Safety invariant:
+	// FilterToSQL must handle every shape that GenerateTableScanFilters can
+	// produce. DuckDB keeps constant-comparison residuals above the scan, but
+	// LIKE/IN/range filters produced by TryPushdownExpression are removed
+	// from the residual and only applied at the scan — silently dropping
+	// such a shape would return wrong rows. New TableFilterTypes must extend
+	// FilterToSQL; the default branch throws so unhandled shapes surface as
+	// loud query errors rather than silent data loss.
+	func.filter_pushdown = true;
 	func.table_scan_progress = Progress;
 	func.get_bind_info = GetBindInfo;
 	return func;

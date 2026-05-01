@@ -103,8 +103,33 @@ SELECT id, name FROM remote_flight.select_test.t WHERE id IN (1, 4, 7) ORDER BY 
 4	dave
 7	grace
 
+# Single-element IN: catches a remote-SQL emitter that drops parens or
+# rewrites IN(x) into something other than `id = x`.
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE id IN (4);
+----
+4	dave
+
+# Multi-element IN with genuinely non-contiguous values that span both
+# endpoints of the table — DuckDB only collapses contiguous IN lists into
+# range filters, so these values exercise the IN_FILTER emission path and
+# would fail if the remote-side IN list were dropped or mis-bracketed.
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE id IN (2, 5, 8) ORDER BY id;
+----
+2	bob
+5	eve
+8	heidi
+
 query IT
 SELECT id, name FROM remote_flight.select_test.t WHERE name LIKE 'a%';
+----
+1	alice
+
+# LIKE with no wildcard reduces to equality on the remote — guards against
+# emitting `name LIKE alice` (unquoted) or otherwise mangling the literal.
+query IT
+SELECT id, name FROM remote_flight.select_test.t WHERE name LIKE 'alice';
 ----
 1	alice
 

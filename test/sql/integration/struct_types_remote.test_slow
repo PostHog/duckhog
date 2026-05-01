@@ -63,6 +63,26 @@ SELECT id, s.i, s.j FROM remote_flight.struct_types.basic WHERE id = 4;
 4	NULL	42
 
 # ============================================================
+# Filter pushdown on struct fields (correctness)
+# Pushed down as `s.j = 40` / `s.i IS NULL` on the remote — verify the
+# emitted SQL preserves dotted-name access and returns exactly the matching
+# row(s).
+# ============================================================
+
+query I
+SELECT id FROM remote_flight.struct_types.basic WHERE s.j = 40;
+----
+2
+
+# s.i IS NULL matches both id=3 (whole struct NULL → field projects to NULL)
+# and id=4 (struct present, i field NULL).
+query I
+SELECT id FROM remote_flight.struct_types.basic WHERE s.i IS NULL ORDER BY id;
+----
+3
+4
+
+# ============================================================
 # STRUCT with VARCHAR fields
 # ============================================================
 
@@ -147,6 +167,13 @@ query II
 SELECT s.inner_s.x, s.inner_s.y FROM remote_flight.struct_types.nested WHERE id = 1;
 ----
 1	2
+
+# Filter pushdown through nested struct field — must emit
+# `"s"."inner_s"."x" = 1`, not flatten or skip a level.
+query I
+SELECT id FROM remote_flight.struct_types.nested WHERE s.inner_s.x = 1;
+----
+1
 
 # ============================================================
 # STRUCT with LIST field

@@ -73,6 +73,44 @@ unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream
 	}
 	string query = "SELECT " + columns_str + " FROM " + table_ref;
 
+	// Translate every pushed-down filter into a remote WHERE clause. Any
+	// TableFilterType FilterToSQL doesn't handle propagates as
+	// NotImplementedException — see the safety note in
+	// PostHogRemoteScan::GetFunction for why silent skips would be unsafe
+	// for LIKE/IN/range residuals.
+	if (parameters.filters && !parameters.filters->filters.empty()) {
+		string where_clause;
+		for (auto &entry : parameters.filters->filters) {
+			auto pos = entry.first;
+			auto it = parameters.projected_columns.filter_to_col.find(pos);
+			if (it == parameters.projected_columns.filter_to_col.end()) {
+				// Filter references a column outside the projected set
+				// (rowid placeholder path, etc.). DuckDB still applies it
+				// because the column wasn't requested for pushdown.
+				continue;
+			}
+			auto col_id = it->second;
+			if (col_id == COLUMN_IDENTIFIER_ROW_ID) {
+				continue;
+			}
+			if (col_id >= bind_data->column_names.size()) {
+				continue;
+			}
+			auto column_expr = QuoteIdent(bind_data->column_names[col_id]);
+			string filter_sql = FilterToSQL(*entry.second, column_expr);
+			if (filter_sql.empty()) {
+				continue;
+			}
+			if (!where_clause.empty()) {
+				where_clause += " AND ";
+			}
+			where_clause += filter_sql;
+		}
+		if (!where_clause.empty()) {
+			query += " WHERE " + where_clause;
+		}
+	}
+
 	// Execute the projected query via Flight SQL.
 	auto stream_state = std::make_shared<PostHogArrowStreamState>(bind_data->catalog, query, factory->txn_id);
 
