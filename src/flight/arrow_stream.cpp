@@ -73,6 +73,49 @@ unique_ptr<ArrowArrayStreamWrapper> PostHogArrowStream::Produce(uintptr_t stream
 	}
 	string query = "SELECT " + columns_str + " FROM " + table_ref;
 
+	// Push translatable filters down into a WHERE clause. Untranslatable
+	// shapes (EXPRESSION_FILTER, dynamic, etc.) are left for the residual
+	// filter operator above the scan — that path is preserved by DuckDB's
+	// ArrowScanFunction even when filter_pushdown is enabled, so partial
+	// pushdown is correctness-safe.
+	if (parameters.filters && !parameters.filters->filters.empty()) {
+		string where_clause;
+		for (auto &entry : parameters.filters->filters) {
+			auto pos = entry.first;
+			auto it = parameters.projected_columns.filter_to_col.find(pos);
+			if (it == parameters.projected_columns.filter_to_col.end()) {
+				// Filter on a column outside the projected set (rowid placeholder
+				// path, etc.). Skip — the residual filter handles it.
+				continue;
+			}
+			auto col_id = it->second;
+			if (col_id == COLUMN_IDENTIFIER_ROW_ID) {
+				continue;
+			}
+			if (col_id >= bind_data->column_names.size()) {
+				continue;
+			}
+			auto column_expr = QuoteIdent(bind_data->column_names[col_id]);
+			string filter_sql;
+			try {
+				filter_sql = FilterToSQL(*entry.second, column_expr);
+			} catch (const NotImplementedException &) {
+				// Leave to the residual.
+				continue;
+			}
+			if (filter_sql.empty()) {
+				continue;
+			}
+			if (!where_clause.empty()) {
+				where_clause += " AND ";
+			}
+			where_clause += filter_sql;
+		}
+		if (!where_clause.empty()) {
+			query += " WHERE " + where_clause;
+		}
+	}
+
 	// Execute the projected query via Flight SQL.
 	auto stream_state = std::make_shared<PostHogArrowStreamState>(bind_data->catalog, query, factory->txn_id);
 

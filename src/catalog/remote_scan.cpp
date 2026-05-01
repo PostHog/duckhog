@@ -192,7 +192,13 @@ BindInfo PostHogRemoteScan::GetBindInfo(const optional_ptr<FunctionData> bind_da
 TableFunction PostHogRemoteScan::GetFunction() {
 	TableFunction func("posthog_remote_scan", {}, Execute, Bind, InitGlobal, InitLocal);
 	func.projection_pushdown = true;
-	func.filter_pushdown = false; // TODO: Implement filter pushdown
+	// Filter pushdown is partial: PostHogArrowStream::Produce translates the
+	// filter shapes it knows (CONSTANT_COMPARISON, IS NULL, IS NOT NULL, IN,
+	// AND, OR, STRUCT_EXTRACT, OPTIONAL_FILTER) into a remote WHERE clause.
+	// DuckDB's ArrowScanFunction still applies the full filter set as a
+	// residual above the scan, so untranslatable shapes don't lose
+	// correctness — they just don't reduce wire traffic.
+	func.filter_pushdown = true;
 	func.table_scan_progress = Progress;
 	func.get_bind_info = GetBindInfo;
 	return func;
