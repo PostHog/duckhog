@@ -24,7 +24,7 @@ jobs:
     # action references; the org-wide "Require actions to be pinned to a SHA"
     # policy applies transitively to called reusable workflows.
     # Upstream PR: https://github.com/duckdb/extension-ci-tools/pull/379
-    uses: PostHog/extension-ci-tools/.github/workflows/_extension_distribution.yml@d3e0ee09e2e392941f2e390e6cbab108a095daa4 # chore/pin-internal-actions
+    uses: PostHog/extension-ci-tools/.github/workflows/_extension_distribution.yml@508d9a6bdc30636633857eaa916f474b9857bc1f # v1.5-variegata + pins
     with:
       duckdb_version: v1.5.2
       ci_tools_version: v1.5-variegata
@@ -47,7 +47,7 @@ jobs:
     # action references; the org-wide "Require actions to be pinned to a SHA"
     # policy applies transitively to called reusable workflows.
     # Upstream PR: https://github.com/duckdb/extension-ci-tools/pull/379
-    uses: PostHog/extension-ci-tools/.github/workflows/_extension_distribution.yml@d3e0ee09e2e392941f2e390e6cbab108a095daa4 # chore/pin-internal-actions
+    uses: PostHog/extension-ci-tools/.github/workflows/_extension_distribution.yml@508d9a6bdc30636633857eaa916f474b9857bc1f # v1.5-variegata + pins
     with:
       duckdb_version: v1.5.2
       ci_tools_version: v1.5-variegata
@@ -69,7 +69,7 @@ jobs:
     # action references; the org-wide "Require actions to be pinned to a SHA"
     # policy applies transitively to called reusable workflows.
     # Upstream PR: https://github.com/duckdb/extension-ci-tools/pull/379
-    uses: PostHog/extension-ci-tools/.github/workflows/_extension_code_quality.yml@d3e0ee09e2e392941f2e390e6cbab108a095daa4 # chore/pin-internal-actions
+    uses: PostHog/extension-ci-tools/.github/workflows/_extension_code_quality.yml@508d9a6bdc30636633857eaa916f474b9857bc1f # v1.5-variegata + pins
     with:
       duckdb_version: v1.5.2
       ci_tools_version: v1.5-variegata
