@@ -18,7 +18,11 @@ concurrency:
 jobs:
   duckdb-next-build:
     name: Build extension binaries (DuckDB main)
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@1d3a50b3414534f6787e28c1c5efaafb4beb4e8f
+    # Use PostHog's fork of duckdb/extension-ci-tools that SHA-pins its internal
+    # action references; the org-wide "Require actions to be pinned to a SHA"
+    # policy applies transitively to called reusable workflows.
+    # Upstream PR: https://github.com/duckdb/extension-ci-tools/pull/379
+    uses: PostHog/extension-ci-tools/.github/workflows/_extension_distribution.yml@d3e0ee09e2e392941f2e390e6cbab108a095daa4 # chore/pin-internal-actions
     with:
       duckdb_version: main
       ci_tools_version: main

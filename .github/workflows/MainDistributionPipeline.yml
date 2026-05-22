@@ -20,7 +20,11 @@ jobs:
   duckdb-stable-build-main:
     name: Build extension binaries (main)
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@ec20f45aabeb9fcfcfa044dda249597f066d4826
+    # Use PostHog's fork of duckdb/extension-ci-tools that SHA-pins its internal
+    # action references; the org-wide "Require actions to be pinned to a SHA"
+    # policy applies transitively to called reusable workflows.
+    # Upstream PR: https://github.com/duckdb/extension-ci-tools/pull/379
+    uses: PostHog/extension-ci-tools/.github/workflows/_extension_distribution.yml@d3e0ee09e2e392941f2e390e6cbab108a095daa4 # chore/pin-internal-actions
     with:
       duckdb_version: v1.5.2
       ci_tools_version: v1.5-variegata
@@ -39,7 +43,11 @@ jobs:
   duckdb-stable-build-pr:
     name: Build extension binaries (PR)
     if: ${{ github.event_name == 'pull_request' }}
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@ec20f45aabeb9fcfcfa044dda249597f066d4826
+    # Use PostHog's fork of duckdb/extension-ci-tools that SHA-pins its internal
+    # action references; the org-wide "Require actions to be pinned to a SHA"
+    # policy applies transitively to called reusable workflows.
+    # Upstream PR: https://github.com/duckdb/extension-ci-tools/pull/379
+    uses: PostHog/extension-ci-tools/.github/workflows/_extension_distribution.yml@d3e0ee09e2e392941f2e390e6cbab108a095daa4 # chore/pin-internal-actions
     with:
       duckdb_version: v1.5.2
       ci_tools_version: v1.5-variegata
@@ -57,7 +65,11 @@ jobs:
 
   code-quality-check:
     name: Code Quality Check
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@ec20f45aabeb9fcfcfa044dda249597f066d4826
+    # Use PostHog's fork of duckdb/extension-ci-tools that SHA-pins its internal
+    # action references; the org-wide "Require actions to be pinned to a SHA"
+    # policy applies transitively to called reusable workflows.
+    # Upstream PR: https://github.com/duckdb/extension-ci-tools/pull/379
+    uses: PostHog/extension-ci-tools/.github/workflows/_extension_code_quality.yml@d3e0ee09e2e392941f2e390e6cbab108a095daa4 # chore/pin-internal-actions
     with:
       duckdb_version: v1.5.2
       ci_tools_version: v1.5-variegata
