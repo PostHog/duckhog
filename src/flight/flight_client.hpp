@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <mutex>
 #include <cstddef>
@@ -30,6 +31,13 @@ struct PostHogDbSchemaInfo {
 	std::string catalog_name;
 	std::string schema_name;
 };
+
+struct PostHogTableMetadata {
+	std::string table_name;
+	std::shared_ptr<arrow::Schema> arrow_schema;
+};
+
+arrow::Result<std::shared_ptr<arrow::Schema>> DeserializeFlightSqlTableSchema(std::string_view schema_bytes);
 
 class PostHogFlightQueryStream {
 public:
@@ -122,6 +130,9 @@ public:
 
 	// List all tables in a schema
 	std::vector<std::string> ListTables(const std::string &catalog, const std::string &schema);
+
+	// List all tables in a schema with their Arrow schemas from one Flight SQL metadata stream.
+	std::vector<PostHogTableMetadata> ListTablesWithSchemas(const std::string &catalog, const std::string &schema);
 
 	// Get the schema of a specific table
 	std::shared_ptr<arrow::Schema> GetTableSchema(const std::string &catalog, const std::string &schema,
