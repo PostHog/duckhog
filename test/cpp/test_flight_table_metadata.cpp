@@ -105,8 +105,8 @@ public:
 		std::vector<arrow::flight::FlightEndpoint> endpoints;
 		endpoints.emplace_back(arrow::flight::Ticket(descriptor.cmd), std::vector<arrow::flight::Location> {},
 		                       std::nullopt, "");
-		auto info = arrow::flight::FlightInfo::Make(*response_schema, descriptor, endpoints,
-		                                            MatchingSchemaCount(command), -1);
+		auto info =
+		    arrow::flight::FlightInfo::Make(*response_schema, descriptor, endpoints, MatchingSchemaCount(command), -1);
 		if (!info.ok()) {
 			return info.status();
 		}
@@ -254,8 +254,9 @@ private:
 				return status;
 			}
 			if (include_schema_column) {
-				auto table_schema = arrow::schema({arrow::field("id", arrow::int64()),
-				                                   arrow::field("payload_" + std::to_string(table_idx), arrow::utf8())});
+				auto table_schema =
+				    arrow::schema({arrow::field("id", arrow::int64()),
+				                   arrow::field("payload_" + std::to_string(table_idx), arrow::utf8())});
 				std::string schema_bytes;
 				if (malformed_schema_table_index_ && *malformed_schema_table_index_ == table_idx) {
 					schema_bytes = "not an arrow schema";
@@ -506,8 +507,9 @@ TEST_CASE("Catalog table loading uses batched metadata instead of per-table sche
 	DuckDB db(nullptr, &config);
 	Connection con(db);
 
-	auto attach_sql = "ATTACH 'hog:remote_catalog?user=user&password=password&flight_server=" +
-	                  running_server.Endpoint() + "&tls_skip_verify=true' AS remote";
+	auto attach_sql =
+	    "ATTACH 'hog:remote_catalog?user=user&password=password&flight_server=" + running_server.Endpoint() +
+	    "&tls_skip_verify=true' AS remote";
 	auto attach_result = con.Query(attach_sql);
 	REQUIRE_FALSE(attach_result->HasError());
 

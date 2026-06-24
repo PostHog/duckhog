@@ -501,7 +501,7 @@ void PostHogSchemaEntry::LoadTablesIfNeeded(ClientContext &context) {
 }
 
 void PostHogSchemaEntry::CreateTableEntryFromSchema(ClientContext &context, const string &table_name,
-                                                    std::shared_ptr<arrow::Schema> arrow_schema) {
+                                                    const std::shared_ptr<arrow::Schema> &arrow_schema) {
 	auto op_started_at = SteadyClock::now();
 	POSTHOG_LOG_DEBUG("Schema '%s': CreateTableEntryFromSchema start table='%s'", name.c_str(), table_name.c_str());
 
@@ -522,9 +522,8 @@ void PostHogSchemaEntry::CreateTableEntryFromSchema(ClientContext &context, cons
 
 	auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, arrow_schema);
 	table_cache_.emplace(table_name, std::move(table_entry));
-	POSTHOG_LOG_DEBUG("Schema '%s': CreateTableEntryFromSchema done table='%s' fields=%zu total_ms=%lld",
-	                  name.c_str(), table_name.c_str(), column_names.size(),
-	                  static_cast<long long>(ElapsedMillis(op_started_at)));
+	POSTHOG_LOG_DEBUG("Schema '%s': CreateTableEntryFromSchema done table='%s' fields=%zu total_ms=%lld", name.c_str(),
+	                  table_name.c_str(), column_names.size(), static_cast<long long>(ElapsedMillis(op_started_at)));
 }
 
 void PostHogSchemaEntry::CreateTableEntry(ClientContext &context, const string &table_name) {

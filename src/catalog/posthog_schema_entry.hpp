@@ -84,7 +84,7 @@ private:
 
 	// Create a table entry from already-fetched Arrow metadata
 	void CreateTableEntryFromSchema(ClientContext &context, const string &table_name,
-	                                std::shared_ptr<arrow::Schema> arrow_schema);
+	                                const std::shared_ptr<arrow::Schema> &arrow_schema);
 
 	// Get or create a table entry
 	optional_ptr<PostHogTableEntry> GetOrCreateTable(ClientContext &context, const string &table_name);

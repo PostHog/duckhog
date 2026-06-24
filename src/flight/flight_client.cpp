@@ -240,8 +240,8 @@ std::string_view ReadBinaryColumn(const std::shared_ptr<arrow::Array> &array, in
 	}
 }
 
-arrow::Status DrainFlightStream(arrow::flight::FlightStreamReader &stream, const char *operation,
-                                size_t &drain_chunks, size_t &drain_rows) {
+arrow::Status DrainFlightStream(arrow::flight::FlightStreamReader &stream, const char *operation, size_t &drain_chunks,
+                                size_t &drain_rows) {
 	while (true) {
 		auto drain_started_at = SteadyClock::now();
 		auto next_chunk_result = stream.Next();
@@ -1051,12 +1051,12 @@ std::vector<PostHogTableMetadata> PostHogFlightClient::ListTablesWithSchemas(con
 			if (!processing_status.ok()) {
 				size_t drain_chunks = 0;
 				size_t drain_rows = 0;
-				auto drain_status = DrainFlightStream(*stream, "Flight ListTablesWithSchemas error", drain_chunks,
-				                                      drain_rows);
+				auto drain_status =
+				    DrainFlightStream(*stream, "Flight ListTablesWithSchemas error", drain_chunks, drain_rows);
 				if (!drain_status.ok()) {
-					return arrow::Status::Invalid(processing_status.ToString() +
-					                             "; additionally failed to drain metadata stream: " +
-					                             drain_status.ToString());
+					return arrow::Status::Invalid(
+					    processing_status.ToString() +
+					    "; additionally failed to drain metadata stream: " + drain_status.ToString());
 				}
 				POSTHOG_LOG_DEBUG(
 				    "Flight ListTablesWithSchemas drained after metadata error endpoint=%llu chunks=%zu rows=%zu",
@@ -1199,9 +1199,9 @@ PostHogFlightClient::GetTableSchema(const std::string &catalog, const std::strin
 		auto drain_status = DrainFlightStream(*stream, "Flight GetTableSchema", drain_chunks, drain_rows);
 		if (!drain_status.ok()) {
 			if (!processing_status.ok()) {
-				return arrow::Status::Invalid(processing_status.ToString() +
-				                             "; additionally failed to drain metadata stream: " +
-				                             drain_status.ToString());
+				return arrow::Status::Invalid(
+				    processing_status.ToString() +
+				    "; additionally failed to drain metadata stream: " + drain_status.ToString());
 			}
 			return drain_status;
 		}
