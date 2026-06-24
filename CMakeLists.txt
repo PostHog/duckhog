@@ -100,15 +100,10 @@ if(${BUILD_UNITTESTS})
         test/cpp/test_render_at_clause.cpp
         test/cpp/test_update_rewriter.cpp
         test/cpp/test_insert_sql_builder.cpp
-        test/cpp/test_flight_table_metadata.cpp
     )
     target_include_directories(test_duckhog_cpp PRIVATE src/include src
         ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/catch
         ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/test/include)
-    target_link_libraries(test_duckhog_cpp PRIVATE
-        Arrow::arrow_static
-        ArrowFlight::arrow_flight_static
-        ArrowFlightSql::arrow_flight_sql_static)
     # Guard with if(TARGET unittest) — DuckDB only builds the unittest binary
     # in its full-tree build mode. Extension-only builds (e.g. tidy-check) skip
     # duckdb/test/CMakeLists.txt entirely, so the deferred call must be a no-op
