@@ -254,14 +254,14 @@ jobs:
 
       - name: Start Duckgres control-plane (token expiry mode)
         env:
-          DUCKGRES_FLIGHT_SESSION_TOKEN_TTL: 100ms
+          DUCKGRES_FLIGHT_SESSION_TOKEN_TTL: 1s
         run: |
           ./scripts/test-servers.sh start --background --seed
 
       - name: Run session token invalidation recovery SQLLogicTest
         env:
           DUCKHOG_TOKEN_EXPIRY_TEST: 1
-          DUCKGRES_FLIGHT_SESSION_TOKEN_TTL: 100ms
+          DUCKGRES_FLIGHT_SESSION_TOKEN_TTL: 1s
         run: |
           eval "$(./scripts/test-servers.sh env)"
           ./build/release/test/unittest \
