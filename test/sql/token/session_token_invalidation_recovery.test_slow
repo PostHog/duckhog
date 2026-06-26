@@ -13,11 +13,11 @@ require-env DUCKHOG_USER
 require-env DUCKHOG_PASSWORD
 
 # Guarded test mode:
-# - start duckgres with DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=100ms
+# - start duckgres with DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=1s
 # - set DUCKHOG_TOKEN_EXPIRY_TEST=1
-# NOTE: This test is intentionally brittle/slow. It depends on short token TTL
-# timing and a heavy local CPU query to force expiry before the next remote RPC.
-# If TTL/env or local performance changes, pass/fail behavior can flip.
+# NOTE: This test intentionally sleeps longer than the dedicated token TTL to
+# force expiry before the next remote RPC. Keep setup work comfortably below the
+# TTL so the expected failure happens at the explicit expiry point below.
 require-env DUCKGRES_FLIGHT_SESSION_TOKEN_TTL
 
 require-env DUCKHOG_TOKEN_EXPIRY_TEST
@@ -34,11 +34,11 @@ CREATE TABLE remote.main.session_token_invalidation_recovery(id INTEGER, v VARCH
 statement ok
 INSERT INTO remote.main.session_token_invalidation_recovery VALUES (1, 'a'), (2, 'b'), (3, 'c');
 
-# Burn local CPU to exceed short token TTL between remote calls.
+# Sleep locally to exceed short token TTL between remote calls.
 query I
-SELECT SUM(i) FROM range(4000000000) t(i);
+SELECT pg_sleep(2);
 ----
-7999999998000000000
+NULL
 
 # This call should fail once due to an expired token.
 statement error

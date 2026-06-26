@@ -85,11 +85,11 @@ dedicated server config (`DUCKGRES_FLIGHT_SESSION_TOKEN_TTL`).
 
 ```bash
 # Start server in token-expiry mode
-DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=100ms ./scripts/test-servers.sh start --background --seed
+DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=1s ./scripts/test-servers.sh start --background --seed
 
 # Run token regression tests
 eval "$(./scripts/test-servers.sh env)"
-DUCKHOG_TOKEN_EXPIRY_TEST=1 DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=100ms \
+DUCKHOG_TOKEN_EXPIRY_TEST=1 DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=1s \
   ./build/release/test/unittest "test/sql/token/*"
 
 # Stop server when done

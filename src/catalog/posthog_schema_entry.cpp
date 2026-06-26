@@ -444,14 +444,14 @@ void PostHogSchemaEntry::LoadTablesIfNeeded(ClientContext &context) {
 		std::cerr << "[PostHog] Loading tables for catalog." << remote_catalog << ".schema." << name << '\n';
 		auto &client = posthog_catalog_.GetFlightClient();
 		auto list_tables_started_at = SteadyClock::now();
-		auto table_names = client.ListTables(remote_catalog, name);
-		POSTHOG_LOG_DEBUG("Schema '%s': ListTables returned %zu tables in %lld ms", name.c_str(), table_names.size(),
-		                  static_cast<long long>(ElapsedMillis(list_tables_started_at)));
+		auto table_metadata = client.ListTablesWithSchemas(remote_catalog, name);
+		POSTHOG_LOG_DEBUG("Schema '%s': ListTablesWithSchemas returned %zu tables in %lld ms", name.c_str(),
+		                  table_metadata.size(), static_cast<long long>(ElapsedMillis(list_tables_started_at)));
 
 		unordered_set<string> remote_tables;
-		remote_tables.reserve(table_names.size());
-		for (const auto &t : table_names) {
-			remote_tables.insert(t);
+		remote_tables.reserve(table_metadata.size());
+		for (const auto &metadata : table_metadata) {
+			remote_tables.insert(metadata.table_name);
 		}
 
 		// Prune tables that no longer exist remotely.
@@ -465,17 +465,29 @@ void PostHogSchemaEntry::LoadTablesIfNeeded(ClientContext &context) {
 
 		// Create entries for tables not already in cache
 		size_t created_count = 0;
-		for (const auto &table_name : table_names) {
-			if (table_cache_.find(table_name) == table_cache_.end()) {
-				POSTHOG_LOG_DEBUG("Schema '%s': hydrating table '%s'", name.c_str(), table_name.c_str());
-				CreateTableEntry(context, table_name);
-				created_count++;
+		auto create_entries_started_at = SteadyClock::now();
+		for (const auto &metadata : table_metadata) {
+			if (table_cache_.find(metadata.table_name) == table_cache_.end()) {
+				POSTHOG_LOG_DEBUG("Schema '%s': hydrating table '%s' from batched metadata", name.c_str(),
+				                  metadata.table_name.c_str());
+				try {
+					CreateTableEntryFromSchema(context, metadata.table_name, metadata.arrow_schema);
+					created_count++;
+				} catch (const std::exception &e) {
+					POSTHOG_LOG_DEBUG("Table metadata hydration skipped for '%s.%s': %s", name.c_str(),
+					                  metadata.table_name.c_str(), e.what());
+					if (IsConnectionFailureMessage(e.what())) {
+						throw CatalogException("PostHog: Not connected to remote server.");
+					}
+				}
 			}
 		}
+		POSTHOG_LOG_DEBUG("Schema '%s': table entry creation total created=%zu elapsed_ms=%lld", name.c_str(),
+		                  created_count, static_cast<long long>(ElapsedMillis(create_entries_started_at)));
 
 		tables_loaded_ = true;
 		tables_loaded_at_ = std::chrono::steady_clock::now();
-		std::cerr << "[PostHog] Loaded " << table_names.size() << " tables for schema " << name << '\n';
+		std::cerr << "[PostHog] Loaded " << table_metadata.size() << " tables for schema " << name << '\n';
 		POSTHOG_LOG_DEBUG("Schema '%s': table load complete (created=%zu cached=%zu total_ms=%lld)", name.c_str(),
 		                  created_count, table_cache_.size(), static_cast<long long>(ElapsedMillis(op_started_at)));
 
@@ -484,7 +496,34 @@ void PostHogSchemaEntry::LoadTablesIfNeeded(ClientContext &context) {
 		if (IsConnectionFailureMessage(e.what())) {
 			throw CatalogException("PostHog: Not connected to remote server.");
 		}
+		throw;
 	}
+}
+
+void PostHogSchemaEntry::CreateTableEntryFromSchema(ClientContext &context, const string &table_name,
+                                                    const std::shared_ptr<arrow::Schema> &arrow_schema) {
+	auto op_started_at = SteadyClock::now();
+	POSTHOG_LOG_DEBUG("Schema '%s': CreateTableEntryFromSchema start table='%s'", name.c_str(), table_name.c_str());
+
+	if (!arrow_schema) {
+		throw InternalException("PostHog: missing Arrow schema for remote table '%s.%s'", name.c_str(),
+		                        table_name.c_str());
+	}
+
+	vector<string> column_names;
+	vector<LogicalType> column_types;
+	PopulateTableSchemaFromArrow(context, arrow_schema, column_names, column_types);
+
+	auto create_info = make_uniq<CreateTableInfo>(*this, table_name);
+	for (idx_t i = 0; i < column_names.size(); i++) {
+		create_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
+	}
+	create_info->columns.Finalize();
+
+	auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, arrow_schema);
+	table_cache_.emplace(table_name, std::move(table_entry));
+	POSTHOG_LOG_DEBUG("Schema '%s': CreateTableEntryFromSchema done table='%s' fields=%zu total_ms=%lld", name.c_str(),
+	                  table_name.c_str(), column_names.size(), static_cast<long long>(ElapsedMillis(op_started_at)));
 }
 
 void PostHogSchemaEntry::CreateTableEntry(ClientContext &context, const string &table_name) {
@@ -508,19 +547,7 @@ void PostHogSchemaEntry::CreateTableEntry(ClientContext &context, const string &
 		auto arrow_schema = client.GetTableSchema(remote_catalog, name, table_name);
 		POSTHOG_LOG_DEBUG("Schema '%s': GetTableSchema('%s') completed in %lld ms", name.c_str(), table_name.c_str(),
 		                  static_cast<long long>(ElapsedMillis(schema_started_at)));
-
-		vector<string> column_names;
-		vector<LogicalType> column_types;
-		PopulateTableSchemaFromArrow(context, arrow_schema, column_names, column_types);
-
-		auto create_info = make_uniq<CreateTableInfo>(*this, table_name);
-		for (idx_t i = 0; i < column_names.size(); i++) {
-			create_info->columns.AddColumn(ColumnDefinition(column_names[i], column_types[i]));
-		}
-		create_info->columns.Finalize();
-
-		auto table_entry = make_uniq<PostHogTableEntry>(catalog, *this, *create_info, posthog_catalog_, arrow_schema);
-		table_cache_.emplace(table_name, std::move(table_entry));
+		CreateTableEntryFromSchema(context, table_name, arrow_schema);
 		POSTHOG_LOG_DEBUG("Schema '%s': CreateTableEntry done table='%s' total_ms=%lld", name.c_str(),
 		                  table_name.c_str(), static_cast<long long>(ElapsedMillis(op_started_at)));
 	} catch (const std::exception &e) {

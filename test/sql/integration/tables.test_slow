@@ -35,3 +35,162 @@ pg_database
 pg_namespace
 pg_roles
 pg_type
+
+# Regression coverage for metadata exploration with many remote tables.
+# The important performance invariant is that the extension can hydrate this
+# schema from one Flight SQL GetTables(include_schema=true) metadata stream
+# rather than issuing one schema RPC per table.
+statement ok
+DROP SCHEMA IF EXISTS remote.metadata_many CASCADE;
+
+statement ok
+CREATE SCHEMA remote.metadata_many;
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_00(id BIGINT, payload VARCHAR, schema_marker_00 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_01(id BIGINT, payload_01 INTEGER, marker_01 BOOLEAN, schema_marker_01 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_02(id BIGINT, payload_02 DOUBLE, marker_02 DATE, schema_marker_02 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_03(id BIGINT, payload VARCHAR, schema_marker_03 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_04(id BIGINT, payload VARCHAR, schema_marker_04 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_05(id BIGINT, payload VARCHAR, schema_marker_05 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_06(id BIGINT, payload VARCHAR, schema_marker_06 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_07(id BIGINT, payload VARCHAR, schema_marker_07 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_08(id BIGINT, payload VARCHAR, schema_marker_08 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_09(id BIGINT, payload VARCHAR, schema_marker_09 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_10(id BIGINT, payload VARCHAR, schema_marker_10 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_11(id BIGINT, payload VARCHAR, schema_marker_11 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_12(id BIGINT, payload VARCHAR, schema_marker_12 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_13(id BIGINT, payload VARCHAR, schema_marker_13 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_14(id BIGINT, payload VARCHAR, schema_marker_14 UTINYINT);
+
+statement ok
+CREATE TABLE remote.metadata_many.metadata_many_15(id BIGINT, payload VARCHAR, schema_marker_15 UTINYINT);
+
+query I
+SELECT COUNT(*)
+FROM duckdb_tables()
+WHERE database_name = 'remote'
+  AND schema_name = 'metadata_many'
+  AND table_name LIKE 'metadata_many_%';
+----
+16
+
+query T rowsort
+SHOW TABLES FROM remote.metadata_many;
+----
+metadata_many_00
+metadata_many_01
+metadata_many_02
+metadata_many_03
+metadata_many_04
+metadata_many_05
+metadata_many_06
+metadata_many_07
+metadata_many_08
+metadata_many_09
+metadata_many_10
+metadata_many_11
+metadata_many_12
+metadata_many_13
+metadata_many_14
+metadata_many_15
+
+query I
+SELECT COUNT(*)
+FROM (SHOW ALL TABLES) AS t
+WHERE t."database" = 'remote'
+  AND t."schema" = 'metadata_many'
+  AND t."name" LIKE 'metadata_many_%';
+----
+16
+
+query T
+SELECT column_name
+FROM information_schema.columns
+WHERE table_catalog = 'remote'
+  AND table_schema = 'metadata_many'
+  AND table_name = 'metadata_many_00'
+  AND column_name = 'payload';
+----
+payload
+
+query TTT rowsort
+SELECT table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_catalog = 'remote'
+  AND table_schema = 'metadata_many'
+  AND (
+    (table_name = 'metadata_many_01' AND column_name IN ('payload_01', 'marker_01')) OR
+    (table_name = 'metadata_many_02' AND column_name IN ('payload_02', 'marker_02'))
+  );
+----
+metadata_many_01	marker_01	BOOLEAN
+metadata_many_01	payload_01	INTEGER
+metadata_many_02	marker_02	DATE
+metadata_many_02	payload_02	DOUBLE
+
+query I
+WITH expected(table_name, column_name) AS (
+    VALUES
+    ('metadata_many_00', 'schema_marker_00'),
+    ('metadata_many_01', 'schema_marker_01'),
+    ('metadata_many_02', 'schema_marker_02'),
+    ('metadata_many_03', 'schema_marker_03'),
+    ('metadata_many_04', 'schema_marker_04'),
+    ('metadata_many_05', 'schema_marker_05'),
+    ('metadata_many_06', 'schema_marker_06'),
+    ('metadata_many_07', 'schema_marker_07'),
+    ('metadata_many_08', 'schema_marker_08'),
+    ('metadata_many_09', 'schema_marker_09'),
+    ('metadata_many_10', 'schema_marker_10'),
+    ('metadata_many_11', 'schema_marker_11'),
+    ('metadata_many_12', 'schema_marker_12'),
+    ('metadata_many_13', 'schema_marker_13'),
+    ('metadata_many_14', 'schema_marker_14'),
+    ('metadata_many_15', 'schema_marker_15')
+)
+SELECT COUNT(*)
+FROM expected e
+JOIN information_schema.columns c
+  ON c.table_catalog = 'remote'
+ AND c.table_schema = 'metadata_many'
+ AND c.table_name = e.table_name
+ AND c.column_name = e.column_name;
+----
+16
+
+query I
+SELECT COUNT(*) FROM remote.metadata_many.metadata_many_00;
+----
+0
+
+statement ok
+DROP SCHEMA remote.metadata_many CASCADE;

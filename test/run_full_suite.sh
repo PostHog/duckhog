@@ -45,7 +45,7 @@ run_phase "${INCLUDE_GLOB}" "${EXCLUDE_GLOBS[@]}"
 
 # Dedicated token-expiry regression phase.
 (
-    export DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=100ms
+    export DUCKGRES_FLIGHT_SESSION_TOKEN_TTL=1s
     export DUCKHOG_TOKEN_EXPIRY_TEST=1
     run_phase "test/sql/token/session_token_invalidation_recovery.test_slow"
 )

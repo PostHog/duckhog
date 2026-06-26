@@ -14,6 +14,11 @@
 #include <unordered_map>
 #include <mutex>
 #include <chrono>
+#include <memory>
+
+namespace arrow {
+class Schema;
+} // namespace arrow
 
 namespace duckdb {
 
@@ -76,6 +81,10 @@ private:
 
 	// Create a table entry for a remote table
 	void CreateTableEntry(ClientContext &context, const string &table_name);
+
+	// Create a table entry from already-fetched Arrow metadata
+	void CreateTableEntryFromSchema(ClientContext &context, const string &table_name,
+	                                const std::shared_ptr<arrow::Schema> &arrow_schema);
 
 	// Get or create a table entry
 	optional_ptr<PostHogTableEntry> GetOrCreateTable(ClientContext &context, const string &table_name);
